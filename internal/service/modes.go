@@ -408,8 +408,16 @@ func humanNote(note string) string {
 const uncappedTurns = agent.UncappedTurns
 
 type resolvedTurnCaps struct {
-	Caps    map[config.Role]int
-	Sources map[config.Role]string
+	Caps                 map[config.Role]int
+	Sources              map[config.Role]string
+	SmallSeatPairReserve int
+}
+
+func effectiveSmallSeatPairReserve(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	return config.DefaultSmallSeatPairReserve
 }
 
 // resolveTurnCaps is the single precedence rule for calls/reply. The returned
@@ -419,9 +427,17 @@ type resolvedTurnCaps struct {
 // more specific and may name every role. A script may still impose a hard
 // ceiling; strategy records that final clamp because only it knows the turn.
 func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
+	return s.resolveTurnCapsFor(phase, override, "", false)
+}
+
+// resolveTurnCapsFor adds contextual defaults before the role and run layers.
+// Pair's small-seat reserve is deliberately not a ceiling: an explicit role
+// preference, launch override, or live no-cap remains authoritative.
+func (s *Service) resolveTurnCapsFor(phase string, override int, mode string, smallSeat bool) resolvedTurnCaps {
 	s.cfgMu.RLock()
 	global := s.cfg.Defaults.AgentMaxTurns
 	phaseCap := s.cfg.Defaults.PhaseTurns[phase]
+	pairReserve := effectiveSmallSeatPairReserve(s.cfg.Defaults.SmallSeatPairReserve)
 	roleCaps := make(map[string]int, len(s.cfg.Defaults.RoleTurns))
 	for role, n := range s.cfg.Defaults.RoleTurns {
 		roleCaps[role] = n
@@ -438,6 +454,11 @@ func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
 		}
 		out.Caps[config.RoleImplementer] = cap
 		out.Sources[config.RoleImplementer] = source
+	}
+	if mode == "pair" && smallSeat {
+		out.Caps[config.RoleImplementer] = pairReserve
+		out.Sources[config.RoleImplementer] = "small-seat pair reserve (default)"
+		out.SmallSeatPairReserve = pairReserve
 	}
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
@@ -457,6 +478,18 @@ func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
 		}
 	}
 	return out
+}
+
+// resolveRosterTurnCaps is the execution boundary: capacity policy follows
+// the roster already chosen for this run, never a second read of project
+// defaults that can disagree with --ducklings or role-keyed seats.
+func (s *Service) resolveRosterTurnCaps(phase string, override int, mode string, roster map[config.Role]config.DucklingID) (resolvedTurnCaps, int) {
+	smallSeat := s.smallImplementerSeat(roster)
+	resolved := s.resolveTurnCapsFor(phase, override, mode, smallSeat)
+	if smallSeat && mode == "pair" {
+		return resolved, resolved.SmallSeatPairReserve
+	}
+	return resolved, 0
 }
 
 // capOverride resolves a run's AgentTurns override: negative means no cap.
@@ -562,7 +595,14 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	currentSeat := string(mc.roster[config.RoleImplementer])
 	escalationCandidates, currentFloor := escalationCandidatesFor(string(config.RoleImplementer), currentSeat, cards)
 	root := mc.ectx.ProjectRoot
-	turnCaps := s.resolveTurnCaps("build", mc.req.AgentTurns)
+	smallSeat := s.smallImplementerSeat(mc.roster)
+	turnCaps, pairReserve := s.resolveRosterTurnCaps("build", mc.req.AgentTurns, mc.rs.run.Mode, mc.roster)
+	if smallSeat && mc.rs.run.Mode == "pair" && turnCaps.Caps[config.RoleImplementer] > pairReserve {
+		mc.rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": fmt.Sprintf("%s for %s raises the small-seat pair reserve from %d to %d calls/reply; the independent reviewer's slot may starve before review begins",
+				turnCaps.Sources[config.RoleImplementer], mc.roster[config.RoleImplementer], pairReserve, turnCaps.Caps[config.RoleImplementer]),
+		})
+	}
 	base := strategy.ExecuteParams{
 		LiveToolEvents:       true,
 		EscalationCandidates: escalationCandidates,
@@ -574,7 +614,8 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// Task execution must carry the same resolved seat class as document
 		// stages. Without this, small-seat strategy guards existed but build
 		// pair runs silently received the large-seat behavior.
-		SmallSeat: s.smallImplementerSeat(mc.rs.run.ProjectID),
+		SmallSeat:            smallSeat,
+		SmallSeatPairReserve: pairReserve,
 		// Answers the person already gave ride ON the prompt: a resumed run
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.

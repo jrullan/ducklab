@@ -14,6 +14,7 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
       Promise.resolve({
         rounds: { pair: 5 },
         agent_max_turns: 24,
+        small_seat_pair_reserve: 24,
         script_rounds: { solo: 3, pair: 3, tournament: 1, council: 2, split: 1 },
         role_turns: {},
         phase_turns: {},
@@ -343,10 +344,10 @@ describe("per-role turn caps in Settings", () => {
 });
 
 describe("calls/reply precedence in Settings", () => {
-  it("shows and saves phase defaults beside the authoritative hard ceiling", async () => {
+  it("shows and saves the small-seat pair reserve beside the authoritative hard ceiling", async () => {
     const client = clientWith({
       modeDefaults: vi.fn(() => Promise.resolve({
-        rounds: { pair: 5 }, agent_max_turns: 24,
+        rounds: { pair: 5 }, agent_max_turns: 24, small_seat_pair_reserve: 24,
         script_rounds: { solo: 3, pair: 3 }, role_turns: {},
         phase_turns: { build: 40, test: 60 },
         script_role_turns: { implementer: 24, reviewer: 8 },
@@ -360,14 +361,17 @@ describe("calls/reply precedence in Settings", () => {
     expect(build.value).toBe("40");
     expect(test.value).toBe("60");
     expect(screen.getByTestId("turn-ceilings").textContent).toContain("pair.reviewer 8");
-    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → role → run");
+    const reserve = screen.getByTestId("small-seat-pair-reserve") as HTMLInputElement;
+    expect(reserve.value).toBe("24");
+    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → small-seat pair reserve → role → run");
     expect(screen.getByTestId("config-settings").textContent).toContain("other roles keep their script design");
 
     fireEvent.change(build, { target: { value: "48" } });
+    fireEvent.change(reserve, { target: { value: "32" } });
     fireEvent.click(screen.getByTestId("settings-save"));
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
     const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    expect(body).toMatchObject({ phase_turns: { build: 48, test: 60 } });
+    expect(body).toMatchObject({ phase_turns: { build: 48, test: 60 }, small_seat_pair_reserve: 32 });
   });
 });
 

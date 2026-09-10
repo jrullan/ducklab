@@ -217,6 +217,10 @@ type ModeDefaultsView struct {
 	Rounds map[string]int `json:"rounds"`
 	// AgentMaxTurns caps the model calls a single turn may chain.
 	AgentMaxTurns int `json:"agent_max_turns"`
+	// SmallSeatPairReserve is pair's contextual implementer default for a
+	// small seat. It is not included in TurnCeilings because explicit role/run
+	// choices and a live lift may cross it.
+	SmallSeatPairReserve int `json:"small_seat_pair_reserve"`
 	// ScriptRounds is what each mode does when nothing overrides it, so a client
 	// can show the real number instead of an empty box.
 	ScriptRounds map[string]int `json:"script_rounds"`
@@ -291,19 +295,20 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	out := ModeDefaultsView{
-		Rounds:          map[string]int{},
-		AgentMaxTurns:   s.cfg.Defaults.AgentMaxTurns,
-		ScriptRounds:    ModeRounds,
-		Ducklings:       map[string][]string{},
-		RoleTurns:       map[string]int{},
-		PhaseTurns:      map[string]int{},
-		ScriptRoleTurns: ScriptRoleTurns,
-		TurnCeilings:    scriptTurnCeilings(),
-		Seats:           ModeSeats,
-		ModeSeats:       map[string]map[string][]string{},
-		RolePins:        map[string][]string{},
-		BuildMode:       s.cfg.Defaults.BuildMode,
-		TestMode:        s.cfg.Defaults.TestMode,
+		Rounds:               map[string]int{},
+		AgentMaxTurns:        s.cfg.Defaults.AgentMaxTurns,
+		SmallSeatPairReserve: effectiveSmallSeatPairReserve(s.cfg.Defaults.SmallSeatPairReserve),
+		ScriptRounds:         ModeRounds,
+		Ducklings:            map[string][]string{},
+		RoleTurns:            map[string]int{},
+		PhaseTurns:           map[string]int{},
+		ScriptRoleTurns:      ScriptRoleTurns,
+		TurnCeilings:         scriptTurnCeilings(),
+		Seats:                ModeSeats,
+		ModeSeats:            map[string]map[string][]string{},
+		RolePins:             map[string][]string{},
+		BuildMode:            s.cfg.Defaults.BuildMode,
+		TestMode:             s.cfg.Defaults.TestMode,
 	}
 	for mode, n := range s.cfg.Defaults.Rounds {
 		out.Rounds[mode] = n
@@ -353,6 +358,9 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 	if v.AgentMaxTurns <= 0 {
 		return fmt.Errorf("agent_max_turns must be greater than zero; got %d", v.AgentMaxTurns)
+	}
+	if v.SmallSeatPairReserve < 0 || v.SmallSeatPairReserve > 200 {
+		return fmt.Errorf("small_seat_pair_reserve must be 1 to 200; got %d", v.SmallSeatPairReserve)
 	}
 	for mode, n := range v.Rounds {
 		if _, ok := ModeRounds[mode]; !ok {
@@ -467,6 +475,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
+	prevSmallSeatPairReserve := s.cfg.Defaults.SmallSeatPairReserve
 	prevModeSeats, prevRoleTurns := s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns
 	prevPhaseTurns := s.cfg.Defaults.PhaseTurns
 	prevRolePins := s.cfg.Defaults.RolePins
@@ -485,6 +494,12 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 	s.cfg.Defaults.Rounds = rounds
 	s.cfg.Defaults.AgentMaxTurns = v.AgentMaxTurns
+	// Zero comes only from an older client that does not know this field. Keep
+	// the existing/default value instead of turning a partial Settings save
+	// into an accidental removal of the reserve.
+	if v.SmallSeatPairReserve > 0 {
+		s.cfg.Defaults.SmallSeatPairReserve = v.SmallSeatPairReserve
+	}
 	roleTurns := map[string]int{}
 	for role, n := range v.RoleTurns {
 		if n > 0 {
@@ -527,6 +542,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
+		s.cfg.Defaults.SmallSeatPairReserve = prevSmallSeatPairReserve
 		s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns = prevModeSeats, prevRoleTurns
 		s.cfg.Defaults.PhaseTurns = prevPhaseTurns
 		s.cfg.Defaults.RolePins = prevRolePins

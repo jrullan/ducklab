@@ -829,6 +829,7 @@ export interface ServiceModeDefaultsView {
   script_role_turns?: Record<string, number>;
   script_rounds?: Record<string, number>;
   seats?: Record<string, number>;
+  small_seat_pair_reserve?: number;
   test_mode?: string;
   turn_ceilings?: Record<string, number>;
 }

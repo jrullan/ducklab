@@ -2355,12 +2355,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                         for (let i = events.length - 1; i >= 0; i--) {
                           const e = events[i]!;
                           if (e.type === "reply_call") {
-                            const d = e.data as { n?: number; max?: number; source?: string; requested?: number; ceiling?: number; ceiling_source?: string };
+                            const d = e.data as { n?: number; max?: number; source?: string; requested?: number; ceiling?: number; ceiling_source?: string; reserve?: number; reserve_source?: string; reserve_duckling?: string; reserve_lifted?: boolean };
                             const max = d.max ?? 0;
                             const count = `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
                             if (d.ceiling && d.requested && d.requested > max) {
                               const requested = d.requested >= 10000 ? "no cap" : d.requested;
                               return `${count} · ${d.ceiling_source ?? "hard ceiling"} (${d.source ?? "default"} requested ${requested})`;
+                            }
+                            if (d.reserve) {
+                              const owner = d.reserve_duckling ? ` for ${d.reserve_duckling}` : "";
+                              return `${count} · ${d.source ?? "default"} · ${d.reserve_source ?? "pair reserve"} ${d.reserve}${owner}${d.reserve_lifted ? " lifted" : ""}`;
                             }
                             return d.source ? `${count} · ${d.source}` : count;
                           }
@@ -2389,6 +2393,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                     )}
                   </span>
                 </div>
+                {events.some((e) => e.type === "reply_call" && Boolean((e.data as { reserve_lifted?: boolean }).reserve_lifted)) && (
+                  <p className="text-xs text-warn" data-testid="pair-reserve-warning">
+                    The small-seat pair reserve was lifted; the independent reviewer's slot may starve before review begins.
+                  </p>
+                )}
               </div>
               {/* One tracker serves every duckling and every turn, so the run's
                   total cannot say which model is burning it. In a mode with two

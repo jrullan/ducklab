@@ -104,6 +104,7 @@ repair_attempts     = 2
 tool_result_max_bytes = 32768
 agent_max_turns     = 24          # per conversation turn (agent loop cap)
 phase_turns         = { build = 40, test = 60 } # implementer calls/reply before role/run overrides
+small_seat_pair_reserve = 24      # contextual pair default; role/run/no-cap may cross it
 http_timeout_s      = 300
 transient_retries   = 3
 
@@ -190,6 +191,15 @@ args    = ["--stdio"]
 env     = { }
 enabled = true
 ```
+
+Calls/reply resolve as global → phase → small-seat pair reserve → role → run.
+The reserve applies only when the effective implementer actually seated in a
+pair run has `tier = "small"`; a per-run roster override therefore changes the
+support profile. It preserves wall-clock room for independent review but is not
+a script invariant. Raising it, overriding it, or lifting calls/reply to no cap
+is allowed and recorded with a warning that the reviewer slot may starve. Hard
+script ceilings, such as the pair reviewer's eight calls, remain separate and
+cannot be raised by configuration or a live lift.
 
 ### 2.1 Validation rules
 

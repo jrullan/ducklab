@@ -159,6 +159,11 @@ type Turn struct {
 	// repeated by round, so inflating it turns review into open-ended browsing.
 	MaxTurnsCeiling       int
 	MaxTurnsCeilingSource string
+	// MaxTurnsReserve records a contextual default that may have been crossed
+	// by a more-specific setting. Unlike MaxTurnsCeiling it never clamps.
+	MaxTurnsReserve         int
+	MaxTurnsReserveSource   string
+	MaxTurnsReserveDuckling config.DucklingID
 	// Images are data URLs for a vision duckling — a bug's screenshots on a
 	// triage turn. Carried through to the agent turn untouched.
 	Images []string
@@ -200,7 +205,9 @@ func (t *Turn) AgentTurn(duckling config.DucklingID, prompt string, toolbelt []s
 		Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
 		MaxTurnsRequested: t.MaxTurnsRequested, MaxTurnsSource: t.MaxTurnsSource,
 		MaxTurnsCeiling: t.MaxTurnsCeiling, MaxTurnsCeilingSource: t.MaxTurnsCeilingSource,
-		Persona: t.Persona, SmallSeat: t.SmallSeat, Images: t.Images,
+		MaxTurnsReserve: t.MaxTurnsReserve, MaxTurnsReserveSource: t.MaxTurnsReserveSource,
+		MaxTurnsReserveDuckling: t.MaxTurnsReserveDuckling,
+		Persona:                 t.Persona, SmallSeat: t.SmallSeat, Images: t.Images,
 		Round: round, Index: index,
 		ManifestAuditInputs:     t.ManifestAuditInputs,
 		ManifestAuditPolicy:     t.ManifestAuditPolicy,
