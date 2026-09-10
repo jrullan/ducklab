@@ -18,6 +18,7 @@ import { StatusChip } from "../components/StatusChip";
 import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
+import { StageRequestCard } from "../components/StageRequestCard";
 import { SurveyCoverageLine, SurveyInventory, type SurveyInventoryItem } from "../components/SurveyInventory";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
@@ -1080,6 +1081,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {decisionOpen && <button type="button" onClick={() => jumpTo("decision-card")} className="rounded px-2 py-1 font-medium text-accent hover:bg-surface2">Decision</button>}
           <button type="button" onClick={() => { if (!railOpen) toggleRail(); requestAnimationFrame(() => jumpTo("run-rail")); }} className="ml-auto rounded px-2 py-1 text-ink-secondary hover:bg-surface2 hover:text-ink">Run details</button>
         </nav>
+        <StageRequestCard request={run.stage_request} />
         {/* The task's own words, unfolded from the pinned title: judging a
             run means reading what it did against what was ASKED, and the ask
             used to sit in a card that the transcript scrolled away. Bounded:

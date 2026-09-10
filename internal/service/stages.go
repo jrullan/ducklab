@@ -344,8 +344,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
-	writer.AppendEvent("run_start", map[string]interface{}{"stage": req.Stage, "mode": mode})
-
 	// The request outlives the goroutine: an answered question re-enters the
 	// stage with the same brief, mode and revision, and the request used to
 	// live nowhere a resume could find it.
@@ -353,6 +351,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if data, err := json.Marshal(req); err == nil {
 		_ = json.Unmarshal(data, &run.StageRequest)
 	}
+	// The event log is the self-contained account of why every later turn and
+	// finding happened. Persist the exact effective request in its first frame;
+	// clients joining live can show it without reading a sidecar file.
+	writer.AppendEvent("run_start", map[string]interface{}{
+		"stage": req.Stage, "mode": mode, "stage_request": run.StageRequest,
+	})
 
 	// Document stages still operate in the person's checkout. Unlike build and
 	// test-first worktrees, they must retain the queue's per-project tree hold.

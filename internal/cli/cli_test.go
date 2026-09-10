@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,6 +15,19 @@ import (
 
 	"github.com/jrullan/ducklab/internal/daemon"
 )
+
+func TestRunSummaryPrintsThePersistedStageRequest(t *testing.T) {
+	var out bytes.Buffer
+	printRunSummary(&out, map[string]interface{}{
+		"id": "r-plan", "status": "running", "task_id": "", "verdict": "UNVERIFIED",
+		"stage_request": map[string]interface{}{"extend": "add provider isolation", "rounds": float64(2)},
+	})
+	for _, want := range []string{"request:", "add provider isolation", `"rounds": 2`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("summary omitted %q:\n%s", want, out.String())
+		}
+	}
+}
 
 // B-355: grammar preflight is useful only before a run exists. The CLI sends
 // the file body to the dedicated syntax-only route, prints the gate's exact
