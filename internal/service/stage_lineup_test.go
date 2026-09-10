@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
@@ -116,4 +118,62 @@ func TestAStageWarningUsesItsEffectiveLineUp(t *testing.T) {
 	if d.Run.Roster["architect"] != "pato-k3" || d.Run.Roster["reviewer"] != "pato-glm" {
 		t.Fatalf("effective roster = %#v", d.Run.Roster)
 	}
+}
+
+// B-372: plan_extend defaults to solo, but its composed candidate still gets
+// an independent reviewer. With that seat empty, Ducklab used to spend the
+// architect turn and only then fail while looking up duckling "".
+func TestPlanExtendRefusesAnUnseatedCompositionReviewerBeforeCreatingARun(t *testing.T) {
+	s := writableService(t, "pato-architect")
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"pato-architect"}},
+	}
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindSpec: "## SPEC-001 — Existing behavior\n\nContract.\n",
+		artifact.KindPlan: "## M-01 — Core\n\n### T-001 — Existing task\n\n**Implements:** SPEC-001\n",
+	})
+
+	_, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "add another task",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no reviewer seated") || !strings.Contains(err.Error(), "independent review") {
+		t.Fatalf("unseated composition reviewer was not rejected at launch: %v", err)
+	}
+	runs, listErr := s.RunList(context.Background(), RunFilter{ProjectID: id})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("failed preflight created a run record: %+v", runs)
+	}
+}
+
+func TestPlanExtendCanSeatItsCompositionReviewerFromTheLaunchLineUp(t *testing.T) {
+	s := writableService(t, "pato-architect", "pato-reviewer")
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"pato-architect"}},
+	}
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindSpec: "## SPEC-001 — Existing behavior\n\nContract.\n",
+		artifact.KindPlan: "## M-01 — Core\n\n### T-001 — Existing task\n\n**Implements:** SPEC-001\n",
+	})
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "add another task", Ducklings: []string{"pato-architect", "pato-reviewer"},
+	})
+	if err != nil {
+		t.Fatalf("explicit composition reviewer was rejected: %v", err)
+	}
+	if run.Mode != "solo" {
+		t.Fatalf("extend mode = %q, want solo", run.Mode)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for run.Roster["reviewer"] == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if run.Roster["architect"] != "pato-architect" || run.Roster["reviewer"] != "pato-reviewer" {
+		t.Fatalf("effective stage roster = %#v", run.Roster)
+	}
+	_ = s.RunAbort(context.Background(), run.ID)
+	_, _ = s.waitForRun(context.Background(), run.ID)
 }

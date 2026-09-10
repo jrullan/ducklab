@@ -250,6 +250,36 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		}
 	}
 
+	// Resolve the complete document-stage cast before creating a run record or
+	// spending an architect turn. A solo first draft needs only its architect;
+	// every amendment also receives the independent composition review, and
+	// every non-solo artifact script includes a reviewer in its council.
+	mode := req.Mode
+	if mode == "" {
+		mode = "council"
+	}
+	projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("load project config: %w", err)
+	}
+	roster, _ := s.resolveRoster(projCfg, mode)
+	needsReviewer, err := stageNeedsReviewer(entry.Path, req.Stage, mode)
+	if err != nil {
+		return nil, err
+	}
+	s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
+	lineup := req.Ducklings
+	if mode == "solo" && !needsReviewer && len(lineup) > 1 {
+		lineup = lineup[:1]
+	}
+	applyStageLineup(roster, lineup)
+	if roster[config.RoleArchitect] == "" {
+		return nil, fmt.Errorf("no architect seated for %s — assign one on the Roster board (or pass an architect on the launch)", mode)
+	}
+	if needsReviewer && roster[config.RoleReviewer] == "" {
+		return nil, fmt.Errorf("no reviewer seated for this %s stage — its script requires an independent review; assign one on the Roster board (or pass a second duckling on the launch)", req.Stage)
+	}
+
 	// A revision IS the decision on the draft it revises: "keep it, change
 	// this". The run that produced that draft used to wait at its gate
 	// forever — the person had answered, in another form, and the inbox
@@ -278,10 +308,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// Recorded as what will actually run, not as a constant. A report that
 	// says every stage was a council when half were solo is a report that
 	// cannot answer the question it exists for.
-	mode := req.Mode
-	if mode == "" {
-		mode = "council"
-	}
 	run := &runlog.Run{
 		ID:             runlog.GenerateRunID(),
 		ProjectID:      projectID,
@@ -334,6 +360,42 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		exec: func(c context.Context) { s.executeStage(c, rs, entry.Path, req) },
 	})
 	return run, nil
+}
+
+func stageNeedsReviewer(projectRoot, stageName, mode string) (bool, error) {
+	if mode != "solo" {
+		return true, nil
+	}
+	kind := stage.Name(stageName).Kind()
+	current, err := artifact.Load(projectRoot, kind)
+	if err != nil {
+		return false, err
+	}
+	return current != nil && len(current.Sections) > 0, nil
+}
+
+// fillDocumentStageSeats lets a solo amendment use the document flock. Solo's
+// generic roster is task-oriented, but its architect and composition reviewer
+// are still document roles; Settings stores those seats under council.
+func (s *Service) fillDocumentStageSeats(projCfg *config.Project, roster map[config.Role]config.DucklingID, needsReviewer bool) []config.Role {
+	roles := []config.Role{config.RoleArchitect}
+	if needsReviewer {
+		roles = append(roles, config.RoleReviewer)
+	}
+	var filled []config.Role
+	for _, role := range roles {
+		if roster[role] != "" {
+			continue
+		}
+		for _, id := range s.rosterIDs(projCfg, "council", role) {
+			if _, err := s.ducklings.Get(config.DucklingID(id)); err == nil {
+				roster[role] = config.DucklingID(id)
+				filled = append(filled, role)
+				break
+			}
+		}
+	}
+	return filled
 }
 
 // knownIDs collects every section id across the project's approved
@@ -604,6 +666,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// real spend that must land on this run's ledger.
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
+	needsReviewer, _ := stageNeedsReviewer(projectRoot, req.Stage, rs.run.Mode)
+	documentFilled := s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
 	// A request naming its own seats overrides for THIS run alone. An empty
 	// request means THE RESOLVED ROSTER DECIDES — project seats included.
 	// The legacy fallback re-read the GLOBAL mode line-up over the resolver:
@@ -621,7 +685,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 		}
 	} else {
-		if rs.run.Mode == "solo" && len(lineup) > 1 {
+		if rs.run.Mode == "solo" && !needsReviewer && len(lineup) > 1 {
 			lineup = lineup[:1]
 		}
 		filled = applyStageLineup(roster, lineup)
@@ -634,6 +698,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, nil)
 	s.recordSeatTiers(rs.run, roster)
+	for _, role := range documentFilled {
+		rs.run.RosterSources[string(role)] = "documents council seat"
+	}
 	for _, role := range filled {
 		rs.run.RosterSources[string(role)] = "request"
 	}
