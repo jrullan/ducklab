@@ -516,6 +516,12 @@ them is still the project's business (B-364).
 An auto-accept whose reproduction fails **pauses at the human gate wearing the
 error** — never a run stranded as running.
 
+If rebasing the run commit onto the default branch conflicts, Ducklab records
+the observed default SHA and conflicting paths, aborts the rebase, and pauses
+with the original run commit intact. Retrying Accept performs a fresh rebase
+against the default head observed by that retry; a paused worktree is never
+left pinned mid-rebase to a head that other accepted runs can make stale.
+
 ## 6. Bugs and the operate loop
 
 ```

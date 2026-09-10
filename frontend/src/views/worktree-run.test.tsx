@@ -30,20 +30,20 @@ describe("RunView worktree surface", () => {
     expect(screen.getByTestId("worktree-badge")).toHaveTextContent("/state/worktrees/p/r-worktree");
   });
 
-  it("lists a paused rebase conflict and its only lawful options", async () => {
+  it("says a paused rebase conflict was rolled back and can retry fresh", async () => {
     reset();
-    const run = { id: "r-conflict", project_id: "p", stage: "build", mode: "solo", task_id: "T-115", status: "paused", verdict: "", started_at: "2026-08-24T00:00:00Z", pending_kind: "gate", next: ["accept", "reject"], worktree_path: "/state/worktrees/p/r-conflict", pending_data: { worktree: "/state/worktrees/p/r-conflict", base_sha: "abc123", default_sha: "def456", conflicting_files: ["internal/service/queue.go", "frontend/src/views/RunView.tsx"], rebase_in_progress: true } };
+    const run = { id: "r-conflict", project_id: "p", stage: "build", mode: "solo", task_id: "T-115", status: "paused", verdict: "", started_at: "2026-08-24T00:00:00Z", pending_kind: "gate", next: ["accept", "reject"], worktree_path: "/state/worktrees/p/r-conflict", pending_data: { worktree: "/state/worktrees/p/r-conflict", base_sha: "abc123", default_sha: "def456", conflicting_files: ["internal/service/queue.go", "frontend/src/views/RunView.tsx"], rebase_aborted: true } };
     render(<RunView runId="r-conflict" client={clientFor(run)} />);
     await waitFor(() => expect(screen.getByTestId("worktree-conflict")).toHaveTextContent("internal/service/queue.go"));
     const card = screen.getByTestId("worktree-conflict");
     expect(card).toHaveTextContent("frontend/src/views/RunView.tsx");
     expect(card).toHaveTextContent("abc123");
     expect(card).toHaveTextContent("def456");
-    expect(card).toHaveTextContent("rebase is stopped with conflict markers");
-    expect(card).toHaveTextContent("git rebase --continue");
+    expect(card).toHaveTextContent("failed rebase was rolled back");
+    expect(card).toHaveTextContent("retry Accept to use the latest default branch");
     expect(card).toHaveTextContent("reject");
     expect(screen.getByTestId("cycle-accept")).toHaveTextContent("Accept");
     expect(screen.getByTestId("reject-button")).toHaveTextContent("Reject");
-    expect(screen.getByTestId("decision-consequence")).toHaveTextContent("only after the rebase has been completed");
+    expect(screen.getByTestId("decision-consequence")).not.toHaveTextContent("only after the rebase has been completed");
   });
 });
