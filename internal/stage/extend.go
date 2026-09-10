@@ -239,7 +239,6 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		}
 	}
 	placeholder := map[string]string{}
-	newIDs := map[string]bool{}
 	var existing []artifact.Section
 	for _, milestone := range current.Sections {
 		existing = append(existing, milestone.Children...)
@@ -254,9 +253,8 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		if placeholder[key] == "" {
 			placeholder[key] = realID
 		}
-		newIDs[realID] = true
 	}
-	newDependencies := map[string][]string{}
+	addedDependencies := map[string][]string{}
 	for _, amendment := range amendments {
 		old, target := currentTasks[strings.ToUpper(amendment.TaskID)], proposedTasks[strings.ToUpper(amendment.TaskID)]
 		if old == nil || target == nil {
@@ -279,9 +277,7 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 			if !seen[dep] {
 				seen[dep] = true
 				deps = append(deps, dep)
-				if newIDs[dep] {
-					newDependencies[target.ID] = append(newDependencies[target.ID], dep)
-				}
+				addedDependencies[target.ID] = append(addedDependencies[target.ID], dep)
 				added++
 			}
 		}
@@ -290,15 +286,14 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		}
 		setTaskScalarField(target, "Depends on", strings.Join(deps, ", "))
 	}
-	return placeNewPrerequisitesBeforeConsumers(proposed, newIDs, newDependencies)
+	return placeDependenciesBeforeConsumers(proposed, addedDependencies)
 }
 
-// placeNewPrerequisitesBeforeConsumers makes the dependency-only amendment a
-// truthful document order. Fresh task IDs must remain stable and therefore may
-// be numerically higher than an existing consumer; the engine moves the new
-// prerequisite (and its new-task dependency closure) immediately before the
-// earliest amended consumer instead of weakening forward-dependency checks.
-func placeNewPrerequisitesBeforeConsumers(plan *artifact.Document, newIDs map[string]bool, dependencies map[string][]string) error {
+// placeDependenciesBeforeConsumers makes a dependency-only amendment a
+// truthful document order. It moves every added dependency that is still
+// behind its consumer, including the later portion of that task's dependency
+// closure, rather than weakening forward-dependency checks (B-381).
+func placeDependenciesBeforeConsumers(plan *artifact.Document, dependencies map[string][]string) error {
 	type targetOrder struct {
 		id       string
 		position int
@@ -319,16 +314,27 @@ func placeNewPrerequisitesBeforeConsumers(plan *artifact.Document, newIDs map[st
 		var place func(string) error
 		place = func(id string) error {
 			id = strings.ToUpper(id)
-			if placed[id] || visiting[id] {
+			if strings.EqualFold(id, target.id) || placed[id] || visiting[id] {
 				return nil // the composition graph check reports a cycle precisely
+			}
+			_, _, sourcePosition, sourceOK := planTaskLocation(plan, id)
+			_, _, targetPosition, targetOK := planTaskLocation(plan, target.id)
+			if !sourceOK || !targetOK {
+				return fmt.Errorf("cannot place prerequisite %s before consumer %s", id, target.id)
+			}
+			if sourcePosition < targetPosition {
+				placed[id] = true
+				return nil
 			}
 			visiting[id] = true
 			task := plan.Section(id)
 			if task == nil {
-				return fmt.Errorf("new prerequisite %s disappeared during placement", id)
+				return fmt.Errorf("prerequisite %s disappeared during placement", id)
 			}
 			for _, dep := range splitPlanItems(task.Field("depends on")) {
-				if newIDs[dep] {
+				_, _, depPosition, depOK := planTaskLocation(plan, dep)
+				_, _, currentTargetPosition, currentTargetOK := planTaskLocation(plan, target.id)
+				if depOK && currentTargetOK && depPosition > currentTargetPosition {
 					if err := place(dep); err != nil {
 						return err
 					}
@@ -688,7 +694,7 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		"real ids are assigned by the engine. When one of these tasks consumes what another delivers, say so " +
 		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
 		"the real id. Never depend on a task that comes later in your own list.\n" +
-		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and the new placeholder. The engine inserts the new prerequisite before that consumer. Other changes are refused.\n" +
+		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and additions. The engine orders added dependencies before that consumer. Other changes are refused.\n" +
 		"- To replace a listed named section, emit its exact `## <heading>` and complete body. H3 is reserved for task ids.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
 		"- This amendment cannot remove tasks. Retire superseded tasks separately with task_remove.\n" +

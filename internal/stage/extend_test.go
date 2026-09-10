@@ -212,7 +212,7 @@ func TestExtendAddsANewTaskAndAppendsItsRealIDToAnExistingDependency(t *testing.
 	}
 }
 
-func TestDependencyPlacementMovesANewClosureBeforeTheEarliestConsumer(t *testing.T) {
+func TestDependencyPlacementMovesALaterExistingClosureBeforeTheEarliestConsumer(t *testing.T) {
 	plan := &artifact.Document{Sections: []artifact.Section{
 		{ID: "M-001", Title: "Core", Children: []artifact.Section{
 			{ID: "T-001", Title: "Early consumer"},
@@ -223,8 +223,7 @@ func TestDependencyPlacementMovesANewClosureBeforeTheEarliestConsumer(t *testing
 			{ID: "T-004", Title: "Direct prerequisite", Fields: map[string]string{"depends on": "T-003"}},
 		}},
 	}}
-	err := placeNewPrerequisitesBeforeConsumers(plan,
-		map[string]bool{"T-003": true, "T-004": true},
+	err := placeDependenciesBeforeConsumers(plan,
 		map[string][]string{"T-002": {"T-004"}, "T-001": {"T-004"}})
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +239,51 @@ func TestDependencyPlacementMovesANewClosureBeforeTheEarliestConsumer(t *testing
 	}
 	if len(plan.Sections[0].Children) != 3 || len(plan.Sections[1].Children) != 1 {
 		t.Fatalf("new dependency closure was not moved into the consumer milestone: %+v", plan.Sections)
+	}
+}
+
+// The review probe for B-381: a new prerequisite can itself depend on a later
+// existing task. Moving only the new task introduced a second forward edge and
+// left the legal dependency-only amendment mechanically blocked.
+func TestExtendOrdersANewPrerequisiteWithItsExistingDependency(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Consumer\n\n"+
+			"### T-001 — Existing consumer\n\n**Implements:** SPEC-001\n**Depends on:** T-002\n\n"+
+			"## M-002 — Later foundations\n\n"+
+			"### T-002 — Existing prerequisite\n\n**Implements:** SPEC-001\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-existing-closure", Mode: "solo",
+		Extend: "add a prerequisite that uses T-002 and make T-001 wait for it",
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			return "## T-900 — New prerequisite\n\n**Milestone:** M-002\n**Implements:** SPEC-001\n**Depends on:** T-002\n\nBuild it.\n\n" +
+				"## T-001 — Existing consumer\n\n**Milestone:** M-001\n**Depends on:** T-002, T-900\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, milestone := range res.Proposed.Sections {
+		for _, task := range milestone.Children {
+			order = append(order, task.ID)
+		}
+	}
+	if got := strings.Join(order, ","); got != "T-002,T-003,T-001" {
+		t.Fatalf("task order = %s, want existing dependency then new prerequisite then consumer", got)
+	}
+	for _, finding := range res.CompositionMechanical {
+		if strings.Contains(finding, string(artifact.ForwardDependency)) {
+			t.Fatalf("dependency closure still trips forward_dependency: %v", res.CompositionMechanical)
+		}
 	}
 }
 
