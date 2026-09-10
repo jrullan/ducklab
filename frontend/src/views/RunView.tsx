@@ -799,6 +799,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     (run.status === "paused" && next.includes("abort"))
   );
   const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
+  // Rejection deliberately keeps a stage proposal as the record of the
+  // failed attempt. The Documents view already knows that fact and offers
+  // its two doors; the run that produced the draft used to look terminal
+  // and stranded it. Because proposal is filtered by run_id above, this
+  // card can never claim or discard another run's draft.
+  const rejectedDocumentDraft = !!stageToRevise && !!proposal && finished && !run.accepted;
   const materializedRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_in_progress === true;
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
@@ -1694,6 +1700,42 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <a className="mt-2 inline-block text-sm underline" href={routeHref({ name: "projects" })}>Clean or commit the workspace</a>
           )}
           {run.local_only && <RecoveryControls client={client} projectId={run.project_id} commitSHA={run.commit_sha} />}
+        </section>
+      )}
+
+      {rejectedDocumentDraft && (
+        <section data-testid="run-rejected-draft" className="m-2 rounded-card border border-hairline p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-medium text-ink">This rejected draft is still on disk</h2>
+              <p className="text-xs text-ink-muted">
+                Open its document to reuse the original brief, or discard this exact draft here.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                data-testid="run-draft-controls"
+                href={routeHref({ name: "cycle", stage: stageToRevise })}
+                className="rounded border border-hairline px-2 py-1 text-xs"
+              >
+                Open draft controls
+              </a>
+              <button
+                type="button"
+                data-testid="run-discard-draft"
+                onClick={() => {
+                  setActionError(null);
+                  void client
+                    .artifactDiscard(run.project_id, stageKind)
+                    .then(() => setProposal(null))
+                    .catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+                }}
+                className="rounded border border-hairline px-2 py-1 text-xs"
+              >
+                Discard draft
+              </button>
+            </div>
+          </div>
         </section>
       )}
 

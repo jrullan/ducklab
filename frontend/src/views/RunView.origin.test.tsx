@@ -102,6 +102,36 @@ describe("RunView publication consequences", () => {
   });
 });
 
+describe("RunView rejected stage draft", () => {
+  it("reveals the surviving draft and offers its lawful doors from the producing run", async () => {
+    const run = {
+      id: "run-1", project_id: "project-1", stage: "intake", mode: "council", task_id: "",
+      status: "done", verdict: "FAILED", accepted: false, started_at: "2026-01-01T00:00:00Z", next: [],
+    };
+    useRuns.setState({
+      runs: { "run-1": run as never }, events: { "run-1": [] }, deltas: {}, reasoning: {}, spend: {},
+      acceptState: {}, needsResync: false, connection: "open",
+    });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.run = vi.fn().mockResolvedValue({ run, events: [] });
+    client.artifact = vi.fn().mockResolvedValue({
+      sections: [],
+      proposal: { run_id: "run-1", markdown: "# Requirements draft", diff: "" },
+    });
+    client.artifactDiscard = vi.fn().mockResolvedValue({ discarded: "requirements" });
+
+    render(<RunView runId="run-1" client={client as never} />);
+
+    const card = await screen.findByTestId("run-rejected-draft");
+    expect(card).toHaveTextContent("This rejected draft is still on disk");
+    expect(screen.getByTestId("run-draft-controls")).toHaveAttribute("href", "#/cycle/intake");
+
+    screen.getByTestId("run-discard-draft").click();
+    await waitFor(() => expect(client.artifactDiscard).toHaveBeenCalledWith("project-1", "requirements"));
+    await waitFor(() => expect(screen.queryByTestId("run-rejected-draft")).not.toBeInTheDocument());
+  });
+});
+
 describe("RunView origin panel", () => {
   it("quotes the requirement and links every document in the breadcrumb", async () => {
     seedRun();
