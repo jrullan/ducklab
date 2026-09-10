@@ -451,3 +451,74 @@ func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// B-363: the gate scrubs HOME, and rustup/cargo resolve their state from
+// RUSTUP_HOME/CARGO_HOME defaulting to HOME. Fledge's implementer saw `cargo
+// test` pass through the shell tool and fail in the gate with "rustup could
+// not choose a version of cargo to run". The gate keeps toolchain homes the
+// way it keeps Go's and npm's caches: defaulted from the real home when unset,
+// inherited verbatim when set.
+func TestGatePreservesRustToolchainHomes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell probe")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("RUSTUP_HOME", "")
+	t.Setenv("CARGO_HOME", "")
+	os.Unsetenv("RUSTUP_HOME")
+	os.Unsetenv("CARGO_HOME")
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: `printf '%s|%s|%s' "$HOME" "$RUSTUP_HOME" "$CARGO_HOME"`, TimeoutS: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(strings.TrimSpace(res.Output), "|")
+	if len(parts) != 3 {
+		t.Fatalf("probe output = %q", res.Output)
+	}
+	if parts[0] == home {
+		t.Fatalf("gate did not isolate HOME: %q", parts[0])
+	}
+	if parts[1] != filepath.Join(home, ".rustup") || parts[2] != filepath.Join(home, ".cargo") {
+		t.Fatalf("toolchain homes = %q / %q, want %s/.rustup and %s/.cargo", parts[1], parts[2], home, home)
+	}
+
+	t.Setenv("RUSTUP_HOME", "/opt/rustup")
+	t.Setenv("CARGO_HOME", "/opt/cargo")
+	res, err = Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: `printf '%s|%s' "$RUSTUP_HOME" "$CARGO_HOME"`, TimeoutS: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(res.Output); got != "/opt/rustup|/opt/cargo" {
+		t.Fatalf("explicit toolchain homes were not inherited: %q", got)
+	}
+}
+
+// The failure as it happened: a rustup proxy named cargo on PATH that can only
+// work when RUSTUP_HOME points at a real toolchain directory.
+func TestGateRunsARustupProxyWithHomeIsolated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell probe")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.Unsetenv("RUSTUP_HOME")
+	os.Unsetenv("CARGO_HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".rustup", "toolchains", "stable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	proxy := "#!/bin/sh\nif [ -d \"$RUSTUP_HOME/toolchains/stable\" ]; then echo 'cargo 1.98.1'; exit 0; fi\n" +
+		"echo 'error: rustup could not choose a version of cargo to run, because one wasn'\"'\"'t specified explicitly, and no default is configured.' >&2; exit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "cargo"), []byte(proxy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: "cargo --version", TimeoutS: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExitCode != 0 || !strings.Contains(res.Output, "cargo 1.98.1") {
+		t.Fatalf("rustup proxy did not find its toolchain through the isolated gate: exit %d\n%s", res.ExitCode, res.Output)
+	}
+}

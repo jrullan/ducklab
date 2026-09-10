@@ -225,7 +225,7 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	}
 	log := "task verification:\n" + formatGateResult(res)
 	if !verify.IsGreen(res) {
-		return "red", log, nil
+		return "red", log + gateEnvironmentHint(res.Output), nil
 	}
 	for index, command := range ectx.TaskAcceptanceProbes {
 		probe, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
@@ -300,6 +300,30 @@ func missingProducedFiles(root string, files []string) []string {
 		}
 	}
 	return missing
+}
+
+// gateEnvironmentHint explains a toolchain that the gate cannot find. The gate
+// runs with HOME isolated (verify.isolatedStateEnvironment), so a toolchain
+// rooted in the person's home is reachable only through the preserved
+// variables. Without this line a seat reads "rustup could not choose a version
+// of cargo" as a host problem and spends its rounds trying to fix the host
+// with commands the shell policy rightly denies (Fledge build-2, B-363).
+func gateEnvironmentHint(output string) string {
+	lower := strings.ToLower(output)
+	for _, sign := range []string{
+		"rustup could not choose a version",
+		"no default is configured",
+		"command not found",
+		"not found in path",
+	} {
+		if strings.Contains(lower, sign) {
+			return "\ngate environment: HOME is isolated for the gate; toolchains rooted in HOME are reached only through the preserved " +
+				"GOPATH, GOMODCACHE, GOCACHE, npm_config_cache, RUSTUP_HOME and CARGO_HOME. " +
+				"This is the gate's environment, not the project's: do not try to install or configure a toolchain from the run; " +
+				"report it as a blocker if the tool is genuinely absent."
+		}
+	}
+	return ""
 }
 
 func formatGateResult(res *verify.Result) string {

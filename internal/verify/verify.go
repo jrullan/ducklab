@@ -266,6 +266,14 @@ func isolatedStateEnvironment(identities ...Identity) ([]string, func(), error) 
 		cache("GOMODCACHE", filepath.Join(moduleRoot, "pkg", "mod"))
 		cache("GOCACHE", filepath.Join(home, ".cache", "go-build"))
 		cache("npm_config_cache", filepath.Join(home, ".npm"))
+		// Rust keeps its toolchains and its crate registry under HOME too, and
+		// the rustup proxies on PATH resolve them from RUSTUP_HOME/CARGO_HOME.
+		// With HOME scrubbed and neither set, `cargo` on PATH answered "rustup
+		// could not choose a version of cargo to run" in the gate while the
+		// same command passed through the shell tool, and a seat spent three
+		// rounds trying to configure rustup from inside the run (B-363).
+		cache("RUSTUP_HOME", filepath.Join(home, ".rustup"))
+		cache("CARGO_HOME", filepath.Join(home, ".cargo"))
 	}
 	// A scrubbed HOME has no .gitconfig, and the service tests commit in
 	// their temp repos: without an identity every one of them dies at
