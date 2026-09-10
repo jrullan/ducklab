@@ -43,3 +43,45 @@ func TestFormatTaskImplementsRoundTripsThroughGrammar(t *testing.T) {
 		t.Fatalf("round trip = %v, want %v", got, want)
 	}
 }
+
+// B-370: the old cardinality-only check accepted a bare path, after which the
+// toolchain silently discarded it because only typed file: entries have lane
+// semantics. Grammar 2 must reject the information at its boundary instead.
+func TestPlanContractRejectsUntypedArtifactReferences(t *testing.T) {
+	for _, field := range []string{"Produces", "Consumes", "Exercises"} {
+		t.Run(field, func(t *testing.T) {
+			body := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
+				"## M-01 — Core\n\n### T-001 — Build\n\n" +
+				"**Implements:** SPEC-001\n**Work unit:** build the app\n" +
+				"**Acceptance slices:**\n- the app builds\n" +
+				"**Acceptance probes:**\n1. `go test ./...`\n" +
+				"**Produces:** file:src/main.go\n**Consumes:** none\n" +
+				"**Verification:** `go test ./...`\n**Exercises:** file:src/main.go\n"
+			body = strings.Replace(body, "**"+field+":** "+map[string]string{
+				"Produces": "file:src/main.go", "Consumes": "none", "Exercises": "file:src/main.go",
+			}[field], "**"+field+":** src/main.go", 1)
+			diagnostics, err := ContractLint(body, KindPlan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(diagnostics, func(d FieldError) bool {
+				return d.Code == "invalid_artifact_reference" && d.Key == field && d.Token == "src/main.go"
+			}) {
+				t.Fatalf("%s bare path passed grammar 2: %+v", field, diagnostics)
+			}
+		})
+	}
+}
+
+func TestPlanArtifactReferenceAuthorityMatchesManifestContract(t *testing.T) {
+	for _, item := range []string{"file:src/main.go", "dir:fixtures", "build-target:app", "capability:runtime"} {
+		if !ValidPlanArtifact(item) {
+			t.Errorf("valid artifact rejected: %q", item)
+		}
+	}
+	for _, item := range []string{"src/main.go", "file:", "image:clipboard", "none"} {
+		if ValidPlanArtifact(item) {
+			t.Errorf("invalid artifact accepted: %q", item)
+		}
+	}
+}

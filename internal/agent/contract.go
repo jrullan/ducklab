@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/artifact"
 )
 
 // Contracts parse a turn's final text into a typed value (04 §6.1).
@@ -451,10 +453,7 @@ func manifestArtifactKindProblems(taskID string, task ManifestTask) []string {
 }
 
 func validManifestArtifact(item string) bool {
-	kind, value, ok := strings.Cut(item, ":")
-	return ok && strings.TrimSpace(value) != "" && map[string]bool{
-		"file": true, "dir": true, "build-target": true, "capability": true,
-	}[kind]
+	return artifact.ValidPlanArtifact(item)
 }
 
 func validContractID(id, prefix string) bool {

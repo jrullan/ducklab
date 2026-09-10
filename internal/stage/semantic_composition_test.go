@@ -215,6 +215,46 @@ func TestCompositionReviewBoundsNormativeReferences(t *testing.T) {
 	}
 }
 
+// B-373: CheckPlan reported zero findings for invalid task-field grammar, so
+// the engine spent a semantic reviewer on a candidate artifact_lint already
+// knew could not be accepted.
+func TestCompositionReviewRunsArtifactContractBeforeSemanticReviewer(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n")
+	valid := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
+		"## M-01 — Core\n\n### T-001 — Build\n\n" +
+		"**Implements:** SPEC-001\n**Work unit:** build the app\n" +
+		"**Acceptance slices:**\n- the app builds\n" +
+		"**Acceptance probes:**\n1. `go test ./...`\n" +
+		"**Produces:** file:src/main.go\n**Consumes:** none\n" +
+		"**Verification:** `go test ./...`\n**Exercises:** file:src/main.go\n"
+	base, err := artifact.Parse(valid, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := artifact.Parse(strings.Replace(valid, "**Verification:** `go test ./...`", "**Verification:** go test ./...", 1), artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	mechanical, semantic, err := reviewComposition(context.Background(), Params{
+		ProjectRoot: root,
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			calls++
+			return `{"verdict":"approve","findings":[]}`, nil
+		},
+	}, artifact.KindPlan, "change the build task", base, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || semantic != nil {
+		t.Fatalf("invalid contract reached semantic reviewer: calls=%d verdict=%+v", calls, semantic)
+	}
+	if got := strings.Join(mechanical, "\n"); !strings.Contains(got, "T-001 **Verification:** must be one backtick command") {
+		t.Fatalf("composition omitted artifact contract finding: %v", mechanical)
+	}
+}
+
 func TestReferenceContractCheckerStillRejectsAnInvalidUnmaterializedBlock(t *testing.T) {
 	contract := capability.ReferenceContract{
 		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",
