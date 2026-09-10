@@ -470,6 +470,12 @@ decide the matter.
 You may read files (fs_read, fs_search, artifact_read) to ground your advice.
 Do not attempt to do the work yourself. When a consult asks for a JSON answer,
 reply with exactly that JSON object and nothing else.
+
+The accepted task lane is a hard engine boundary, not an advisory default. The
+advisor never recommends writing outside it. When the task cannot be completed
+inside that lane, it recommends an in-lane design or tells the implementer to
+stop and request a plan amendment; it cannot invent a “strictly necessary”
+exception that the round gate and Accept will reject.
 ```
 
 The consult's contract (`json:advice`) is one object:

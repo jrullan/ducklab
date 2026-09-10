@@ -2032,7 +2032,7 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 	if task := s.findTask(ctx, projectID, taskID); task != nil {
 		fmt.Fprintf(&b, "%s — %s\n", task.ID, task.Title)
 		if lane := s.taskLane(projectRoot, taskID); len(lane) > 0 {
-			b.WriteString("\n## Lane notice\n\nThis task owns: " + strings.Join(lane, ", ") + ". Concurrent runs own other lanes; do not modify paths outside this lane unless strictly required.\n")
+			b.WriteString("\n## Lane notice\n\nThis task owns: " + strings.Join(lane, ", ") + ". Concurrent runs own other lanes. " + taskLaneAuthority + "\n")
 		}
 		if inputs := taskArtifactFiles(projectRoot, taskID, "consumes"); len(inputs) > 0 {
 			b.WriteString("\nRead-only inputs: " + strings.Join(inputs, ", ") + ". Consuming an artifact authorizes reading and using its public contract, not redefining or modifying its owner.\n")

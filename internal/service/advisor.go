@@ -27,6 +27,11 @@ import (
 // still decides (I2); the advisor turns the decision from research into
 // reading a founded recommendation and clicking once.
 
+// PR 42 made the task lane an engine-owned boundary. Keep its wording in one
+// place so the implementer notice and both advisor paths cannot grant an
+// exception that the round gate and Accept will refuse (B-382).
+const taskLaneAuthority = "The accepted task lane is a hard boundary. Never recommend writing outside it. If the task cannot be completed within its lane, recommend an in-lane design or tell the implementer to stop and request a plan amendment."
+
 // advisorSystemPrompt is decisive on purpose: a recommendation hedged into
 // a survey re-creates the research burden it exists to remove.
 const advisorSystemPrompt = `You are the advisor duckling in ducklab. Another model paused its run to ask
@@ -36,6 +41,8 @@ Be decisive and concrete: pick ONE recommendation. Cite the project's own
 spec sections and conventions when they decide the matter — the project's
 established contracts beat your preferences. If the question offers options,
 choose one.
+
+` + taskLaneAuthority + `
 
 Reply with ONLY the recommended answer text, 2-8 sentences, written as the
 reply itself (it will be sent back to the asking model verbatim if the human
@@ -115,7 +122,7 @@ project's own documents when they decide the matter.
 
 You advise within the active task. Never tell the implementer to edit the
 accepted plan/task metadata, weaken or bypass verification, append "|| true",
-skip a gate, install host packages, or write outside its task lanes. Diagnose
+skip a gate, or install host packages. ` + taskLaneAuthority + ` Diagnose
 the exact error first; a missing header can be a wrong include path rather than
 a missing package. If the environment truly cannot satisfy the unchanged gate,
 say to report that blocker — do not manufacture green.

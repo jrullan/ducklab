@@ -270,7 +270,17 @@ func TestBuildPromptCarriesLaneNotice(t *testing.T) {
 		artifact.KindPlan: "## M-01 — Auth\n\n**Owns:** internal/service\n\n### T-001 — Issue tokens\n",
 	})
 	prompt := s.buildTaskPrompt(context.Background(), id, dir, "T-001")
-	if !strings.Contains(prompt, "internal/service") || !strings.Contains(prompt, "Concurrent runs own other lanes") {
+	for _, want := range []string{
+		"internal/service",
+		"Concurrent runs own other lanes",
+		"accepted task lane is a hard boundary",
+		"stop and request a plan amendment",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "unless strictly required") {
 		t.Errorf("prompt missing lane notice:\n%s", prompt)
 	}
 }
