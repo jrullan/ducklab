@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Artifact, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
+import type { Artifact, ArtifactLintResult, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
@@ -58,6 +58,11 @@ export function Cycle({
   const [traceDown, setTraceDown] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
+  const [grammarOpen, setGrammarOpen] = useState(false);
+  const [grammarContent, setGrammarContent] = useState("");
+  const [grammarResult, setGrammarResult] = useState<ArtifactLintResult | null>(null);
+  const [grammarBusy, setGrammarBusy] = useState(false);
+  const [grammarFailure, setGrammarFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
   const [brief, setBrief] = useState("");
   // Reference documents for intake and spec: paths to files or folders of
@@ -168,6 +173,27 @@ export function Cycle({
   const [specDocument, setSpecDocument] = useState<Artifact | null>();
   const detailRef = useRef<HTMLDivElement>(null);
   const manualStageChoice = useRef(false);
+
+  const readGrammarFile = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setGrammarFailure(null);
+    const reader = new FileReader();
+    reader.onload = () => setGrammarContent(String(reader.result ?? ""));
+    reader.onerror = () => setGrammarFailure("Could not read the selected draft.");
+    reader.readAsText(file);
+  };
+
+  const checkGrammar = () => {
+    setGrammarBusy(true);
+    setGrammarFailure(null);
+    setGrammarResult(null);
+    void client
+      .artifactLint(projectId, active.kind, grammarContent)
+      .then(setGrammarResult)
+      .catch((error) => setGrammarFailure(error instanceof Error ? error.message : String(error)))
+      .finally(() => setGrammarBusy(false));
+  };
 
   useEffect(() => {
     const nextStage = STAGES.find((candidate) => candidate.stage === stage);
@@ -623,6 +649,7 @@ export function Cycle({
       <header data-testid="cycle-frame-header" id="cycle-ledger" className="sticky top-0 z-10 border-b border-hairline bg-surface pb-3">
         <div className="flex items-center gap-3 py-3">
           <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Intent, requirements, specification and plan — one traceable project spine.</p></div>
+          {active.stage !== "intent" && <button type="button" data-testid="grammar-check-open" onClick={() => { setGrammarOpen(true); setGrammarResult(null); setGrammarFailure(null); }} className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Check grammar</button>}
           <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
           {landingResolved && !prerequisiteLoading && prerequisite && <button type="button" data-testid="cycle-prerequisite-action" onClick={followPrerequisite} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">{prerequisite.action}</button>}
           {landingResolved && !prerequisiteLoading && !prerequisite && (!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intake" && !inspectedSection) { setActive(STAGES[0]); location.hash = routeHref({ name: "cycle", stage: "intent" }); } else if (active.stage === "intake" && inspectedSection && !brief) { setBrief(`Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
@@ -649,6 +676,35 @@ export function Cycle({
           <a href="#/cycle/ledger" className="ml-auto rounded border border-hairline px-2 py-1 hover:text-ink">Review issues</a>
         </div>
       </header>
+      {grammarOpen && active.stage !== "intent" && (
+        <section role="dialog" aria-label="Check document grammar" data-testid="grammar-check-dialog" className="fixed inset-y-0 right-0 z-50 w-full max-w-xl overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl">
+          <div className="mb-4 flex items-start justify-between gap-3 border-b border-hairline pb-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-muted">{active.label}</p>
+              <h2 className="mt-1 text-lg font-semibold text-ink">Check document grammar</h2>
+              <p className="mt-1 text-xs text-ink-muted">Read-only preflight: this neither writes a proposal nor runs semantic or trace checks.</p>
+            </div>
+            <button type="button" aria-label="Close grammar check" onClick={() => setGrammarOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button>
+          </div>
+          <label htmlFor="grammar-candidate" className="text-sm font-medium text-ink">Paste a complete {active.label.toLowerCase()} draft</label>
+          <textarea id="grammar-candidate" data-testid="grammar-candidate" rows={16} value={grammarContent} onChange={(event) => setGrammarContent(event.target.value)} className="mt-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs" />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="cursor-pointer rounded border border-hairline px-2 py-1 text-xs text-ink-secondary">
+              Load .md or .txt
+              <input data-testid="grammar-file" type="file" accept=".md,.txt,text/markdown,text/plain" onChange={(event) => readGrammarFile(event.target.files)} className="sr-only" />
+            </label>
+            <button type="button" data-testid="grammar-check-run" disabled={grammarBusy || grammarContent.trim() === ""} onClick={checkGrammar} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page disabled:opacity-50">{grammarBusy ? "Checking…" : "Check grammar"}</button>
+          </div>
+          {grammarFailure && <p role="alert" className="mt-3 text-sm text-critical">{grammarFailure}</p>}
+          {grammarResult && (
+            <div className="mt-4 space-y-3" data-testid="grammar-result">
+              <p className={`text-sm font-medium ${grammarResult.valid ? "text-good" : "text-critical"}`}>{grammarResult.valid ? "Grammar is valid" : `${grammarResult.errors.length} grammar error${grammarResult.errors.length === 1 ? "" : "s"}`}</p>
+              {grammarResult.errors.length > 0 && <section data-testid="grammar-errors"><h3 className="text-xs font-medium uppercase tracking-wide text-critical">Errors — must fix</h3><ul className="mt-1 space-y-2">{grammarResult.errors.map((diagnostic, index) => <li key={`${diagnostic.code ?? "error"}-${index}`} className="rounded border border-critical p-2 text-sm text-ink"><p>{diagnostic.message}</p>{diagnostic.offending_token && <p className="mt-1 font-mono text-xs text-ink-muted">token: {diagnostic.offending_token}</p>}</li>)}</ul></section>}
+              {grammarResult.notices.length > 0 && <section data-testid="grammar-notices"><h3 className="text-xs font-medium uppercase tracking-wide text-warning">Notices — non-blocking</h3><ul className="mt-1 space-y-2">{grammarResult.notices.map((diagnostic, index) => <li key={`${diagnostic.code ?? "notice"}-${index}`} className="rounded border border-warning p-2 text-sm text-ink"><p>{diagnostic.message}</p></li>)}</ul></section>}
+            </div>
+          )}
+        </section>
+      )}
       <div className="cycle-body grid min-h-0 flex-1 overflow-hidden">
         <nav data-testid="cycle-index" aria-label={`${active.label} section index`} className="sticky top-0 min-h-0 overflow-y-auto border-r border-hairline py-4 pr-3">
           <div className="mb-3 flex items-center justify-between"><h2 className="font-medium text-ink">{active.label}</h2><span className="text-xs text-ink-muted">{indexedSections.length}</span></div>

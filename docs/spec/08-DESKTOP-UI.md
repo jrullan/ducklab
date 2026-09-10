@@ -308,6 +308,12 @@ draft and provide a route to reuse its original brief or discard the draft;
 the Run view may link to the canonical controls in Documents rather than
 duplicating brief-editing state.
 
+For requirements, spec, and plan, Documents also exposes **Check grammar**.
+The person may paste a complete draft or load a Markdown/text file; the action
+calls the engine's read-only artifact lint and displays blocking errors apart
+from non-blocking notices. It never writes the candidate or substitutes trace
+and semantic review.
+
 The `council` conversation appears live in a collapsible drawer at the right —
 the user watches the architect draft and the reviewer object while it happens,
 and a `human` turn surfaces as an inline input in that drawer.
