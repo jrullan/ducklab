@@ -302,6 +302,11 @@ The original sketch, for what still applies:
 When a stage run produces a **proposal**, the view switches to a **side-by-side
 document diff** (current ← → proposed) with `Accept` / `Reject` / `Edit then
 accept`. Nothing is written to the artifact until Accept (`05 §1.1` step 8).
+Reject keeps the proposal as the record of the failed attempt. Both the
+Documents view and the rejected run's own Run view must reveal that surviving
+draft and provide a route to reuse its original brief or discard the draft;
+the Run view may link to the canonical controls in Documents rather than
+duplicating brief-editing state.
 
 The `council` conversation appears live in a collapsible drawer at the right —
 the user watches the architect draft and the reviewer object while it happens,
