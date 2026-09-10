@@ -2771,9 +2771,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		clearPending(rs.run)
 		return s.logResolution(rs, "accept", actor)
 	}
-	if message == "" {
-		message = acceptCommitSubject(rs.run)
-	}
+	message = acceptCommitMessage(rs.run, message)
 	// Announce the commit before any git mutation: staging and committing can
 	// take long enough that a completed round gate otherwise looks like an
 	// unexplained pause. Keep this event before branch creation as well, so it
@@ -2921,10 +2919,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 // acceptWorktreeRun proves exactly the commit that will be fast-forwarded into
 // the default branch. A clean registered checkout on that branch is advanced
 // after the ref so its files continue to match its HEAD.
-// acceptCommitSubject names an accepted commit when the person gave no
-// message. A task names itself; a taskless run — a release scribe, a triage,
-// a stage — used to leave "ducklab: " and an empty subject in the history
-// (6a5eecb, 2026-08-28).
+// acceptCommitSubject names every accepted commit. A task names itself; a
+// taskless run — a release scribe, a triage, a stage — used to leave
+// "ducklab: " and an empty subject in the history (6a5eecb, 2026-08-28).
 func acceptCommitSubject(run *runlog.Run) string {
 	if run.TaskID != "" {
 		return fmt.Sprintf("ducklab: %s", run.TaskID)
@@ -2938,6 +2935,17 @@ func acceptCommitSubject(run *runlog.Run) string {
 	return fmt.Sprintf("ducklab: %s run %s", run.Stage, run.ID)
 }
 
+// acceptCommitMessage keeps the machine-searchable subject canonical across
+// Desktop, CLI and MCP. A person's or operator's explanation is decision
+// evidence, so it belongs in the body rather than replacing the task identity.
+func acceptCommitMessage(run *runlog.Run, reason string) string {
+	subject := acceptCommitSubject(run)
+	if reason = strings.TrimSpace(reason); reason != "" {
+		return subject + "\n\n" + reason
+	}
+	return subject
+}
+
 func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string) error {
 	if rs.run.WorktreePath == "" || rs.run.Branch == "" || rs.run.BaseSHA == "" {
 		return fmt.Errorf("worktree acceptance is missing its path, branch, or base sha")
@@ -2945,9 +2953,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	if _, err := os.Stat(rs.run.WorktreePath); err != nil {
 		return fmt.Errorf("worktree acceptance cannot find %s: %w", rs.run.WorktreePath, err)
 	}
-	if message == "" {
-		message = acceptCommitSubject(rs.run)
-	}
+	message = acceptCommitMessage(rs.run, message)
 	workGit := vcs.New(rs.run.WorktreePath)
 	// Retrying Accept is the UI door after a person resolves the materialized
 	// conflict. Do not let the ordinary staging path turn unresolved conflict

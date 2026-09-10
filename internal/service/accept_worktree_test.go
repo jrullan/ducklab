@@ -78,6 +78,37 @@ func pausedWorktreeRun(t *testing.T, s *Service, id, dir, runID string) (*runlog
 	return run, git
 }
 
+func TestAcceptReasonStaysInBodyUnderCanonicalTaskSubject(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-mcp-subject")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "mcp.txt"), []byte("accepted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const reason = "Gate PASSED; the diff was audited against the task."
+	result, err := s.RunAcceptAs(context.Background(), run.ID, reason, "mcp:claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "show", "-s", "--format=%s%n%b", result.CommitSHA)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := string(out)
+	if !strings.HasPrefix(commit, "ducklab: T-001\n") {
+		t.Fatalf("accept subject was replaced by the decision reason:\n%s", commit)
+	}
+	if !strings.Contains(commit, "\n"+reason+"\n") {
+		t.Fatalf("decision reason was not retained in the commit body:\n%s", commit)
+	}
+	if !strings.Contains(commit, "Ducklab-Run: "+run.ID) {
+		t.Fatalf("accept trailers were lost:\n%s", commit)
+	}
+}
+
 // A recorded isolated checkout is a custody boundary: acceptance must refuse
 // rather than stage it when the turn or its gate was run from another tree.
 // In particular, that refusal must leave the candidate in the worktree and

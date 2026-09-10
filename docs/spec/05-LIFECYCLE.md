@@ -65,6 +65,11 @@ an accepted intention that changed no requirement.
 
 Steps 5–8 are **never** delegated to a model.
 
+Every acceptance commit has a canonical subject derived by the engine
+(`ducklab: T-NNN` for a task, or the stage/subject form for taskless work).
+An optional human or MCP decision reason is preserved in the commit body; it
+never replaces that subject. The actor and run remain explicit trailers.
+
 When `[remote].on_accept` resolves to `push` or `pr`, publication follows the
 local commit and never controls its acceptance. A configured remote name that
 does not exist in the repository produces an informational `local_only`
