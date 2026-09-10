@@ -10,8 +10,21 @@ function allSections(sections: Section[] | null | undefined): Section[] {
 }
 
 function declaredFiles(section: Section): string[] {
-  const raw = section.fields?.files ?? section.fields?.paths ?? section.fields?.file ?? "";
+  const raw = section.fields?.owns ?? section.fields?.files ?? section.fields?.paths ?? section.fields?.file ?? "";
   return raw.split(/[\n,]+/).map((file) => file.trim()).filter(Boolean);
+}
+
+function taskSections(sections: Section[] | null | undefined): Section[] {
+  return allSections(sections).filter((section) => /^T-\d+$/i.test(section.id));
+}
+
+function stableFields(fields: Record<string, string> | undefined): [string, string][] {
+  return Object.entries(fields ?? {}).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function sameTask(left: Section, right: Section): boolean {
+  return JSON.stringify({ title: left.title, body: left.body, implements: [...(left.implements ?? [])].sort(), fields: stableFields(left.fields) }) ===
+    JSON.stringify({ title: right.title, body: right.body, implements: [...(right.implements ?? [])].sort(), fields: stableFields(right.fields) });
 }
 
 export function PlanCard({ artifact, traceErrors, onApprove, onChanges }: {
@@ -21,17 +34,30 @@ export function PlanCard({ artifact, traceErrors, onApprove, onChanges }: {
   onChanges: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const sections = allSections(artifact.proposal?.sections ?? artifact.sections);
-  const tasks = sections.filter((section) => /^M[-_]?\d+/i.test(section.id) || section.id.startsWith("T-"));
-  const taskCount = tasks.length || sections.length;
-  const lanes = tasks.map((task) => task.fields?.lane || task.fields?.owner || "").filter(Boolean);
-  const parallel = new Set(lanes).size || (taskCount ? 1 : 0);
-  // Trace errors are the deterministic missing links in the proposal. Keep the
-  // evidence grounded in that check rather than in the stage-name list.
-  const covered = Math.max(0, taskCount - traceErrors.length);
+  const approvedTasks = taskSections(artifact.sections);
+  const proposedTasks = taskSections(artifact.proposal?.sections ?? artifact.sections);
+  const approvedByID = new Map(approvedTasks.map((task) => [task.id, task]));
+  const proposedByID = new Map(proposedTasks.map((task) => [task.id, task]));
+  const isAmendment = approvedTasks.length > 0;
+  const added = proposedTasks.filter((task) => !approvedByID.has(task.id));
+  const changed = proposedTasks.filter((task) => {
+    const current = approvedByID.get(task.id);
+    return !!current && !sameTask(current, task);
+  });
+  const removed = approvedTasks.filter((task) => !proposedByID.has(task.id));
+  const focus = isAmendment ? [...added, ...changed] : proposedTasks;
+  const focusIDs = new Set(focus.map((task) => task.id));
+  // Trace errors are the deterministic missing links in the proposal. An
+  // amendment reports only errors attached to what it changes; inherited
+  // debt in the approved plan is not evidence about this proposal.
+  const relevantErrors = isAmendment
+    ? traceErrors.filter((error) => focusIDs.has(error.id) || [...focusIDs].some((id) => error.detail.includes(id)))
+    : traceErrors;
+  const covered = Math.max(0, focus.length - relevantErrors.length);
+  const lanes = focus.filter((task) => declaredFiles(task).length > 0).length;
   const ownersByFile = new Map<string, Set<string>>();
-  for (const task of tasks) {
-    const owner = task.fields?.owner || task.fields?.lane || task.id;
+  for (const task of proposedTasks) {
+    const owner = task.id;
     for (const file of declaredFiles(task)) {
       const owners = ownersByFile.get(file) ?? new Set<string>();
       owners.add(owner);
@@ -41,11 +67,15 @@ export function PlanCard({ artifact, traceErrors, onApprove, onChanges }: {
   const collisions = [...ownersByFile.values()].filter((owners) => owners.size > 1).length;
   return <section className="mt-4 rounded-card border border-serious p-3" data-testid="now-plan-card">
     <h2 className="text-sm font-medium text-ink">Plan waiting for your decision</h2>
-    <p className="mt-2 text-sm text-ink">The team turned the agreed spec into {taskCount} tasks — it is waiting for you to approve the scope before any duckling touches code.</p>
+    <p className="mt-2 text-sm text-ink">
+      {isAmendment
+        ? `This amendment adds ${added.length}, changes ${changed.length}, and removes ${removed.length} task${added.length + changed.length + removed.length === 1 ? "" : "s"} from the approved ${approvedTasks.length}-task plan.`
+        : `The team proposes ${proposedTasks.length} task${proposedTasks.length === 1 ? "" : "s"} from the agreed specification.`}
+    </p>
     <div className="mt-3 space-y-1 text-xs text-ink-secondary" data-testid="plan-evidence">
-      <p>criteria covered: {covered}</p>
-      <p>tasks proposed: {taskCount} · can run in parallel: {parallel}</p>
-      <p>files with two owners: {collisions}</p>
+      <p>{isAmendment ? "changed tasks covered" : "tasks covered"}: {covered}/{focus.length}</p>
+      <p>ownership lanes declared: {lanes}/{focus.length}</p>
+      <p>ownership collisions in proposed plan: {collisions}</p>
     </div>
     <div className="mt-3 flex items-center gap-2">
       <button type="button" data-testid="plan-approve" onClick={onApprove} className="rounded border border-hairline px-2 py-1 text-xs">Approve</button>

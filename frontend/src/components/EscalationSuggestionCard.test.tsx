@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { EscalationSuggestionCard } from "./EscalationSuggestionCard";
 import { RunView } from "../views/RunView";
 import { EngineClient, type Run } from "../api/client";
@@ -108,5 +108,44 @@ describe("EscalationSuggestionCard", () => {
     useRuns.getState().resyncRun(run, []);
     rerender(<RunView runId="r-1" client={client} />);
     expect(screen.queryByTestId("escalation-suggestion")).toBeNull();
+  });
+
+  it("keeps one authoritative stopped-state decision ahead of a folded escalation", async () => {
+    const failure = "reviewer verdict contract parse failed: repair returned invalid JSON at byte 81";
+    const run: Run = {
+      id: "r-1", project_id: "p-1", stage: "plan", mode: "pair", task_id: "",
+      status: "paused", verdict: "", started_at: "2026-01-01T00:00:00Z",
+      pending_kind: "error", failure, next: ["resume", "abort"],
+    };
+    const stopped: DucklabEvent = {
+      type: "human_needed", run_id: "r-1", seq: 12,
+      data: { kind: "error", detail: failure },
+    };
+    const client = new EngineClient({
+      baseUrl: "http://engine", token: "test",
+      fetchFn: (async (url: string) => new Response(JSON.stringify(
+        String(url).endsWith("/v1/runs/r-1")
+          ? { run, events: [{ ...suggestion, seq: 11 }, stopped] }
+          : { items: [], rows: [] },
+      ), { status: 200, headers: { "Content-Type": "application/json" } })) as unknown as typeof fetch,
+    });
+    useRuns.setState({ runs: { "r-1": run }, events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open" });
+
+    render(<RunView runId="r-1" client={client} />);
+
+    const decision = await screen.findByTestId("run-decision");
+    const escalation = await screen.findByTestId("escalation-suggestion");
+    expect(screen.getAllByTestId("decision-card")).toHaveLength(1);
+    expect(screen.getByTestId("run-state")).toHaveTextContent("waiting for you · error");
+    expect(screen.getByTestId("run-state")).not.toHaveTextContent("in progress");
+    expect(within(decision).getAllByRole("button").map((button) => button.textContent)).toEqual(["Abort", "Resume"]);
+    expect(decision.compareDocumentPosition(escalation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(escalation.tagName).toBe("DETAILS");
+    expect((escalation as HTMLDetailsElement).open).toBe(false);
+    expect(escalation).toHaveAttribute("data-secondary", "true");
+    expect(screen.queryByTestId("pending-human")).toBeNull();
+    expect(screen.getByTestId("run-failure-summary")).toHaveTextContent("reviewer did not return a usable verdict");
+    expect((screen.getByTestId("run-failure-details") as HTMLDetailsElement).open).toBe(false);
+    expect(screen.getAllByText(failure)).toHaveLength(1);
   });
 });

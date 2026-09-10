@@ -115,6 +115,21 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const active = nowList.filter((r) => r.status === "running" || r.status === "queued");
   const failures = actionableFailures(nowList);
 
+  // A pending run owns its decision. The guide may describe the same run and
+  // the artifact endpoint may expose the same proposal; neither is a second
+  // decision. Keep the standalone plan card only for an orphan proposal whose
+  // producing run is no longer waiting.
+  const waitingIDs = new Set(waiting.map((run) => run.id));
+  const planRunID = plan?.proposal?.run_id ?? plan?.run_id;
+  const standalonePlan = !!plan?.proposal && (!planRunID || !waitingIDs.has(planRunID));
+  const actionSteps = nextSteps.filter((step) => {
+    if (step.kind !== "run" || !step.ref) return true;
+    if (waitingIDs.has(step.ref)) return false;
+    // Conversations remain reachable from Runs. They are not decisions and a
+    // five-hour-old reply invitation must not masquerade as current work.
+    return runs[step.ref]?.stage !== "chat";
+  });
+
   const toVerify = bugs.filter((b) => b.status === "fixed");
   // A report sent back after its fix landed, with nothing running for it. The
   // person said "still broken", and then the system said nothing at all: the
@@ -135,7 +150,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]?.mode ?? "solo";
 
   const quiet =
-    waiting.length === 0 && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
+    waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
+  const waitingCount = waiting.length + (standalonePlan ? 1 : 0);
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -192,9 +208,9 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         title="Now"
         subtitle="Decisions first, active work second, and the clearest next step when the queue is quiet."
       />
-      <ContextStrip tone={waiting.length > 0 || failures.length > 0 ? "attention" : "neutral"}>
+      <ContextStrip tone={waitingCount > 0 || failures.length > 0 ? "attention" : "neutral"}>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-ink-secondary">
-          <span><strong className="font-medium text-ink">{waiting.length}</strong> waiting for you</span>
+          <span><strong className="font-medium text-ink" data-testid="now-waiting-count">{waitingCount}</strong> waiting for you</span>
           <span><strong className="font-medium text-ink">{active.length}</strong> running</span>
           <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>
           <span><strong className="font-medium text-ink">{failures.length}</strong> failed</span>
@@ -203,8 +219,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       {/* Running work is owned by Now; the retired guide rail no longer duplicates it. */}
       {/* The inbox's own live section carries the fuller view
           with live spend, in the inbox's own flow. */}
-      <NextStepCards
-        steps={nextSteps}
+      {quiet && <NextStepCards
+        steps={actionSteps}
         costFor={(step) => {
           // A launch's price at the point of use: the mode the step would open
           // and what runs of that mode have cost here so far.
@@ -213,9 +229,9 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           if (!est || est.runs === 0) return undefined;
           return `opens ${buildMode} · ~${money(est.usd)}`;
         }}
-      />
+      />}
 
-      {plan?.proposal && (
+      {standalonePlan && plan?.proposal && (
         <PlanCard
           artifact={plan}
           traceErrors={planTrace}
@@ -256,6 +272,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 }}
                 onReject={() => void client.reject(r.id).catch(() => {})}
                 onAbort={() => void client.abort(r.id).catch(() => {})}
+                onRequestChanges={r.stage === "intake" || r.stage === "spec" || r.stage === "plan"
+                  ? async (note) => {
+                    await client.stageStart(projectId, r.stage, { revise: note });
+                  }
+                  : undefined}
                 acceptError={(() => {
                   const st = acceptState[r.id];
                   return st?.kind === "error" ? st.message : undefined;
@@ -437,7 +458,7 @@ function actionableFailures(list: Run[]): Run[] {
     }
   }
   return [...latest.values()]
-    .filter((r) => r.status === "failed" && r.stage !== "chat" && !settled.has(r.task_id || r.stage || r.id))
+    .filter((r) => r.status === "failed" && r.verdict !== "ABORTED" && r.stage !== "chat" && !settled.has(r.task_id || r.stage || r.id))
     .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
 }
 
