@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,11 +76,7 @@ func indexCachePath() (string, error) {
 
 // isOpenRouter says whether a provider is the one that serves the endpoint.
 func isOpenRouter(p config.Provider) bool {
-	u, err := url.Parse(p.BaseURL)
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(u.Hostname(), "openrouter.ai")
+	return config.IsOpenRouter(p)
 }
 
 // openRouterProvider finds the configured OpenRouter provider with a key in

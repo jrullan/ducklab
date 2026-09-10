@@ -218,6 +218,7 @@ export interface DucklingDuckling {
   id?: string;
   model?: string;
   notes?: string;
+  openrouter_provider?: string;
   params?: ConfigSamplingParams;
   provider?: string;
   roles?: string[];
@@ -358,6 +359,20 @@ export interface EngineapitranscriptResponse {
 
 export interface EngineapiverifyResponse {
   output?: string;
+}
+
+export interface ProviderModelEndpoint {
+  context_tokens?: number;
+  data_retention?: string;
+  input_per_mtok?: number;
+  max_output_tokens?: number;
+  moderated?: boolean;
+  output_per_mtok?: number;
+  prompt_training?: boolean;
+  provider_name?: string;
+  quantization?: string;
+  tag?: string;
+  zero_data_retention?: boolean;
 }
 
 export interface ReportDelta {
@@ -742,6 +757,7 @@ export interface ServiceDucklingUpdate {
   fallback?: string;
   model?: string;
   notes?: string;
+  openrouter_provider?: string;
   params?: ServiceSamplingParamsUpdate;
   provider?: string;
   roles?: string[];
@@ -1141,6 +1157,7 @@ export const OPERATIONS = [
   { id: "ProviderList", method: "GET", path: "/v1/providers" },
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
   { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
+  { id: "ProviderModelEndpoints", method: "GET", path: "/v1/providers/{id}/model-endpoints" },
   { id: "Restart", method: "POST", path: "/v1/restart" },
   { id: "RunList", method: "GET", path: "/v1/runs" },
   { id: "RunGet", method: "GET", path: "/v1/runs/{id}" },

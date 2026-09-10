@@ -16,6 +16,7 @@ function clientWith(ducklings: Duckling[], providers: ProviderView[]) {
     providers: vi.fn(() => Promise.resolve(providers)),
     providerSet: vi.fn(() => Promise.resolve({})),
     providerRemove: vi.fn(() => Promise.resolve({})),
+    providerModelEndpoints: vi.fn(() => Promise.resolve([])),
     ducklingSet: vi.fn(() => Promise.resolve({})),
     ducklingRemove: vi.fn(() => Promise.resolve({})),
   } as unknown as EngineClient;
@@ -165,6 +166,59 @@ describe("Ducklings", () => {
         cost: { input_per_mtok: 0, output_per_mtok: 15 },
       }),
     );
+  });
+
+  it("selects a concrete OpenRouter endpoint and adopts its exact price and disclosed policies", async () => {
+    const client = clientWith([], [provider({
+      id: "openrouter",
+      base_url: "https://openrouter.ai/api/v1",
+    })]);
+    (client.providerModelEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      provider_name: "DeepInfra",
+      tag: "deepinfra/fp4",
+      quantization: "fp4",
+      input_per_mtok: 0.49,
+      output_per_mtok: 1.56,
+      context_tokens: 131072,
+      max_output_tokens: 65536,
+      zero_data_retention: true,
+      prompt_training: false,
+    }]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "glm52" } });
+    fireEvent.change(screen.getByTestId("duckling-model"), { target: { value: "z-ai/glm-5.2" } });
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /DeepInfra.*fp4/ })).toBeTruthy());
+    fireEvent.change(screen.getByTestId("duckling-openrouter-provider"), { target: { value: "deepinfra/fp4" } });
+    const details = screen.getByTestId("openrouter-endpoint-details");
+    expect(details.textContent).toContain("zero retention");
+    expect(details.textContent).toContain("no");
+    expect(details.textContent).toContain("not disclosed by API");
+    expect((screen.getByTestId("duckling-cost-in") as HTMLInputElement).value).toBe("0.49");
+    expect((screen.getByTestId("duckling-cost-out") as HTMLInputElement).value).toBe("1.56");
+
+    fireEvent.click(screen.getByTestId("duckling-save"));
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalledWith(
+      "glm52",
+      expect.objectContaining({
+        openrouter_provider: "deepinfra/fp4",
+        cost: { input_per_mtok: 0.49, output_per_mtok: 1.56 },
+      }),
+    ));
+  });
+
+  it("falls back to a provider-code field when OpenRouter discovery fails", async () => {
+    const client = clientWith([], [provider({
+      id: "openrouter",
+      base_url: "https://openrouter.ai/api/v1",
+    })]);
+    (client.providerModelEndpoints as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("catalog unavailable"));
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-model"), { target: { value: "z-ai/glm-5.2" } });
+    expect(await screen.findByTestId("duckling-openrouter-provider-input")).toBeTruthy();
+    expect(screen.getByTestId("openrouter-endpoint-config").textContent).toContain("catalog unavailable");
   });
 
   // The engine has accepted sampling params all along. The form sent no

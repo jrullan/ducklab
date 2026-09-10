@@ -93,6 +93,9 @@ func TestOpenRouterProviderIsRecognisedByHost(t *testing.T) {
 	if !isOpenRouter(config.Provider{BaseURL: "https://openrouter.ai/api/v1"}) {
 		t.Error("openrouter.ai not recognised")
 	}
+	if !isOpenRouter(config.Provider{BaseURL: "https://eu.openrouter.ai/api/v1"}) {
+		t.Error("an official regional OpenRouter host was not recognised")
+	}
 	if isOpenRouter(config.Provider{BaseURL: "http://10.0.0.5:8000/v1"}) || isOpenRouter(config.Provider{BaseURL: "https://api.openai.com/v1"}) {
 		t.Error("a non-OpenRouter host was taken for it")
 	}

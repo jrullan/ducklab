@@ -6,6 +6,7 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/service"
@@ -314,6 +315,11 @@ func routeTable() []Route {
 			Summary:      "Configured providers. Carries the name of the key's environment variable, never a key (I10).",
 			ClientMethod: "ProviderList",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleProviderList }},
+		{Method: "GET", Path: "/v1/providers/{id}/model-endpoints", Auth: true,
+			Response:     listOf{Items: []provider.ModelEndpoint{}},
+			Summary:      "Concrete OpenRouter serving endpoints for a model, with exact price, quantization, and disclosed data policy",
+			ClientMethod: "ProviderModelEndpoints",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleProviderModelEndpoints }},
 		{Method: "PUT", Path: "/v1/providers/{id}", Auth: true,
 			Request: service.ProviderView{}, Summary: "Add or replace a provider",
 			ClientMethod: "ProviderSet",

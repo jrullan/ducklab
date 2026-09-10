@@ -783,6 +783,9 @@
           "notes": {
             "type": "string"
           },
+          "openrouter_provider": {
+            "type": "string"
+          },
           "params": {
             "$ref": "#/components/schemas/ConfigSamplingParams"
           },
@@ -1236,6 +1239,50 @@
         },
         "required": [
           "output"
+        ],
+        "type": "object"
+      },
+      "ProviderModelEndpoint": {
+        "properties": {
+          "context_tokens": {
+            "type": "integer"
+          },
+          "data_retention": {
+            "type": "string"
+          },
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "max_output_tokens": {
+            "type": "integer"
+          },
+          "moderated": {
+            "type": "boolean"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          },
+          "prompt_training": {
+            "type": "boolean"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "quantization": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "zero_data_retention": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "input_per_mtok",
+          "output_per_mtok",
+          "provider_name",
+          "tag"
         ],
         "type": "object"
       },
@@ -2543,6 +2590,9 @@
             "type": "string"
           },
           "notes": {
+            "type": "string"
+          },
+          "openrouter_provider": {
             "type": "string"
           },
           "params": {
@@ -7227,6 +7277,57 @@
           }
         ],
         "summary": "Add or replace a provider"
+      }
+    },
+    "/v1/providers/{id}/model-endpoints": {
+      "get": {
+        "operationId": "ProviderModelEndpoints",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ProviderModelEndpoint"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Concrete OpenRouter serving endpoints for a model, with exact price, quantization, and disclosed data policy"
       }
     },
     "/v1/restart": {

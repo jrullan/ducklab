@@ -13,6 +13,15 @@ import (
 	"github.com/jrullan/ducklab/internal/provider"
 )
 
+type endpointCatalogProvider struct {
+	*provider.Fake
+	items []provider.ModelEndpoint
+}
+
+func (p *endpointCatalogProvider) ModelEndpoints(context.Context, string) ([]provider.ModelEndpoint, error) {
+	return p.items, nil
+}
+
 func fleetService(t *testing.T) (*Service, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -163,6 +172,61 @@ func TestDucklingSetAndRemoveReachTheRegistry(t *testing.T) {
 	}
 	if _, err := s.ducklings.Get("pato-hosted"); err == nil {
 		t.Error("a removed duckling is still usable until a restart")
+	}
+}
+
+func TestOpenRouterEndpointSelectionRoundTripsEnrichesAndPinsCalls(t *testing.T) {
+	s := writableService(t)
+	fake := provider.NewFake("openrouter")
+	fake.AddTextResponse("ok")
+	catalog := &endpointCatalogProvider{Fake: fake, items: []provider.ModelEndpoint{{
+		ProviderName: "DeepInfra", Tag: "deepinfra/fp4", Quantization: "fp4",
+		InputPerMTok: 0.49, OutputPerMTok: 1.56, ContextTokens: 131072, MaxOutputTokens: 65536,
+	}}}
+	s.cfg.Providers["openrouter"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1"}
+	s.providers["openrouter"] = catalog
+	s.ducklings.RegisterProvider(catalog)
+
+	items, err := s.ProviderModelEndpoints(context.Background(), "openrouter", "z-ai/glm-5.2")
+	if err != nil || len(items) != 1 || items[0].Tag != "deepinfra/fp4" {
+		t.Fatalf("endpoint catalog = %#v, err = %v", items, err)
+	}
+	if err := s.DucklingSet("glm52", DucklingView{
+		Provider: "openrouter", Model: "z-ai/glm-5.2", OpenRouterProvider: "deepinfra/fp4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.DucklingGet(context.Background(), "glm52")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.OpenRouterProvider != "deepinfra/fp4" || view.Cost.InputPerMTok != 0.49 || view.Cost.OutputPerMTok != 1.56 {
+		t.Fatalf("saved endpoint = %#v", view)
+	}
+	if view.Caps.ContextTokens == nil || *view.Caps.ContextTokens != 131072 || view.Params.MaxTokens == nil || *view.Params.MaxTokens != 65536 {
+		t.Fatalf("endpoint limits were not adopted: caps=%#v params=%#v", view.Caps, view.Params)
+	}
+
+	routed, err := s.ducklings.Provider("glm52")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routed.Chat(context.Background(), provider.ChatRequest{Model: "z-ai/glm-5.2"}); err != nil {
+		t.Fatal(err)
+	}
+	req := fake.Requests()[0]
+	if req.Provider == nil || len(req.Provider.Only) != 1 || req.Provider.Only[0] != "deepinfra/fp4" || req.Provider.AllowFallbacks == nil || *req.Provider.AllowFallbacks {
+		t.Fatalf("request was not pinned: %#v", req.Provider)
+	}
+}
+
+func TestOpenRouterEndpointCannotBeAttachedToAnotherProvider(t *testing.T) {
+	s := writableService(t)
+	err := s.DucklingSet("wrong-route", DucklingView{
+		Provider: "fake", Model: "m", OpenRouterProvider: "deepinfra/fp4",
+	})
+	if err == nil || !strings.Contains(err.Error(), "only when its provider is OpenRouter") {
+		t.Fatalf("non-OpenRouter endpoint pin was accepted: %v", err)
 	}
 }
 

@@ -14,15 +14,16 @@ import (
 
 // Duckling is a named, configured model participant.
 type Duckling struct {
-	ID       config.DucklingID     `json:"id"`
-	Provider config.ProviderID     `json:"provider"`
-	Model    string                `json:"model"`
-	Tier     config.ModelTier      `json:"tier,omitempty"`
-	Roles    []config.Role         `json:"roles,omitempty"`
-	Notes    string                `json:"notes,omitempty"`
-	Params   config.SamplingParams `json:"params"`
-	Caps     Capabilities          `json:"caps"`
-	Cost     config.Cost           `json:"cost"`
+	ID                 config.DucklingID     `json:"id"`
+	Provider           config.ProviderID     `json:"provider"`
+	Model              string                `json:"model"`
+	OpenRouterProvider string                `json:"openrouter_provider,omitempty"`
+	Tier               config.ModelTier      `json:"tier,omitempty"`
+	Roles              []config.Role         `json:"roles,omitempty"`
+	Notes              string                `json:"notes,omitempty"`
+	Params             config.SamplingParams `json:"params"`
+	Caps               Capabilities          `json:"caps"`
+	Cost               config.Cost           `json:"cost"`
 	// Color is which of the eight series slots this duckling is drawn in, or 0
 	// to let the fleet order decide.
 	//
@@ -157,7 +158,7 @@ func (r *Registry) Provider(id config.DucklingID) (provider.Provider, error) {
 	if !ok {
 		return nil, fmt.Errorf("provider %q for duckling %q not found", d.Provider, id)
 	}
-	return p, nil
+	return provider.WithOpenRouterEndpoint(p, d.OpenRouterProvider), nil
 }
 
 // Probe probes a duckling's capabilities.
@@ -420,17 +421,18 @@ func (r *Registry) Test(ctx context.Context, id config.DucklingID, prompt string
 // FromConfig creates a Duckling from config.
 func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 	d := &Duckling{
-		ID:       id,
-		Provider: cfg.Provider,
-		Model:    cfg.Model,
-		Tier:     cfg.Tier,
-		Roles:    cfg.Roles,
-		Notes:    cfg.Notes,
-		Params:   cfg.Params,
-		Cost:     cfg.Cost,
-		Color:    cfg.Color,
-		Fallback: cfg.Fallback,
-		Caps:     Capabilities{ContextTokens: 32768},
+		ID:                 id,
+		Provider:           cfg.Provider,
+		Model:              cfg.Model,
+		OpenRouterProvider: cfg.OpenRouterProvider,
+		Tier:               cfg.Tier,
+		Roles:              cfg.Roles,
+		Notes:              cfg.Notes,
+		Params:             cfg.Params,
+		Cost:               cfg.Cost,
+		Color:              cfg.Color,
+		Fallback:           cfg.Fallback,
+		Caps:               Capabilities{ContextTokens: 32768},
 	}
 	// Declared capabilities were dropped here, so a duckling that says
 	// native_tools = true still listed as "text protocol" everywhere the
