@@ -1333,6 +1333,65 @@ func TestReseatSwapsTheSeatsAndResumes(t *testing.T) {
 	s.waitForRun(context.Background(), run.ID)
 }
 
+// An automatic fallback is resolved only when provider weather happens, from
+// the same role criteria shown in Flock. The event preserves the request, the
+// actual target, and the evidence that made it win.
+func TestReseatAutoSelectsFromFlockCriteriaAndRecordsWhy(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-small", "pato-large")
+	small, large := 32000, 128000
+	dSmall := s.cfg.Ducklings["pato-small"]
+	dSmall.Caps.ContextTokens = &small
+	s.cfg.Ducklings["pato-small"] = dSmall
+	dLarge := s.cfg.Ducklings["pato-large"]
+	dLarge.Caps.ContextTokens = &large
+	s.cfg.Ducklings["pato-large"] = dLarge
+	s.cfg.Defaults.CandidateCriteria = map[string][]string{
+		"architect": {"context"},
+		"reviewer":  {"context"},
+		"advisor":   {"context"},
+	}
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "small change", Ducklings: []string{"pato-uno"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+	rs.run.Status = "paused"
+	rs.run.PendingKind = "provider"
+	rs.run.Failure = "provider unavailable: timeout"
+
+	out, err := s.RunReseat(context.Background(), run.ID, "pato-uno", "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Roster["architect"] != "pato-large" {
+		t.Errorf("architect = %q, want Flock's largest-context candidate", out.Roster["architect"])
+	}
+	raw, err := os.ReadFile(filepath.Join(rs.runDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := string(raw)
+	for _, want := range []string{`"type":"seat_failover"`, `"requested_to":"auto"`, `"selection":"flock_candidate_criteria"`, `"to":"pato-large"`, `"context"`} {
+		if !strings.Contains(record, want) {
+			t.Errorf("event omitted %s:\n%s", want, record)
+		}
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+}
+
 func readEventTypes(t *testing.T, runDir string) []string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(runDir, "events.jsonl"))

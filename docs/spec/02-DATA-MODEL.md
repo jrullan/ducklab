@@ -154,6 +154,7 @@ provider = "beelink"
 model    = "gemma-4-26b-a4b"
 roles    = []                  # empty = eligible for any role
 notes    = "fast local generalist"
+fallback = "auto"             # resolve from Flock criteria when provider weather pauses a run
 
 [duckling.pato-local.params]
 temperature = 0.2
@@ -229,6 +230,14 @@ On load, `internal/config` must reject with exit code 3 and a one-line message:
 
 Missing `api_key_env` is **not** an error; it means keyless. An `api_key_env`
 naming an unset variable is an error only at first use, reported as exit 8.
+
+A duckling's optional `fallback` is either another duckling id or the reserved
+value `auto`. A named fallback is fixed. `auto` is resolved only when provider
+weather pauses a run: the engine applies the current `[defaults.candidate_criteria]`
+for every affected role, excludes the unavailable duckling, and selects one
+candidate eligible for all affected seats. Empty criteria or missing evidence
+produce an explicit error rather than an arbitrary choice. The `seat_failover`
+event records the resolved duckling, effective criteria, and ranking explanation.
 
 ### 2.2 Environment overrides
 

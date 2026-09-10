@@ -5079,9 +5079,10 @@ func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string)
 }
 
 // RunReseat moves a paused run's seats from one duckling to its stand-in —
-// the declared-fallback door for provider weather. Explicit and recorded,
-// never a router's choice: the person (or their pre-authorized chain) names
-// the swap, a seat_failover event lands on the record, and the run resumes
+// the declared-fallback door for provider weather. An explicit target is the
+// person's fixed choice; "auto" is their pre-authorization to resolve the
+// target at failure time through the configured Flock candidate criteria.
+// Either way, a seat_failover event lands on the record and the run resumes
 // with its ledger intact. Availability only — a run paused at a human gate
 // has nothing to reseat.
 func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.Run, error) {
@@ -5095,13 +5096,9 @@ func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.R
 		return nil, fmt.Errorf("reseat answers provider weather; this run is %s/%s",
 			rs.run.Status, orDefault(rs.run.PendingKind, "none"))
 	}
-	if _, err := s.ducklings.Get(config.DucklingID(to)); err != nil {
-		return nil, fmt.Errorf("no duckling %q to reseat onto", to)
-	}
 	var roles []string
 	for role, d := range rs.run.Roster {
 		if d == from {
-			rs.run.Roster[role] = to
 			roles = append(roles, role)
 		}
 	}
@@ -5109,6 +5106,35 @@ func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.R
 		return nil, fmt.Errorf("%s holds no seat on this run", from)
 	}
 	sort.Strings(roles)
+	requestedTo := to
+	selectionKind := "explicit"
+	var selected autoFallbackSelection
+	if to == "auto" {
+		cards, err := s.Scorecards(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("score fleet for automatic fallback: %w", err)
+		}
+		criteria := map[string][]string{}
+		s.cfgMu.RLock()
+		for _, role := range roles {
+			criteria[role] = append([]string{}, CriteriaFor(s.cfg.Defaults.CandidateCriteria, role)...)
+		}
+		s.cfgMu.RUnlock()
+		selected, err = selectAutoFallback(from, roles, cards, criteria)
+		if err != nil {
+			return nil, err
+		}
+		to = selected.ID
+		selectionKind = "flock_candidate_criteria"
+	}
+	if _, err := s.ducklings.Get(config.DucklingID(to)); err != nil {
+		return nil, fmt.Errorf("no duckling %q to reseat onto", to)
+	}
+	for role, d := range rs.run.Roster {
+		if d == from {
+			rs.run.Roster[role] = to
+		}
+	}
 	// A stage run re-resolves its line-up from config on resume, which would
 	// quietly undo the swap: the override goes into the persisted request,
 	// the same per-run seat door the chips use.
@@ -5128,10 +5154,17 @@ func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.R
 		}
 	}
 	if w, err := s.ensureWriter(rs); err == nil {
-		w.AppendEvent("seat_failover", map[string]interface{}{
+		data := map[string]interface{}{
 			"from": from, "to": to, "roles": roles,
-			"reason": orDefault(rs.run.Failure, "provider unreachable"),
-		})
+			"reason":    orDefault(rs.run.Failure, "provider unreachable"),
+			"selection": selectionKind,
+		}
+		if requestedTo == "auto" {
+			data["requested_to"] = "auto"
+			data["criteria"] = selected.Criteria
+			data["why"] = selected.Why
+		}
+		w.AppendEvent("seat_failover", data)
 	}
 	return s.RunResume(ctx, id)
 }

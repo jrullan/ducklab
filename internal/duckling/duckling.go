@@ -32,8 +32,8 @@ type Duckling struct {
 	// the Ducklings page. So one model was blue as an architect and orange as an
 	// implementer, and a reader could never learn "orange is that one".
 	Color int `json:"color,omitempty"`
-	// Fallback is the declared stand-in for provider weather; availability
-	// only, never quality — the person names it, no router does.
+	// Fallback is the declared stand-in for provider weather; "auto" delegates
+	// the choice to the person's Flock candidate criteria at reseat time.
 	Fallback string `json:"fallback,omitempty"`
 }
 

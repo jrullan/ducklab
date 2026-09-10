@@ -101,6 +101,40 @@ func TestConfiguredCriteriaReorder(t *testing.T) {
 	}
 }
 
+// "auto" is not a second ranking system. It consumes the complete ordering
+// behind Flock suggestions, excludes the failed duckling, and can only select
+// a duckling that is eligible for every seat being moved.
+func TestAutoFallbackUsesFlockCriteriaForEveryAffectedRole(t *testing.T) {
+	cards := rankingFixture()
+	selected, err := selectAutoFallback("coder", []string{"implementer", "reviewer"}, cards, map[string][]string{
+		"implementer": {"input_cost"},
+		"reviewer":    {"pass_rate"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ID != "cheap" {
+		t.Fatalf("selected %q, want cheap: %+v", selected.ID, selected)
+	}
+	if !strings.Contains(selected.Why["implementer"], "$0.07/Mtok in") || !strings.Contains(selected.Why["reviewer"], "as reviewer") {
+		t.Errorf("selection does not explain both role rankings: %+v", selected.Why)
+	}
+	if got := selected.Criteria["implementer"]; strings.Join(got, ",") != "input_cost" {
+		t.Errorf("recorded criteria = %v", got)
+	}
+}
+
+func TestAutoFallbackFailsRatherThanGuessingWithoutEvidence(t *testing.T) {
+	_, err := selectAutoFallback("coder", []string{"reviewer"}, rankingFixture(), map[string][]string{"reviewer": {"bench"}})
+	if err == nil || !strings.Contains(err.Error(), "no eligible duckling") || !strings.Contains(err.Error(), "bench") {
+		t.Fatalf("missing evidence error = %v", err)
+	}
+	_, err = selectAutoFallback("coder", []string{"reviewer"}, rankingFixture(), map[string][]string{"reviewer": {}})
+	if err == nil || !strings.Contains(err.Error(), "criteria are empty") {
+		t.Fatalf("disabled criteria error = %v", err)
+	}
+}
+
 // Three of three is not "100%". Ranking uses the lower bound of the Wilson
 // interval, so a long record at a good rate outranks a short perfect one —
 // the reviewer seat suggested a local model with 3 runs at 100% over the

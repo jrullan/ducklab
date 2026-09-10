@@ -237,6 +237,14 @@ func criterionPhrase(key, role string, s Scorecard, v float64) string {
 // duckling with no value sorts after every duckling with one. No eligible
 // duckling → no candidates → the seat says nothing.
 func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Candidate {
+	return rankCandidates(role, scorecards, criteria, 3)
+}
+
+// rankCandidates is the engine's one ranking implementation. Suggestions use
+// a short list; automatic fallback needs the whole ordered set so a candidate
+// that can hold every affected role is not hidden below the first three for
+// one of them. A non-positive limit means no truncation.
+func rankCandidates(role string, scorecards []Scorecard, criteria []string, limit int) []Candidate {
 	if len(criteria) == 0 {
 		return []Candidate{}
 	}
@@ -291,8 +299,8 @@ func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Ca
 		}
 		return a.s.ID < b.s.ID
 	})
-	if len(rows) > 3 {
-		rows = rows[:3]
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
 	}
 	out := make([]Candidate, len(rows))
 	for i, r := range rows {
@@ -305,6 +313,78 @@ func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Ca
 		out[i] = Candidate{ID: r.s.ID, Why: strings.Join(parts, " · ")}
 	}
 	return out
+}
+
+type autoFallbackSelection struct {
+	ID       string
+	Criteria map[string][]string
+	Why      map[string]string
+}
+
+// selectAutoFallback chooses one duckling that is eligible for every seat the
+// failed duckling held. It applies the same role declarations, evidence rules,
+// criteria order, and tie breakers as the Flock suggestions. For multiple
+// seats, the minimum sum of rank positions wins; an ID breaks exact ties.
+func selectAutoFallback(from string, roles []string, scorecards []Scorecard, criteriaByRole map[string][]string) (autoFallbackSelection, error) {
+	selection := autoFallbackSelection{
+		Criteria: map[string][]string{},
+		Why:      map[string]string{},
+	}
+	available := make([]Scorecard, 0, len(scorecards))
+	for _, card := range scorecards {
+		if card.ID != from {
+			available = append(available, card)
+		}
+	}
+
+	type score struct {
+		total int
+		why   map[string]string
+	}
+	common := map[string]*score{}
+	for roleIndex, role := range roles {
+		criteria := append([]string{}, criteriaByRole[role]...)
+		selection.Criteria[role] = criteria
+		if len(criteria) == 0 {
+			return selection, fmt.Errorf("auto fallback is disabled for role %q because its Flock criteria are empty", role)
+		}
+		ranked := rankCandidates(role, available, criteria, 0)
+		if len(ranked) == 0 {
+			return selection, fmt.Errorf("auto fallback found no eligible duckling for role %q under Flock criteria [%s]", role, strings.Join(criteria, ", "))
+		}
+		seen := map[string]bool{}
+		for position, candidate := range ranked {
+			seen[candidate.ID] = true
+			if roleIndex == 0 {
+				common[candidate.ID] = &score{total: position, why: map[string]string{role: candidate.Why}}
+				continue
+			}
+			if current, ok := common[candidate.ID]; ok {
+				current.total += position
+				current.why[role] = candidate.Why
+			}
+		}
+		if roleIndex > 0 {
+			for id := range common {
+				if !seen[id] {
+					delete(common, id)
+				}
+			}
+		}
+		if len(common) == 0 {
+			return selection, fmt.Errorf("auto fallback found no duckling eligible for all affected roles [%s]", strings.Join(roles, ", "))
+		}
+	}
+
+	bestID, bestTotal := "", 0
+	for id, candidate := range common {
+		if bestID == "" || candidate.total < bestTotal || (candidate.total == bestTotal && id < bestID) {
+			bestID, bestTotal = id, candidate.total
+		}
+	}
+	selection.ID = bestID
+	selection.Why = common[bestID].why
+	return selection, nil
 }
 
 // escalationCandidatesFor returns only same-role seats with enough evidence whose

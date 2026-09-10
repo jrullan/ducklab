@@ -522,6 +522,30 @@ describe("the reseat offer on a weather pause", () => {
     await screen.findByTestId("run-view");
     expect(screen.queryByTestId("reseat-button")).toBeNull();
   });
+
+  it("explains that auto uses the current Flock criteria", async () => {
+    const paused = {
+      ...failed, status: "paused" as const, verdict: "", pending_kind: "provider",
+      next: ["resume", "abort"],
+    };
+    const runReseat = vi.fn(() => Promise.resolve(paused));
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: paused, events: [
+        { type: "provider_retry", run_id: "r-1", ts: "t", data: { duckling: "k3", attempt: 2, error: "timeout" } },
+      ] })),
+      ducklings: vi.fn(() => Promise.resolve([
+        { id: "k3", provider: "openrouter", model: "kimi", fallback: "auto" },
+      ])),
+      runReseat,
+    } as Partial<EngineClient>);
+    useRuns.setState({ runs: { "r-1": paused }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-1" client={client} />);
+    const btn = await screen.findByTestId("reseat-button");
+    expect(btn.textContent).toContain("automatically");
+    expect(screen.getByTestId("reseat-offer").textContent).toContain("current Flock criteria");
+    fireEvent.click(btn);
+    await waitFor(() => expect(runReseat).toHaveBeenCalledWith("r-1", "k3", "auto"));
+  });
 });
 
 describe("the calls/reply row", () => {
