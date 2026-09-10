@@ -4274,6 +4274,131 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	return err
 }
 
+// TaskLandRequest declares work that reached the default branch outside a
+// Ducklab run. ConfirmTask is deliberately separate from Reason: a useful
+// explanation must not silently waive a commit that names some other task.
+type TaskLandRequest struct {
+	CommitSHA   string `json:"commit_sha"`
+	Reason      string `json:"reason"`
+	ConfirmTask bool   `json:"confirm_task,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+}
+
+// TaskLand records an externally-landed task as a synthetic accepted build
+// run. Task status, dependency release, reports and release inventory all
+// derive from accepted runs, so using that same ledger avoids a second status
+// authority that could disagree with the rest of the product.
+func (s *Service) TaskLand(ctx context.Context, projectID, taskID string, req TaskLandRequest) (*runlog.Run, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, fmt.Errorf("task id is required")
+	}
+	tasks, err := s.TaskList(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	var task *TaskView
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			task = &tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		return nil, fmt.Errorf("no task %s in the plan", taskID)
+	}
+	if task.Status == "accepted" {
+		return nil, fmt.Errorf("%s is already accepted", taskID)
+	}
+	if task.Status == "in_progress" || task.Status == "review" {
+		return nil, fmt.Errorf("%s has a run still open; abort or decide it before declaring external work", taskID)
+	}
+	if strings.HasPrefix(task.Blocked, "waiting on ") {
+		return nil, fmt.Errorf("%s is %s; land its dependencies first", taskID, task.Blocked)
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return nil, fmt.Errorf("a reason for the external landing is required")
+	}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	git := vcs.New(entry.Path)
+	sha := strings.TrimSpace(req.CommitSHA)
+	if err := git.IsReachableFromDefault(sha); err != nil {
+		return nil, err
+	}
+	message, err := git.CommitMessage(sha)
+	if err != nil {
+		return nil, err
+	}
+	if !containsExactTaskID(message, taskID) && !req.ConfirmTask {
+		return nil, fmt.Errorf("commit %s does not name %s; set confirm_task=true to attest that it completes this task", sha, taskID)
+	}
+	actor := strings.TrimSpace(req.Actor)
+	if actor == "" {
+		actor = "human"
+	}
+	branch, err := git.DefaultBranchName()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	run := &runlog.Run{
+		ID: runlog.GenerateRunID(), ProjectID: projectID, Stage: "build", Mode: "external",
+		TaskID: taskID, TaskBodyHash: taskBodyHash(task.Body), Status: "done", Verdict: "PASSED",
+		Accepted: true, CommitSHA: sha, Branch: branch, StartedAt: now, EndedAt: now,
+		Resolution: fmt.Sprintf("completed by %s, declared by %s", sha, actor),
+	}
+	w, err := runlog.NewWriter(entry.Path, run)
+	if err != nil {
+		return nil, err
+	}
+	done := make(chan struct{})
+	close(done)
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: entry.Path, done: done}
+	s.attachWriter(rs, w)
+	if err := w.AppendEvent("run_start", map[string]interface{}{"stage": "build", "mode": "external", "task_id": taskID}); err != nil {
+		_ = w.Close()
+		return nil, err
+	}
+	evidence := map[string]interface{}{
+		"action": "task_landed", "task_id": taskID, "commit_sha": sha, "actor": actor,
+		"reason": reason, "commit_names_task": containsExactTaskID(message, taskID), "confirmed": req.ConfirmTask,
+	}
+	if err := w.AppendEvent("human", evidence); err != nil {
+		_ = w.Close()
+		return nil, err
+	}
+	_ = w.AppendEvent("run_end", map[string]interface{}{"verdict": "PASSED", "resolution": run.Resolution})
+	if err := w.WriteState(); err != nil {
+		_ = w.Close()
+		return nil, err
+	}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+	if bugID, bugErr := s.BugFixedByTask(ctx, projectID, taskID); bugErr == nil && bugID != "" {
+		_ = w.AppendEvent("bug_fixed", map[string]interface{}{"bug": bugID, "task": taskID})
+		_ = w.WriteState()
+	}
+	_ = w.Close()
+	s.queue.poke(s)
+	return rs.snapshotRun(), nil
+}
+
+func containsExactTaskID(message, taskID string) bool {
+	for _, token := range strings.FieldsFunc(message, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-'
+	}) {
+		if token == taskID {
+			return true
+		}
+	}
+	return false
+}
+
 // stageRun is the sole staging path for a run. LinkedDeps are runtime
 // symlinks supplied to an isolated checkout and must never enter a commit;
 // neither may build products (B-364). It returns the excluded paths that

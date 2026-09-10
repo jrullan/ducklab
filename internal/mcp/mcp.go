@@ -46,6 +46,7 @@ type Engine interface {
 	ArtifactLint(projectID, kind, content string) (map[string]interface{}, error)
 	TaskList(projectID string) ([]map[string]interface{}, error)
 	TaskRemove(projectID, taskID string) (map[string]interface{}, error)
+	TaskLand(projectID, taskID, sha, reason string, confirmTask bool, actor string) (map[string]interface{}, error)
 	BugAdd(projectID string, req map[string]string) (map[string]interface{}, error)
 	BugList(projectID string, openOnly bool) ([]map[string]interface{}, error)
 	BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error)

@@ -970,6 +970,15 @@ func (c *Client) TaskRemove(projectID, taskID string) (map[string]interface{}, e
 	return result, err
 }
 
+// TaskLand declares a task completed by work already on the default branch.
+func (c *Client) TaskLand(projectID, taskID, sha, reason string, confirmTask bool, actor string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/projects/%s/tasks/%s/land", projectID, taskID), map[string]interface{}{
+		"commit_sha": sha, "reason": reason, "confirm_task": confirmTask, "actor": actor,
+	}, &result)
+	return result, err
+}
+
 // TaskNext returns the first task whose dependencies are met.
 func (c *Client) TaskNext(projectID string) (map[string]interface{}, error) {
 	var result map[string]interface{}

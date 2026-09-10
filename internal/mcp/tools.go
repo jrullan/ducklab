@@ -121,6 +121,17 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "task_id"),
 		},
 		{
+			"name":        "task_land",
+			"description": "Declare a task completed by a commit already reachable from the default branch. The commit must name the exact task id unless confirm_task explicitly attests the association. Records an accepted external build run with actor and reason provenance.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id":   str("the project id"),
+				"task_id":      str("the task id, T-..."),
+				"commit_sha":   str("commit reachable from the default branch"),
+				"reason":       str("why this external commit completes the task"),
+				"confirm_task": map[string]interface{}{"type": "boolean", "description": "explicitly attest the association when the commit message does not name the task"},
+			}, "project_id", "task_id", "commit_sha", "reason"),
+		},
+		{
 			"name": "run_start",
 			"description": "Build a task WITHOUT the test-first discipline — an exception, not the " +
 				"ordinary path. When the human says to run, start or build a task, they mean " +
@@ -349,6 +360,11 @@ func (a args) str(k string) string {
 	return v
 }
 
+func (a args) bool(k string) bool {
+	v, _ := a[k].(bool)
+	return v
+}
+
 func (s *Server) roster(a args) (map[string]interface{}, error) {
 	action, scope := a.str("action"), a.str("scope")
 	if action != "get" && action != "set" && action != "unpin" {
@@ -484,6 +500,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolJSON(result), nil
 	case "task_remove":
 		out, err := s.eng.TaskRemove(a.str("project_id"), a.str("task_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "task_land":
+		out, err := s.eng.TaskLand(a.str("project_id"), a.str("task_id"), a.str("commit_sha"), a.str("reason"), a.bool("confirm_task"), "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}

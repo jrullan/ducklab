@@ -1021,6 +1021,13 @@ export interface ServiceSuggestion {
   runs?: number;
 }
 
+export interface ServiceTaskLandRequest {
+  actor?: string;
+  commit_sha?: string;
+  confirm_task?: boolean;
+  reason?: string;
+}
+
 export interface ServiceTaskView {
   blocked?: string;
   body?: string;
@@ -1152,6 +1159,7 @@ export const OPERATIONS = [
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
   { id: "TaskRemove", method: "DELETE", path: "/v1/projects/{id}/tasks/{task}" },
   { id: "TaskBodyUpdate", method: "PUT", path: "/v1/projects/{id}/tasks/{task}" },
+  { id: "TaskLand", method: "POST", path: "/v1/projects/{id}/tasks/{task}/land" },
   { id: "TestRetire", method: "POST", path: "/v1/projects/{id}/tasks/{task}/retire-test" },
   { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
