@@ -240,6 +240,7 @@ export const KNOWN_EVENT_TYPES = [
   "run_end",
   "run_queued",
   "run_started",
+  "accept_retry",
   "capabilities_resolved",
   "review_evidence",
   "gate_coverage_warning",

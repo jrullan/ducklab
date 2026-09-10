@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,46 @@ import (
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
+
+// A green reproduction has a real race window before update-ref. Losing that
+// compare-and-swap to another accepted run is ordinary under parallel work;
+// the engine retries one freshly rebased and freshly verified candidate.
+func TestAcceptWorktreeRetriesOnceWhenDefaultMovesDuringReproduction(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	marker := filepath.Join(dir, ".ducklab", "cas-race-once")
+	appendVerifyPreparation(t, dir, fmt.Sprintf(`mode = "custom"
+custom = "if test ! -f %s; then touch %s; git -C %s commit --allow-empty -m concurrent-accept >/dev/null; fi"`, marker, marker, dir))
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-cas-retry")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "candidate.txt"), []byte("candidate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("accept did not recover from one moved default: %v", err)
+	}
+	if got := mustHead(t, git); got != result.CommitSHA {
+		t.Fatalf("default HEAD = %s, accepted = %s", got, result.CommitSHA)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retries := 0
+	for _, event := range detail.Events {
+		if event.Type == "accept_retry" {
+			retries++
+			if event.Data["reason"] != "default branch moved during acceptance" {
+				t.Errorf("retry reason = %#v", event.Data["reason"])
+			}
+		}
+	}
+	if retries != 1 {
+		t.Fatalf("accept retries = %d, want exactly one", retries)
+	}
+}
 
 // pausedWorktreeRun creates the same persisted gate state that RunAccept sees,
 // with candidate work deliberately written only in its isolated checkout.
