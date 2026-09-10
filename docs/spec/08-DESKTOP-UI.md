@@ -332,6 +332,11 @@ Two toggleable boards sharing one layout.
 - Right rail on selection: full record, traceability, run history, and the
   primary actions — for a task `Run ▸` (with mode selector), for a bug
   `Triage ▸` and `Promote to task ▸`.
+- A runnable task also offers the secondary `Work already landed…` door. It
+  takes a default-branch commit and a reason, requires an explicit attestation
+  when the commit message does not name the exact task id, and records the
+  result as an external accepted build run. The same ledger therefore releases
+  dependencies and feeds Now, reports, and release inventory.
 - Batch select for `Triage` on bugs; the engine batches to 10 per run
   (`05 §6`).
 

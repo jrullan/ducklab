@@ -3558,6 +3558,27 @@
         ],
         "type": "object"
       },
+      "ServiceTaskLandRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "confirm_task": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ServiceTaskView": {
         "properties": {
           "blocked": {
@@ -6973,6 +6994,60 @@
           }
         ],
         "summary": "Amend one existing task in the approved plan; neighbouring sections remain unchanged"
+      }
+    },
+    "/v1/projects/{id}/tasks/{task}/land": {
+      "post": {
+        "operationId": "TaskLand",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceTaskLandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Declare a task completed by a commit already reachable from the default branch"
       }
     },
     "/v1/projects/{id}/tasks/{task}/retire-test": {

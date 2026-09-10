@@ -576,6 +576,21 @@ func (g *Git) IsReachableFromDefault(sha string) error {
 	return nil
 }
 
+// CommitMessage returns the complete message for one commit. Callers that use
+// a commit as provenance must inspect the durable message, not a branch name or
+// the current checkout, either of which may have moved since the work landed.
+func (g *Git) CommitMessage(sha string) (string, error) {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return "", fmt.Errorf("commit sha is required")
+	}
+	out, err := g.run("show", "-s", "--format=%B", sha+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("read commit %q: %w", sha, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // DefaultBranchHead returns the configured default branch's current commit.
 func (g *Git) DefaultBranchHead() (string, error) {
 	ref, err := g.defaultBranchRef()

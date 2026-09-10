@@ -1032,6 +1032,10 @@ function TaskRunner({
   // reloads and the "failing test committed" message disappears, but absence
   // is not confirmation: the person is owed a sentence that says it happened.
   const [retired, setRetired] = useState<string | null>(null);
+  const [landingOpen, setLandingOpen] = useState(false);
+  const [landingSHA, setLandingSHA] = useState("");
+  const [landingReason, setLandingReason] = useState("");
+  const [landingConfirm, setLandingConfirm] = useState(false);
   // Accepted work is not waiting to be built. The controls follow the task's
   // state rather than being offered whatever it is.
   const accepted = task.status === "accepted";
@@ -1273,6 +1277,44 @@ function TaskRunner({
           >
             retire the test
           </button>
+        );
+      case "land":
+        return (
+          <div key={action} className="rounded border border-hairline p-2 text-xs" data-testid="task-land-external">
+            {!landingOpen ? (
+              <button type="button" onClick={() => setLandingOpen(true)} className="text-ink underline">
+                Work already landed…
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-ink-muted">Record a commit already on the default branch as this task's completion.</p>
+                <input aria-label="landing commit" value={landingSHA} onChange={(e) => setLandingSHA(e.target.value)} placeholder="commit SHA" className="w-full rounded border border-hairline bg-surface2 px-2 py-1" />
+                <input aria-label="landing reason" value={landingReason} onChange={(e) => setLandingReason(e.target.value)} placeholder="why this commit completes the task" className="w-full rounded border border-hairline bg-surface2 px-2 py-1" />
+                <label className="flex items-start gap-2 text-ink-muted">
+                  <input type="checkbox" checked={landingConfirm} onChange={(e) => setLandingConfirm(e.target.checked)} />
+                  <span>I explicitly confirm this association if the commit message does not name {task.id}.</span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || !landingSHA.trim() || !landingReason.trim()}
+                    onClick={() => {
+                      setBusy(true);
+                      setFailure(null);
+                      void client.taskLand(projectId, task.id, landingSHA, landingReason, landingConfirm)
+                        .then(() => { setLandingOpen(false); onDone(); })
+                        .catch((err) => setFailure(err))
+                        .finally(() => setBusy(false));
+                    }}
+                    className="rounded border border-good px-2 py-1 text-good disabled:opacity-40"
+                  >
+                    Record completion
+                  </button>
+                  <button type="button" onClick={() => setLandingOpen(false)} className="text-ink-muted underline">cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
         );
       case "review":
         return (

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 func landingGit(t *testing.T, dir string, args ...string) string {
@@ -123,5 +126,119 @@ func TestRunLandRejectsInvalidAndUnreachableSHA(t *testing.T) {
 	landingGit(t, entry.Path, "checkout", branch)
 	if err := s.RunLand(context.Background(), "r-guard", unreachable, "tester", "manual"); err == nil || !strings.Contains(err.Error(), "not reachable from the default branch") {
 		t.Errorf("unreachable SHA error = %v, want reachability reason", err)
+	}
+}
+
+func TestTaskLandRecordsExternalCommitAsAcceptedRun(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "task-external-landing")
+	entry, _ := s.registry.Get(projectID)
+	if err := os.MkdirAll(filepath.Join(entry.Path, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Work\n\n### T-255 — External work\n\nComplete it.\n"
+	if err := os.WriteFile(filepath.Join(entry.Path, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	landingGit(t, entry.Path, "init")
+	landingGit(t, entry.Path, "config", "user.name", "test")
+	landingGit(t, entry.Path, "config", "user.email", "test@test")
+	landingGit(t, entry.Path, "add", ".ducklab/docs/plan.md")
+	landingGit(t, entry.Path, "commit", "-m", "initial")
+	for _, prior := range []*runlog.Run{
+		{ID: "r-red-test", ProjectID: projectID, Stage: "test", Mode: "solo", TaskID: "T-255", Status: "done", Accepted: true, StartedAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)},
+		{ID: "r-failed-external", ProjectID: projectID, Stage: "build", Mode: "solo", TaskID: "T-255", Status: "failed", StartedAt: time.Now().UTC().Format(time.RFC3339)},
+	} {
+		w, err := runlog.NewWriter(entry.Path, prior)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = w.AppendEvent("run_start", map[string]interface{}{"stage": prior.Stage, "task_id": prior.TaskID})
+		_ = w.Close()
+	}
+	s.RecoverRuns(context.Background())
+	before, err := s.TaskList(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || before[0].Status != "blocked" || !containsString(before[0].Next, "land") {
+		t.Fatalf("task before external landing = %+v, want blocked with land door", before)
+	}
+
+	if err := os.WriteFile(filepath.Join(entry.Path, "landed.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	landingGit(t, entry.Path, "add", "landed.txt")
+	landingGit(t, entry.Path, "commit", "-m", "implement external work\n\nCompletes T-255")
+	sha := landingGit(t, entry.Path, "rev-parse", "HEAD")
+	run, err := s.TaskLand(context.Background(), projectID, "T-255", TaskLandRequest{
+		CommitSHA: sha, Reason: "implemented in a reviewed pull request", Actor: "codex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.Accepted || run.Stage != "build" || run.Mode != "external" || run.CommitSHA != sha {
+		t.Fatalf("external run = %+v", run)
+	}
+	if want := "completed by " + sha + ", declared by codex"; run.Resolution != want {
+		t.Errorf("resolution = %q, want %q", run.Resolution, want)
+	}
+	tasks, err := s.TaskList(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != "accepted" {
+		t.Fatalf("tasks after external landing = %+v, want accepted", tasks)
+	}
+	events, err := runlog.ReadEvents(s.RunDir(run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, event := range events {
+		if event.Type == "human" && event.Data["action"] == "task_landed" && event.Data["reason"] == "implemented in a reviewed pull request" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %+v, want task_landed provenance", events)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTaskLandRequiresExactTaskProvenanceOrExplicitConfirmation(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "task-external-confirm")
+	entry, _ := s.registry.Get(projectID)
+	if err := os.MkdirAll(filepath.Join(entry.Path, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Work\n\n### T-001 — External work\n\nComplete it.\n"
+	if err := os.WriteFile(filepath.Join(entry.Path, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	landingGit(t, entry.Path, "init")
+	landingGit(t, entry.Path, "config", "user.name", "test")
+	landingGit(t, entry.Path, "config", "user.email", "test@test")
+	landingGit(t, entry.Path, "add", ".ducklab/docs/plan.md")
+	landingGit(t, entry.Path, "commit", "-m", "initial")
+	landingGit(t, entry.Path, "commit", "--allow-empty", "-m", "Completes T-0010")
+	sha := landingGit(t, entry.Path, "rev-parse", "HEAD")
+
+	req := TaskLandRequest{CommitSHA: sha, Reason: "the PR predates the task trailer", Actor: "jose"}
+	if _, err := s.TaskLand(context.Background(), projectID, "T-001", req); err == nil || !strings.Contains(err.Error(), "confirm_task=true") {
+		t.Fatalf("near-match error = %v, want explicit confirmation instruction", err)
+	}
+	req.ConfirmTask = true
+	if _, err := s.TaskLand(context.Background(), projectID, "T-001", req); err != nil {
+		t.Fatalf("confirmed external landing: %v", err)
 	}
 }

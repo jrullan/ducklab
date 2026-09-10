@@ -1262,6 +1262,20 @@ func (s *Server) handleTaskRemove(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, out)
 }
 
+func (s *Server) handleTaskLand(w http.ResponseWriter, r *http.Request) {
+	var req service.TaskLandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.TaskLand(r.Context(), r.PathValue("id"), r.PathValue("task"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusCreated, run)
+}
+
 func (s *Server) handleArtifactDiscard(w http.ResponseWriter, r *http.Request) {
 	if err := s.svc.ArtifactDiscard(r.Context(), r.PathValue("id"), r.PathValue("kind")); err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())

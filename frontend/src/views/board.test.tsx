@@ -1105,6 +1105,24 @@ describe("the rail follows the contract's order", () => {
     const actions = screen.getByTestId("task-actions");
     expect(actions.firstElementChild!.querySelector("[data-testid=run-launcher]")).toBeTruthy();
   });
+
+  it("records a commit already landed through the task's explicit door", async () => {
+    const taskLand = vi.fn(() => Promise.resolve({ id: "r-external", accepted: true }));
+    const client = railClient({
+      tasks: vi.fn(() => Promise.resolve([
+        { id: "T-001", title: "A task", milestone: "M-01", status: "blocked", next: ["run", "land"] },
+      ])),
+      taskLand,
+    });
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByText("Work already landed…"));
+    fireEvent.change(screen.getByLabelText("landing commit"), { target: { value: "b87315f" } });
+    fireEvent.change(screen.getByLabelText("landing reason"), { target: { value: "merged in PR 42" } });
+    fireEvent.click(screen.getByText(/I explicitly confirm/));
+    fireEvent.click(screen.getByText("Record completion"));
+    await waitFor(() => expect(taskLand).toHaveBeenCalledWith("p", "T-001", "b87315f", "merged in PR 42", true));
+  });
 });
 
 // The person clicked the card to DO something: a promoted bug's body carries

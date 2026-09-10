@@ -180,7 +180,15 @@ func taskNextActions(status, gateMode string, removable, depsWaiting, testReady,
 			}
 		}
 		if removable {
+			// Work may have landed through a PR or a manual commit rather than a
+			// Ducklab run. That is a lawful completion path, but only while no
+			// dependency is still waiting; TaskLand enforces the same guard.
+			if !depsWaiting {
+				out = append(out, "land")
+			}
 			out = append(out, "remove")
+		} else if !depsWaiting {
+			out = append(out, "land")
 		}
 	case "accepted":
 		// A decision can be regretted: reviewing reads the commit, building

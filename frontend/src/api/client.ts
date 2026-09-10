@@ -452,7 +452,7 @@ export interface Task {
    * door is the build, the honest reviewer is eyes. One click overrules. */
   build_only?: boolean;
   /** The actions a person may legally start from this task, stated by the
-   * engine — run, test_first, review, remove. */
+   * engine — run, test_first, review, land, remove. */
   next?: string[];
 }
 
@@ -1535,6 +1535,16 @@ export class EngineClient {
       "DELETE",
       `/v1/projects/${projectId}/tasks/${taskId}`,
     );
+  }
+  /** Record work already merged outside a Ducklab run against the same
+   * accepted-run ledger used by Now, dependencies and release inventory. */
+  taskLand(projectId: string, taskId: string, commitSha: string, reason: string, confirmTask = false) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/land`, {
+      commit_sha: commitSha,
+      reason,
+      confirm_task: confirmTask,
+      actor: "human",
+    });
   }
   /** Move a bug. The engine refuses transitions the loop does not allow, so
    * the error it returns is the one worth showing. */

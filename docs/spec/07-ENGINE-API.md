@@ -124,6 +124,7 @@ plan | review | release | operate`.
 | GET | `/v1/projects/{id}/tasks` | `?status=&milestone=&after=&limit=` |
 | POST | `/v1/projects/{id}/tasks` | `{"title","body","implements","complexity","depends_on"}` |
 | GET/PATCH | `/v1/projects/{id}/tasks/{taskId}` | partial update |
+| POST | `/v1/projects/{id}/tasks/{taskId}/land` | `{"commit_sha","reason","confirm_task?","actor?"}` → synthetic accepted build run; commit must be reachable from default and name the task unless explicitly confirmed |
 | GET | `/v1/projects/{id}/tasks/next` | first `todo` with satisfied deps |
 | GET | `/v1/projects/{id}/bugs` | `?status=&severity=` |
 | POST | `/v1/projects/{id}/bugs` | `{"title","body","severity","reporter","source"}` |

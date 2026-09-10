@@ -152,13 +152,13 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 	}{
 		// TDD is the front door: with no committed test, the definition of
 		// done comes first, and the order IS the workflow clients render.
-		{"fresh under a tests gate", "todo", "tests", true, []string{"test_first", "run", "remove"}},
+		{"fresh under a tests gate", "todo", "tests", true, []string{"test_first", "run", "land", "remove"}},
 		// Test-first is only offered where a test changes something the gate
 		// can see.
-		{"fresh under a build gate", "todo", "build", true, []string{"run", "remove"}},
-		{"blocked but runnable", "blocked", "build", true, []string{"run", "remove"}},
+		{"fresh under a build gate", "todo", "build", true, []string{"run", "land", "remove"}},
+		{"blocked but runnable", "blocked", "build", true, []string{"run", "land", "remove"}},
 		// TaskRemove's own guard, reflected: a pinned task never offers remove.
-		{"pinned by an accepted run", "todo", "tests", false, []string{"test_first", "run"}},
+		{"pinned by an accepted run", "todo", "tests", false, []string{"test_first", "run", "land"}},
 		{"being worked on", "in_progress", "tests", true, nil},
 		{"awaiting a decision", "review", "tests", true, nil},
 		{"done", "accepted", "tests", false, []string{"review", "run"}},
@@ -174,17 +174,17 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 	// Once the failing test is committed, building it is the front door — and
 	// withdrawing the promise stands right beside it, because a state that
 	// can hold the project's queue owes the person both exits.
-	if got := taskNextActions("todo", "tests", true, false, true, false, false); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
+	if got := taskNextActions("todo", "tests", true, false, true, false, false); !slices.Equal(got, []string{"run", "retire_test", "test_first", "land", "remove"}) {
 		t.Errorf("test-ready next = %v, want run first then retire_test", got)
 	}
 	// A failed BUILD retries by building, not by writing another test.
-	if got := taskNextActions("blocked", "tests", true, false, false, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+	if got := taskNextActions("blocked", "tests", true, false, false, false, false); !slices.Equal(got, []string{"run", "test_first", "land", "remove"}) {
 		t.Errorf("retry next = %v, want run first", got)
 	}
 	// But a failed TEST retries the chain: the definition of done never
 	// landed, so TDD is still the front door — an aborted test-first left
 	// the person with no way to restart the test+build they had asked for.
-	if got := taskNextActions("blocked", "tests", true, false, false, true, false); !slices.Equal(got, []string{"test_first", "run", "remove"}) {
+	if got := taskNextActions("blocked", "tests", true, false, false, true, false); !slices.Equal(got, []string{"test_first", "run", "land", "remove"}) {
 		t.Errorf("failed-test retry next = %v, want test_first first", got)
 	}
 }
@@ -262,7 +262,7 @@ func TestAPausedDocumentStageOffersResume(t *testing.T) {
 // follows the first action like every client.
 func TestBuildOnlyFlipsTheFrontDoor(t *testing.T) {
 	got := taskNextActions("todo", "tests", true, false, false, false, true)
-	if !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+	if !slices.Equal(got, []string{"run", "test_first", "land", "remove"}) {
 		t.Errorf("build-only order = %v, want run first with test_first still offered", got)
 	}
 	// Without the recommendation the TDD chain keeps the front door.

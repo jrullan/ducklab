@@ -42,6 +42,12 @@ type fakeEngine struct {
 	lastTriageReq       map[string]interface{}
 	removedProject      string
 	removedTask         string
+	landedProject       string
+	landedTask          string
+	landedSHA           string
+	landedReason        string
+	landedConfirm       bool
+	landedActor         string
 	budgetLifted        string
 	resumeCount         int
 	projectStatus       map[string]interface{}
@@ -225,6 +231,11 @@ func (f *fakeEngine) TaskRemove(projectID, taskID string) (map[string]interface{
 	f.removedProject, f.removedTask = projectID, taskID
 	return map[string]interface{}{"removed": taskID}, nil
 }
+func (f *fakeEngine) TaskLand(projectID, taskID, sha, reason string, confirmTask bool, actor string) (map[string]interface{}, error) {
+	f.landedProject, f.landedTask, f.landedSHA = projectID, taskID, sha
+	f.landedReason, f.landedConfirm, f.landedActor = reason, confirmTask, actor
+	return map[string]interface{}{"id": "r-external", "accepted": true}, nil
+}
 func (f *fakeEngine) BugAdd(_ string, req map[string]string) (map[string]interface{}, error) {
 	f.filed = append(f.filed, req)
 	return map[string]interface{}{"id": fmt.Sprintf("B-%03d", len(f.filed))}, nil
@@ -305,6 +316,42 @@ func TestTaskRemoveIsAnOperatorTool(t *testing.T) {
 	if !found {
 		t.Error("task_remove missing from tool list")
 	}
+}
+
+func TestTaskLandIsAnAuditedOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resp := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claude"}}}`,
+		callFrame(2, "task_land", `{"project_id":"ducklab","task_id":"T-255","commit_sha":"b87315f","reason":"merged through PR","confirm_task":true}`),
+	)
+	if len(resp) != 2 {
+		t.Fatalf("responses = %d, want 2", len(resp))
+	}
+	if eng.landedProject != "ducklab" || eng.landedTask != "T-255" || eng.landedSHA != "b87315f" {
+		t.Fatalf("landing target = %s/%s@%s", eng.landedProject, eng.landedTask, eng.landedSHA)
+	}
+	if eng.landedReason != "merged through PR" || !eng.landedConfirm || eng.landedActor != "mcp:claude" {
+		t.Fatalf("landing provenance = reason %q confirm %v actor %q", eng.landedReason, eng.landedConfirm, eng.landedActor)
+	}
+	tools := drive(t, eng, `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`)
+	listed := tools[0]["result"].(map[string]interface{})["tools"].([]interface{})
+	for _, raw := range listed {
+		tool := raw.(map[string]interface{})
+		if tool["name"] != "task_land" {
+			continue
+		}
+		schema := tool["inputSchema"].(map[string]interface{})
+		rawRequired := schema["required"].([]interface{})
+		required := make([]string, 0, len(rawRequired))
+		for _, item := range rawRequired {
+			required = append(required, fmt.Sprint(item))
+		}
+		if strings.Join(required, ",") != "project_id,task_id,commit_sha,reason" {
+			t.Fatalf("task_land required = %v", required)
+		}
+		return
+	}
+	t.Fatal("task_land missing from tool list")
 }
 
 func TestInitializeAndToolListSpeakMCP(t *testing.T) {
