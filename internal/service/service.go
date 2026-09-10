@@ -2362,7 +2362,10 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 }
 
 // emitLaunchEscalation warns before this run's first model call when the same
-// task and stage have already failed twice, irrespective of which seat ran them.
+// task and stage have already failed at least twice, irrespective of which
+// seat ran them. The sentence carries the real count: it once said "twice"
+// with four prior failures in the data (B-361), and the sentence is what an
+// operator relays.
 func (s *Service) emitLaunchEscalation(rs *runState) {
 	if rs == nil || rs.writer == nil || rs.run.TaskID == "" {
 		return
@@ -2388,8 +2391,10 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 	data := map[string]interface{}{
 		"point": "launch", "thresholds_fired": []string{"repeated_task_stage_failure"},
 		"prior_failed_or_aborted_runs": failures, "current_wilson_floor": floor,
-		"diagnoses": map[string]interface{}{"task_brief_quality": "this task has failed here twice; improve the task body before reseating"},
-		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
+		"diagnoses": map[string]interface{}{"task_brief_quality": fmt.Sprintf(
+			"launch-time reminder from history, not evidence from this run: this task's %s stage has failed or been aborted here %d times; improve the task body before reseating",
+			rs.run.Stage, failures)},
+		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
 	// A stronger candidate is useful reseating evidence, but its absence must
 	// not silence the task-level warning: improving the brief remains actionable.
