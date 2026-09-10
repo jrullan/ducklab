@@ -192,12 +192,12 @@ env     = { }
 enabled = true
 ```
 
-Calls/reply resolve as global → phase → small-seat pair reserve → role → run.
+Calls/reply resolve as global → phase → role → small-seat pair reserve → run.
 The reserve applies only when the effective implementer actually seated in a
 pair run has `tier = "small"`; a per-run roster override therefore changes the
 support profile. It preserves wall-clock room for independent review but is not
-a script invariant. Raising it, overriding it, or lifting calls/reply to no cap
-is allowed and recorded with a warning that the reviewer slot may starve. Hard
+a script invariant. Raising it, overriding it for a run, or lifting calls/reply
+to no cap is allowed and recorded with a warning that the reviewer slot may starve. Hard
 script ceilings, such as the pair reviewer's eight calls, remain separate and
 cannot be raised by configuration or a live lift.
 

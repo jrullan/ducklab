@@ -363,7 +363,7 @@ describe("calls/reply precedence in Settings", () => {
     expect(screen.getByTestId("turn-ceilings").textContent).toContain("pair.reviewer 8");
     const reserve = screen.getByTestId("small-seat-pair-reserve") as HTMLInputElement;
     expect(reserve.value).toBe("24");
-    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → small-seat pair reserve → role → run");
+    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → role → small-seat pair reserve → run");
     expect(screen.getByTestId("config-settings").textContent).toContain("other roles keep their script design");
 
     fireEvent.change(build, { target: { value: "48" } });

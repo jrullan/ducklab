@@ -205,8 +205,8 @@ func TestCallsPerReplyPrecedenceIsGlobalPhaseRoleRun(t *testing.T) {
 }
 
 // The pair reserve is a contextual default for a small implementer, not a
-// hidden script ceiling. More-specific role and run choices must win, while
-// an untouched small-seat pair gets the configured reserve with provenance.
+// hidden script ceiling. The seat-and-mode-specific reserve must beat a
+// generic role choice, while explicit run choices remain authoritative.
 func TestSmallSeatPairReserveParticipatesInTurnCapPrecedence(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
@@ -238,8 +238,8 @@ func TestSmallSeatPairReserveParticipatesInTurnCapPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	role := s.resolveTurnCapsFor("build", 0, "pair", true)
-	if role.Caps[config.RoleImplementer] != 50 || role.Sources[config.RoleImplementer] != "implementer role default" {
-		t.Fatalf("role override did not cross reserve: %#v / %#v", role.Caps, role.Sources)
+	if role.Caps[config.RoleImplementer] != 30 || role.Sources[config.RoleImplementer] != "small-seat pair reserve (default)" {
+		t.Fatalf("generic role default crossed the contextual reserve: %#v / %#v", role.Caps, role.Sources)
 	}
 	run := s.resolveTurnCapsFor("build", 70, "pair", true)
 	if run.Caps[config.RoleImplementer] != 70 || run.Sources[config.RoleImplementer] != "run override" {
