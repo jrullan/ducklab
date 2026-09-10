@@ -3819,6 +3819,13 @@ func (rs *runState) snapshotRun() *runlog.Run {
 	rs.wmu.Lock()
 	defer rs.wmu.Unlock()
 	clone := *rs.run
+	clone.Roster = cloneStringMap(rs.run.Roster)
+	clone.RosterSources = cloneStringMap(rs.run.RosterSources)
+	clone.SeatTiers = cloneStringMap(rs.run.SeatTiers)
+	clone.SeatTierSources = cloneStringMap(rs.run.SeatTierSources)
+	clone.PendingData = cloneAnyMap(rs.run.PendingData)
+	clone.StageRequest = cloneAnyMap(rs.run.StageRequest)
+	clone.ChainBuild = cloneAnyMap(rs.run.ChainBuild)
 	if rs.run.Spend != nil {
 		clone.Spend = make(map[string]runlog.DucklingSpend, len(rs.run.Spend))
 		for k, v := range rs.run.Spend {
@@ -3834,6 +3841,45 @@ func (rs *runState) snapshotRun() *runlog.Run {
 		clone.Budget.WallclockS = snap.WallclockS
 	}
 	return &clone
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneAnyMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(in))
+	for key, value := range in {
+		out[key] = cloneAnyValue(value)
+	}
+	return out
+}
+
+func cloneAnyValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneAnyMap(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for i, item := range typed {
+			out[i] = cloneAnyValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
