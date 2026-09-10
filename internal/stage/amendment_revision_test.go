@@ -21,12 +21,20 @@ func TestRevisingAnAmendmentUsesOneEffectiveRequestForArchitectAndReviewer(t *te
 	}
 
 	fragment := "## T-060 — Build the flow\n\nDo it.\n\n## T-061 — Wire the flow\n\nDo it.\n\n## T-062 — Test the flow\n\nDo it.\n"
-	note := "add Depends on: T-060 to T-061 and T-062"
+	firstNote := "do not touch the existing task table"
+	secondNote := "add Depends on: T-060 to T-061 and T-062"
+	revisions := firstNote + "\n\n" + secondNote
 	var architectPrompt, reviewerPrompt string
+	var deltaDigest string
 	_, err = runExtend(context.Background(), Params{
 		ProjectRoot: root, Stage: Plan, RunID: "r-revision", Mode: "solo",
-		Extend: "add the small flow", Revision: note,
+		Extend: "add the small flow", Revision: revisions,
 		Drafts: func() []string { return []string{fragment} },
+		OnEvent: func(kind string, data map[string]interface{}) {
+			if kind == "composition_review_started" {
+				deltaDigest, _ = data["delta_digest"].(string)
+			}
+		},
 		Execute: func(_ context.Context, script *strategy.Script, got string) (string, error) {
 			if script.Name == "composition-review" {
 				reviewerPrompt = got
@@ -39,7 +47,7 @@ func TestRevisingAnAmendmentUsesOneEffectiveRequestForArchitectAndReviewer(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, must := range []string{note, "T-060 — Build the flow", "T-061 — Wire the flow", "T-062 — Test the flow"} {
+	for _, must := range []string{firstNote, secondNote, "T-060 — Build the flow", "T-061 — Wire the flow", "T-062 — Test the flow"} {
 		if !strings.Contains(architectPrompt, must) {
 			t.Errorf("revision prompt lost %q:\n%s", must, architectPrompt)
 		}
@@ -47,9 +55,13 @@ func TestRevisingAnAmendmentUsesOneEffectiveRequestForArchitectAndReviewer(t *te
 	// B-376: the architect received the revision above, but composition review
 	// used only the original Extend string. A finding against superseded scope
 	// could therefore never converge no matter how accurately it was revised.
-	for _, must := range []string{"add the small flow", note, "authoritative where it changes or narrows"} {
+	for _, must := range []string{"add the small flow", firstNote, secondNote, "Operator revisions, in order", "authoritative where it changes or narrows"} {
 		if !strings.Contains(reviewerPrompt, must) {
 			t.Errorf("composition reviewer lost effective amendment %q:\n%s", must, reviewerPrompt)
 		}
+	}
+	singleRevisionDigest := fullContentHash(effectiveExtendChange(Params{Extend: "add the small flow", Revision: secondNote}))
+	if deltaDigest == "" || deltaDigest == singleRevisionDigest {
+		t.Fatalf("composition delta digest did not preserve the earlier revision: got %q single-note %q", deltaDigest, singleRevisionDigest)
 	}
 }

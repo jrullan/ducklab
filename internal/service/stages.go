@@ -266,11 +266,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 			// request carried none, so the model revised blind (B-087).
 			// Reloaded fresh from the same paths, not copied: the person may
 			// have edited a document between draft and revision.
-			if len(req.Refs) == 0 && req.From == "" {
-				if prior, ok := loadStageRequest(filepath.Join(entry.Path, ".ducklab", "runs", prop.Front.RunID)); ok {
+			if prior, ok := loadStageRequest(filepath.Join(entry.Path, ".ducklab", "runs", prop.Front.RunID)); ok {
+				if len(req.Refs) == 0 && req.From == "" {
 					req.Refs = prior.Refs
 					req.From = prior.From
 				}
+				req.Revise = appendRevision(prior.Revise, req.Revise)
 			}
 		}
 	}
@@ -535,6 +536,21 @@ func loadStageRequest(runDir string) (StageRequest, bool) {
 		return req, false
 	}
 	return req, true
+}
+
+// appendRevision preserves every operator narrowing in the order it was
+// given. A request_changes run supersedes the prior run record, so replacing
+// its Revise field would make an earlier constraint disappear one round later.
+func appendRevision(prior, current string) string {
+	prior = strings.TrimSpace(prior)
+	current = strings.TrimSpace(current)
+	if prior == "" {
+		return current
+	}
+	if current == "" {
+		return prior
+	}
+	return prior + "\n\n" + current
 }
 
 func loadSectionedCheckpoint(runDir string) *stage.SectionedCheckpoint {
