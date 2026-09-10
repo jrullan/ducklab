@@ -721,6 +721,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// configured roster above produced a self-review warning even when an
 	// explicit K3 -> GLM line-up had already separated the seats (Fledge P4).
 	warning = bothSidesWarning(roster)
+	rs.wmu.Lock()
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, nil)
 	s.recordSeatTiers(rs.run, roster)
@@ -733,13 +734,16 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	profile, profileSource, smallSeat := s.stageSupportProfile(roster, req.SupportProfile)
 	rs.run.SupportProfile = profile
 	rs.run.SupportProfileSource = profileSource
+	if warning != "" {
+		rs.run.Warning = warning
+	}
+	rs.wmu.Unlock()
 	rs.writer.AppendEvent("support_profile_resolved", map[string]interface{}{
 		"profile": profile, "source": profileSource,
 		"detail": "capacity-sensitive harness treatment resolved independently from the run's model roster",
 	})
 	rs.writer.WriteState()
 	if warning != "" {
-		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
 

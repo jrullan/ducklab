@@ -949,6 +949,8 @@ func recordLimits(rs *runState, b *budget.Budget) {
 	if rs == nil || b == nil {
 		return
 	}
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
 	rs.run.Budget.Limit = runlog.BudgetLimits{
 		USD: b.MaxUSD, Tokens: b.MaxTokens, Turns: b.MaxTurns, WallclockS: b.MaxWallclockS,
 	}
