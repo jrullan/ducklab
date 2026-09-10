@@ -330,8 +330,8 @@ export interface Duckling {
   color?: number;
   caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number; vision?: boolean };
   cost?: { input_per_mtok: number; output_per_mtok: number };
-  /** The declared stand-in for provider weather — named by the person,
-   * never chosen by a router. */
+  /** The declared stand-in for provider weather, or `auto` to select from
+   * the Flock criteria at reseat time. */
   fallback?: string;
 }
 

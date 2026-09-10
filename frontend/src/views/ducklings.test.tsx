@@ -221,6 +221,24 @@ describe("Ducklings", () => {
     expect(screen.getByTestId("openrouter-endpoint-config").textContent).toContain("catalog unavailable");
   });
 
+  it("offers and saves a Flock-ranked automatic fallback", async () => {
+    const client = clientWith(
+      [duckling({ id: "stand-in" })],
+      [provider({ id: "local" })],
+    );
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "primary" } });
+    fireEvent.change(screen.getByTestId("duckling-model"), { target: { value: "model" } });
+    const fallback = screen.getByTestId("duckling-fallback") as HTMLSelectElement;
+    expect(Array.from(fallback.options).map((option) => option.value)).toContain("auto");
+    fireEvent.change(fallback, { target: { value: "auto" } });
+    fireEvent.click(screen.getByTestId("duckling-save"));
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalled());
+    const [, body] = (client.ducklingSet as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(body).toMatchObject({ fallback: "auto" });
+  });
+
   // The engine has accepted sampling params all along. The form sent no
   // `params` at all, so max_tokens and disable_thinking were reachable only by
   // hand-editing config.toml — which is not a thing a desktop-only user does.

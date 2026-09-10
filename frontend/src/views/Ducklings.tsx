@@ -620,9 +620,8 @@ function DucklingForm({
   // wherever it appears, which is the whole point: a colour that changes
   // between runs cannot be learned.
   const [color, setColor] = useState(existing?.color ?? 0);
-  // The declared stand-in for provider weather: when this duckling's
-  // provider is unreachable, the paused run offers a one-click reseat to
-  // this one. Named by the person, never chosen by a router.
+  // The declared stand-in for provider weather. "auto" is resolved from the
+  // current Flock criteria and evidence only when a reseat is needed.
   const [fallback, setFallback] = useState(existing?.fallback ?? "");
   const providerDefinition = providers.find((item) => item.id === provider);
   const openRouter = isOpenRouterProvider(providerDefinition);
@@ -856,10 +855,11 @@ function DucklingForm({
             data-testid="duckling-fallback"
             value={fallback}
             onChange={(e) => setFallback(e.target.value)}
-            title="when this duckling's provider is unreachable, a paused run offers a one-click reseat to this stand-in"
+            title="choose a fixed stand-in, or let the engine rank the fleet with the configured role criteria at reseat time"
             className="rounded border border-hairline bg-surface2 px-2 py-1"
           >
             <option value="">none</option>
+            <option value="auto">auto — use Flock criteria</option>
             {fleet
               .filter((d) => d.id !== (existing?.id ?? ""))
               .map((d) => (

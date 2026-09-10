@@ -1764,9 +1764,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </p>
             );
           })()}
-          {/* The declared-fallback door: provider weather, a stand-in named
-              in Settings, one click to swap the seats and go — recorded as
-              seat_failover, never a router's silent choice. */}
+          {/* The fallback door: provider weather, one click to swap the seats
+              and go. A fixed target is declared in Settings; auto delegates
+              to the person's Flock criteria. Both are recorded. */}
           {(() => {
             if (run.pending_kind !== "provider" && run.pending_kind !== "error") return null;
             if (!next.includes("resume")) return null;
@@ -1787,10 +1787,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                       }}
                       className="rounded border border-hairline px-2 py-1 text-sm"
                     >
-                      Reseat to {to} & resume
+                      {to === "auto" ? "Reseat automatically & resume" : `Reseat to ${to} & resume`}
                     </button>
                     <span className="text-xs text-ink-muted">
-                      {from} is unreachable; {to} is its declared fallback and inherits the work
+                      {from} is unreachable; {to === "auto"
+                        ? "Ducklab will select an eligible duckling using the current Flock criteria"
+                        : `${to} is its declared fallback and inherits the work`}
                     </span>
                   </div>
                 );

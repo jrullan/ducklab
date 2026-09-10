@@ -446,7 +446,7 @@ func routeTable() []Route {
 			Response: runlog.Run{}, Summary: "Resume a paused run", ClientMethod: "RunResume",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunResume }},
 		{Method: "POST", Path: "/v1/runs/{id}/reseat", Auth: true,
-			Response: runlog.Run{}, Summary: "Reseat a weather-paused run onto a fallback duckling and resume", ClientMethod: "RunReseat",
+			Response: runlog.Run{}, Summary: "Reseat a weather-paused run onto a fixed or Flock-ranked fallback and resume", ClientMethod: "RunReseat",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunReseat }},
 		{Method: "POST", Path: "/v1/runs/{id}/findings/file", Auth: true,
 			Response:     bugItems{},

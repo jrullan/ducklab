@@ -8014,7 +8014,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Reseat a weather-paused run onto a fallback duckling and resume"
+        "summary": "Reseat a weather-paused run onto a fixed or Flock-ranked fallback and resume"
       }
     },
     "/v1/runs/{id}/resume": {

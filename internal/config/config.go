@@ -319,9 +319,9 @@ type Duckling struct {
 	Cost   Cost           `toml:"cost" json:"cost"`
 	Index  *ExternalIndex `toml:"index,omitempty" json:"index,omitempty"`
 	// Fallback names the duckling that takes this one's seats when its
-	// provider is unreachable — declared here by the person, never chosen by
-	// a router. Availability only; quality-based switching is Switchyard's
-	// road and not ours.
+	// provider is unreachable. The reserved value "auto" resolves at failure
+	// time through the Flock candidate criteria. Availability only;
+	// quality-based switching is Switchyard's road and not ours.
 	Fallback string `toml:"fallback,omitempty" json:"fallback,omitempty"`
 	// Color is which of the eight series slots this duckling is drawn in.
 	// 0 means the fleet order decides. A slot number rather than a hex, so the

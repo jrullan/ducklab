@@ -58,7 +58,7 @@ type DucklingView struct {
 	Cost               config.Cost           `json:"cost"`
 	// Color is one of the eight series slots, or 0 for "decide from the fleet".
 	Color int `json:"color,omitempty"`
-	// Fallback is the declared stand-in for provider weather.
+	// Fallback is a declared stand-in, or "auto" for the Flock criteria.
 	Fallback string `json:"fallback,omitempty"`
 }
 

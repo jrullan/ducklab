@@ -1067,8 +1067,8 @@ func (c *Client) ProviderKeyEnvs() ([]string, error) {
 	return envs, nil
 }
 
-// RunReseat moves a weather-paused run's seats onto a fallback duckling and
-// resumes it.
+// RunReseat moves a weather-paused run's seats onto a fixed fallback or asks
+// the engine to rank the Flock when to is "auto", then resumes it.
 func (c *Client) RunReseat(runID, from, to string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/runs/"+runID+"/reseat", map[string]string{"from": from, "to": to}, &result)
