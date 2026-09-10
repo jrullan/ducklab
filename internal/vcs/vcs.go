@@ -1377,6 +1377,19 @@ func (g *Git) SetBranch(name, sha string) error {
 }
 
 // StagedPaths lists what the index holds beyond HEAD.
+// HasStagedChanges reports whether the index differs from HEAD. It is the
+// question an accept must ask before committing: "is there anything to
+// commit?", not "is the tree clean?" — a worktree may carry untracked build
+// products that never land (B-364) and still have nothing left to commit
+// because a prior accept already made the run commit (B-366).
+func (g *Git) HasStagedChanges() (bool, error) {
+	paths, err := g.StagedPaths()
+	if err != nil {
+		return false, err
+	}
+	return len(paths) > 0, nil
+}
+
 func (g *Git) StagedPaths() ([]string, error) {
 	out, err := g.run("diff", "--cached", "--name-only")
 	if err != nil {

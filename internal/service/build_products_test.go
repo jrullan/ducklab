@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -140,5 +141,76 @@ func TestBuildProductPathsFollowMarkersAndProjectConfig(t *testing.T) {
 	}
 	if got := presentExclusions(tree, landingExclusions(tree, projectRoot)); strings.Join(got, ",") != "target" {
 		t.Fatalf("present exclusions = %v, want target only", got)
+	}
+}
+
+// B-366: a prior accept had already committed the run in its worktree (then
+// lost the fast-forward race). The retry must reuse that commit. Since B-364
+// the untracked target/ stays in the worktree, so "is the tree clean?" is
+// the wrong question — it sent the retry into `git commit` on an empty
+// index: "nothing added to commit but untracked files present (target/)".
+func TestAcceptWorktreeRetryReusesTheRunCommitDespiteUntrackedBuildProducts(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-retry-build-products")
+	workGit := vcs.New(run.WorktreePath)
+	for name, body := range map[string]string{
+		"Cargo.toml":       "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+		"src/lib.rs":       "pub fn x() {}\n",
+		"target/debug/x.d": "x\n",
+	} {
+		path := filepath.Join(run.WorktreePath, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// What a prior accept leaves behind when the fast-forward is refused:
+	// the run commit, with its trailer, at the worktree HEAD; target/ still
+	// untracked because the landing excluded it.
+	if err := workGit.Add("Cargo.toml", "src/lib.rs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workGit.CommitWithTrailer("ducklab: T-001", map[string]string{"Ducklab-Run": run.ID, "Duckling": "implementer"}); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := workGit.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// And main moved meanwhile, as it did under T-015.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("README.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("main moved"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("retry accept: %v", err)
+	}
+	diff, err := git.ShowCommit(result.CommitSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "src/lib.rs") || strings.Contains(diff, "target/") {
+		t.Fatalf("landed commit is not the run's work without build products:\n%s", diff)
+	}
+	if result.CommitSHA == prior {
+		t.Fatalf("the landed commit was not rebased onto the moved main")
+	}
+	out, err := exec.Command("git", "-C", dir, "log", "--format=%s", "-3").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(out), "ducklab: T-001") != 1 {
+		t.Fatalf("the run was committed more than once or not at all:\n%s", out)
 	}
 }

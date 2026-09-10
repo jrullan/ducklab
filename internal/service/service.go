@@ -2795,7 +2795,10 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// commit", the raw error reached the user, and a run whose gate was green
 	// and whose reviewer approved was marked FAILED. The person did nothing
 	// wrong and the run did nothing wrong.
-	if clean, cerr := git.IsClean(); cerr == nil && clean {
+	// "Already committed" is decided by the index, not by the working tree:
+	// untracked build products never land and must not turn a no-op accept
+	// into a doomed `git commit` (B-364, B-366).
+	if staged, cerr := git.HasStagedChanges(); cerr == nil && !staged {
 		head, _ := git.HeadSHA()
 		// Announced: this is the slow tail of every accept — a full suite
 		// from a fresh checkout — and after the round gate's green it read
@@ -2953,17 +2956,23 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return fmt.Errorf("stage worktree: %w", err)
 	}
 	recordLandingExclusions(rs, present)
-	if clean, err := workGit.IsClean(); err != nil {
+	// Commit only what is staged. The question is not "is the tree clean?"
+	// — untracked build products stay in the worktree by design (B-364) —
+	// but "is there anything to commit?". T-015's retry after a refused
+	// fast-forward asked the first question, saw target/, and ran git commit
+	// on an empty index: "nothing added to commit" (B-366).
+	if staged, err := workGit.HasStagedChanges(); err != nil {
 		return err
-	} else if !clean {
+	} else if staged {
 		if _, err := workGit.CommitWithTrailer(message, map[string]string{"Ducklab-Run": rs.run.ID, "Duckling": "implementer"}); err != nil {
 			return fmt.Errorf("commit worktree: %w", err)
 		}
 	} else if committed, err := workGit.HeadHasTrailer("Ducklab-Run", rs.run.ID); err != nil {
 		return fmt.Errorf("inspect worktree HEAD for run commit: %w", err)
 	} else if committed {
-		// A prior accept may have committed this run before its rebase failed.
-		// Its clean, tagged HEAD is already the candidate; do not commit it again.
+		// A prior accept may have committed this run before its rebase or
+		// fast-forward failed. Its tagged HEAD is already the candidate; do
+		// not commit it again.
 	}
 
 	// Capture this run's diff before rebasing can introduce unrelated upstream
