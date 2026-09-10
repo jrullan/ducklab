@@ -41,7 +41,7 @@ func runNext(r *runlog.Run) []string {
 			// The conversation waits for the person's next message — or its
 			// proper ending, which is "we are done here", not an abort.
 			return []string{"reply", "end", "abort"}
-		case "budget", "provider", "error":
+		case "budget", "provider", "error", "history_duration":
 			// Stopped by its own ceiling, a provider that went away, or any
 			// error at all — work intact either way, because no error may
 			// discard work automatically. Fix what needs fixing and resume;
