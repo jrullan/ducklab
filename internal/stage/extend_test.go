@@ -99,6 +99,9 @@ func TestMergePlacesTasksAndAssignsRealIDs(t *testing.T) {
 	if strings.Contains(first.Body, "Milestone:") {
 		t.Error("the placement field survived into the task body")
 	}
+	if first.Field("milestone") != "" {
+		t.Error("the placement field survived in parsed task fields")
+	}
 	if !strings.Contains(first.Body, "**Implements:** SPEC-004") {
 		t.Error("the wiring line was lost from the body")
 	}
@@ -193,10 +196,50 @@ func TestExtendAddsANewTaskAndAppendsItsRealIDToAnExistingDependency(t *testing.
 	if current.Section("T-002").Field("depends on") != "T-001" {
 		t.Fatal("dependency amendment mutated the approved plan")
 	}
+	body := artifact.RenderBody(res.Proposed)
+	if prerequisite, consumerAt := strings.Index(body, "### T-003 — New prerequisite"), strings.Index(body, "### T-002 — Existing consumer"); prerequisite < 0 || consumerAt < 0 || prerequisite > consumerAt {
+		t.Fatalf("new prerequisite was not placed before its existing consumer:\n%s", body)
+	}
+	for _, finding := range res.CompositionMechanical {
+		if strings.Contains(finding, string(artifact.ForwardDependency)) {
+			t.Fatalf("legal dependency-only amendment still trips forward_dependency: %v", res.CompositionMechanical)
+		}
+	}
 	for _, want := range []string{"T-002 Depends on only", "No other existing task"} {
 		if !strings.Contains(reviewPrompt, want) {
 			t.Errorf("composition scope lost %q:\n%s", want, reviewPrompt)
 		}
+	}
+}
+
+func TestDependencyPlacementMovesANewClosureBeforeTheEarliestConsumer(t *testing.T) {
+	plan := &artifact.Document{Sections: []artifact.Section{
+		{ID: "M-001", Title: "Core", Children: []artifact.Section{
+			{ID: "T-001", Title: "Early consumer"},
+		}},
+		{ID: "M-002", Title: "Later", Children: []artifact.Section{
+			{ID: "T-002", Title: "Later consumer"},
+			{ID: "T-003", Title: "Foundation"},
+			{ID: "T-004", Title: "Direct prerequisite", Fields: map[string]string{"depends on": "T-003"}},
+		}},
+	}}
+	err := placeNewPrerequisitesBeforeConsumers(plan,
+		map[string]bool{"T-003": true, "T-004": true},
+		map[string][]string{"T-002": {"T-004"}, "T-001": {"T-004"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			order = append(order, task.ID)
+		}
+	}
+	if got := strings.Join(order, ","); got != "T-003,T-004,T-001,T-002" {
+		t.Fatalf("task order = %s, want dependency closure before earliest consumer", got)
+	}
+	if len(plan.Sections[0].Children) != 3 || len(plan.Sections[1].Children) != 1 {
+		t.Fatalf("new dependency closure was not moved into the consumer milestone: %+v", plan.Sections)
 	}
 }
 

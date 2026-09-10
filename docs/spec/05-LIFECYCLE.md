@@ -377,7 +377,11 @@ A light plan extension normally emits only new task fragments; Ducklab assigns
 their real sequential IDs and preserves every existing task by code. Two
 bounded amendment deltas are also legal. A dependency-only stub may add new
 IDs to an existing task's `Depends on` set, but may contain no other field or
-prose. An exact `##` heading listed as a named plan section may replace that
+prose. Because stable new IDs are necessarily higher than existing IDs, the
+engine places each new prerequisite and its new-task dependency closure before
+the earliest amended consumer, moving it into that consumer's milestone when
+necessary; it does not relax the ordinary forward-dependency invariant. An
+exact `##` heading listed as a named plan section may replace that
 section's complete body. Unknown or ambiguous headings are refused, and `###`
 is reserved for task IDs. The final composition review receives the exact set
 of existing tasks and named sections the engine allowed to change.
