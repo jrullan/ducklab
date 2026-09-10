@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -46,5 +47,32 @@ func TestWallclockBudgetCancelsAnInflightProviderCall(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 300*time.Millisecond {
 		t.Fatalf("provider survived past the remaining deadline: %s", elapsed)
+	}
+}
+
+// OpenAI-compatible transports can retain only ErrProviderUnavailable when an
+// HTTP call is cancelled. The elapsed run clock still proves which boundary
+// fired, so provider weather must not hide a wallclock pause.
+func TestWallclockExhaustionOutranksProviderWeatherClassification(t *testing.T) {
+	tracker := budget.NewTracker(&budget.Budget{MaxWallclockS: 1})
+	tracker.Spend.RestoreWallclock(1.1)
+
+	err := providerCallError(tracker, fmt.Errorf("%w: Post /chat: context deadline exceeded", provider.ErrProviderUnavailable))
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("error = %v, want ErrBudgetExceeded", err)
+	}
+	if errors.Is(err, provider.ErrProviderUnavailable) {
+		t.Fatalf("wallclock exhaustion retained provider-weather identity: %v", err)
+	}
+}
+
+func TestProviderWeatherBelowWallclockCapKeepsItsIdentity(t *testing.T) {
+	tracker := budget.NewTracker(&budget.Budget{MaxWallclockS: 60})
+	err := providerCallError(tracker, provider.ErrProviderUnavailable)
+	if !errors.Is(err, provider.ErrProviderUnavailable) {
+		t.Fatalf("error = %v, want provider weather", err)
+	}
+	if errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("healthy wallclock was mislabeled as budget: %v", err)
 	}
 }

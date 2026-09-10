@@ -431,12 +431,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				})
 			}
 			if err != nil {
-				callErr := fmt.Errorf("provider chat: %w", err)
-				if errors.Is(err, context.DeadlineExceeded) && loop.Budget != nil {
-					if msg, exceeded := loop.Budget.Check(); exceeded {
-						callErr = fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
-					}
-				}
+				callErr := providerCallError(loop.Budget, err)
 				// The call that failed, on the record. Only successful calls
 				// were written, so a run that died on its third attempt left
 				// two entries and no trace of the one that killed it — and
@@ -872,6 +867,29 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	outcome.Parsed = parsed
 
 	return outcome, nil
+}
+
+func providerCallError(tracker *budget.Tracker, err error) error {
+	callErr := fmt.Errorf("provider chat: %w", err)
+	if tracker == nil {
+		return callErr
+	}
+	// OpenAI-compatible transports intentionally classify HTTP/read failures as
+	// provider weather, and some preserve the underlying deadline only as text.
+	// The run clock is the authority: if its deadline elapsed while that call
+	// was in flight, surface the user's budget boundary rather than offering a
+	// misleading provider reseat (B-357).
+	if msg, exceeded := tracker.CheckWallclock(); exceeded {
+		return fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+	}
+	// Keep the broader check for adapters that do preserve DeadlineExceeded.
+	// It also retains the old behavior for a deadline that races another cap.
+	if errors.Is(err, context.DeadlineExceeded) {
+		if msg, exceeded := tracker.Check(); exceeded {
+			return fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+	}
+	return callErr
 }
 
 // chatForcedConclusion accounts for and records the tool-free call made after
