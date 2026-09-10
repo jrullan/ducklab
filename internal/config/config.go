@@ -383,6 +383,16 @@ type Verify struct {
 	TestGlobs []string `toml:"test_globs" json:"test_globs"`
 }
 
+// cleanRelativePath accepts only a non-empty, already-clean, relative path
+// that names something inside the tree: not ".", not "..", not escaping
+// through "..", not absolute.
+func cleanRelativePath(p string) bool {
+	if p == "" || p == "." || p == ".." || filepath.IsAbs(p) || filepath.Clean(p) != p {
+		return false
+	}
+	return !strings.HasPrefix(p, ".."+string(filepath.Separator))
+}
+
 // Capabilities controls composable, stack-specific harness adapters. Auto
 // enables deterministic detection; explicit lists override it without making
 // the core know what a language, framework, or build system is.
@@ -849,9 +859,18 @@ func (p *Project) Validate(path string) error {
 	if p.References.PerFileChars < 0 || p.References.TotalChars < 0 || p.References.MaxFiles < 0 {
 		return &Error{File: path, Key: "references", Msg: "caps must be zero (default) or positive"}
 	}
+	// Both lists feed `git rm -r --cached` and the review diff's pathspec
+	// verbatim; "." would empty the landing index and hide the whole diff,
+	// and an escaping path would reach outside the tree. One validator so the
+	// two exclusion lists cannot drift (B-364 review).
 	for _, dep := range p.Verify.LinkDeps {
-		if dep == "" || filepath.IsAbs(dep) || filepath.Clean(dep) != dep || dep == "." || strings.HasPrefix(dep, ".."+string(filepath.Separator)) || dep == ".." {
+		if !cleanRelativePath(dep) {
 			return &Error{File: path, Key: "verify.link_deps", Msg: fmt.Sprintf("must contain clean relative paths, got %q", dep)}
+		}
+	}
+	for _, product := range p.Verify.BuildProducts {
+		if !cleanRelativePath(product) {
+			return &Error{File: path, Key: "verify.build_products", Msg: fmt.Sprintf("must contain clean relative paths inside the project, got %q", product)}
 		}
 	}
 	for key, policy := range p.Capabilities.Policy {

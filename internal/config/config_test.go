@@ -582,3 +582,43 @@ func TestProjectRejectsUnknownCapabilityPolicyLevel(t *testing.T) {
 		t.Fatal("invalid capability policy was accepted")
 	}
 }
+
+// B-364 review: verify.build_products feeds `git rm -r --cached` and the
+// review diff's pathspec verbatim, exactly like verify.link_deps. "." would
+// empty the landing index; an escaping path reaches outside the tree. One
+// validator covers both lists so they cannot drift.
+func TestVerifyExclusionListsRequireCleanRelativePaths(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		ok    bool
+	}{
+		{"nested", "generated/cache", true},
+		{"single", "target", true},
+		{"dot", ".", false},
+		{"dotdot", "..", false},
+		{"escaping", "../outside", false},
+		{"absolute", "/tmp/build", false},
+		{"unclean", "build/../target", false},
+		{"empty", "", false},
+	} {
+		for _, key := range []string{"build_products", "link_deps"} {
+			p := DefaultProject("fixture", "Fixture")
+			if key == "build_products" {
+				p.Verify.BuildProducts = []string{tc.value}
+			} else {
+				p.Verify.LinkDeps = []string{tc.value}
+			}
+			err := p.Validate("project.toml")
+			if tc.ok && err != nil {
+				t.Errorf("%s %s: valid path %q refused: %v", key, tc.name, tc.value, err)
+			}
+			if !tc.ok && err == nil {
+				t.Errorf("%s %s: %q was accepted", key, tc.name, tc.value)
+			}
+			if !tc.ok && err != nil && !strings.Contains(err.Error(), "verify."+key) {
+				t.Errorf("%s %s: error not keyed to verify.%s: %v", key, tc.name, key, err)
+			}
+		}
+	}
+}
