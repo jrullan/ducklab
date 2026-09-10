@@ -85,6 +85,14 @@ func artifactContractFindings(kind artifact.Kind, proposed *artifact.Document) [
 	if proposed == nil {
 		return nil
 	}
+	// Legacy plans remain operable while projects migrate to grammar 2. Their
+	// historical task vocabulary is not a contract violation in an amendment:
+	// applying the current whole-document lint here would make one new task
+	// responsible for rewriting every older task before semantic review could
+	// run. Grammar-2 plans have explicitly opted into the strict contract.
+	if kind == artifact.KindPlan && proposed.Front.Grammar < artifact.CurrentGrammar {
+		return nil
+	}
 	diagnostics, err := artifact.ContractLint(artifact.Render(proposed), kind)
 	if err != nil {
 		return []string{"artifact contract could not parse the composed candidate: " + err.Error()}

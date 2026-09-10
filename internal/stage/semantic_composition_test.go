@@ -255,6 +255,49 @@ func TestCompositionReviewRunsArtifactContractBeforeSemanticReviewer(t *testing.
 	}
 }
 
+// B-373: enforcing grammar 2 over the whole composed candidate must not make
+// an amendment migrate every historical task before it can be reviewed.
+func TestCompositionReviewAllowsLegacyPlanFieldsToReachSemanticReviewer(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n\n## SPEC-002 — Test\n\nContract.\n")
+	legacy := "---\nkind: plan\nversion: 1\n---\n\n" +
+		"## M-01 — Core\n\n### T-001 — Build\n\n" +
+		"**Implements:** SPEC-001\n**Component:** engine\n**Work unit:** build the app\n"
+	base, err := artifact.Parse(legacy, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addition := "\n### T-002 — Test\n\n" +
+		"**Implements:** SPEC-002\n**Work unit:** test the app\n" +
+		"**Acceptance slices:**\n- the app is tested\n" +
+		"**Acceptance probes:**\n1. `go test ./...`\n" +
+		"**Produces:** file:src/main_test.go\n**Consumes:** file:src/main.go\n" +
+		"**Verification:** `go test ./...`\n**Exercises:** file:src/main_test.go\n"
+	proposed, err := artifact.Parse(legacy+addition, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	mechanical, semantic, err := reviewComposition(context.Background(), Params{
+		ProjectRoot: root,
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			calls++
+			return `{"verdict":"approve","findings":[]}`, nil
+		},
+	}, artifact.KindPlan, "add one valid task", base, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || semantic == nil || semantic.Verdict != "approve" {
+		t.Fatalf("legacy amendment did not reach semantic reviewer: calls=%d verdict=%+v", calls, semantic)
+	}
+	for _, finding := range mechanical {
+		if strings.Contains(finding, "unknown field") || strings.Contains(finding, "legacy_grammar") {
+			t.Fatalf("legacy vocabulary became a mechanical blocker: %v", mechanical)
+		}
+	}
+}
+
 func TestReferenceContractCheckerStillRejectsAnInvalidUnmaterializedBlock(t *testing.T) {
 	contract := capability.ReferenceContract{
 		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",
