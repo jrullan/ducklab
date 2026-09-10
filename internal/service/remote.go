@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,12 +32,34 @@ type RemoteRequest struct {
 type RemoteResult struct {
 	Action     string `json:"action"`
 	Actor      string `json:"actor"`
+	Remote     string `json:"remote,omitempty"`
 	Branch     string `json:"branch"`
 	Status     string `json:"status"`
+	Detail     string `json:"detail,omitempty"`
 	Prompt     string `json:"prompt,omitempty"`
 	CompareURL string `json:"compare_url,omitempty"`
 	PRURL      string `json:"pr_url,omitempty"`
 	Body       string `json:"body,omitempty"`
+}
+
+// missingRemoteError is different from a failed remote operation: there was
+// nowhere to attempt one. Automatic publication treats it as a local-only
+// outcome, while explicit Push/Pull/PR requests still return the precise
+// configuration error to their caller.
+type missingRemoteError struct{ name string }
+
+func (e *missingRemoteError) Error() string {
+	if e.name == "" {
+		return "remote action refused: no [remote] is configured"
+	}
+	return fmt.Sprintf("remote action refused: no remote '%s' in this repository", e.name)
+}
+
+func localOnlyDetail(name string) string {
+	if name == "" {
+		return "committed locally; no remote configured"
+	}
+	return fmt.Sprintf("committed locally; no remote '%s' in this repository", name)
 }
 
 type remoteReceipt struct {
@@ -82,10 +105,10 @@ func remoteAllowed(req RemoteRequest) error {
 func configuredRemote(p *projectState) (string, error) {
 	name := strings.TrimSpace(p.cfg.Remote.Name)
 	if name == "" {
-		return "", fmt.Errorf("remote action refused: no [remote] is configured")
+		return "", &missingRemoteError{}
 	}
 	if _, err := p.git.RemoteURL(name); err != nil {
-		return "", fmt.Errorf("remote action refused: remote %q is unavailable", name)
+		return "", &missingRemoteError{name: name}
 	}
 	return name, nil
 }
@@ -129,6 +152,12 @@ func (s *Service) publishAcceptPush(ctx context.Context, rs *runState) {
 	branch := s.baseBranchForPush(p)
 	out, pushErr := s.Push(ctx, rs.run.ProjectID, RemoteRequest{Actor: rs.run.Resolution, Branch: branch})
 	if pushErr != nil {
+		var missing *missingRemoteError
+		if errors.As(pushErr, &missing) {
+			s.recordLocalOnly(rs, p, "push", branch, missing.name)
+			s.persistPublishResult(rs)
+			return
+		}
 		s.recordPublishFailure(rs, "push", branch, pushErr)
 		s.persistPublishResult(rs)
 		return
@@ -168,6 +197,12 @@ func (s *Service) publishAcceptPR(ctx context.Context, rs *runState) {
 	}
 	out, prErr := s.PR(ctx, rs.run.ProjectID, RemoteRequest{Actor: rs.run.Resolution, Branch: branch, Title: acceptCommitSubject(rs.run)})
 	if prErr != nil {
+		var missing *missingRemoteError
+		if errors.As(prErr, &missing) {
+			s.recordLocalOnly(rs, p, "pr", branch, missing.name)
+			s.persistPublishResult(rs)
+			return
+		}
 		s.recordPublishFailure(rs, "pr", branch, prErr)
 		s.persistPublishResult(rs)
 		return
@@ -176,6 +211,18 @@ func (s *Service) publishAcceptPR(ctx context.Context, rs *runState) {
 		s.recordPublishReceipt(rs, *out)
 	}
 	s.persistPublishResult(rs)
+}
+
+// recordLocalOnly records that an on_accept policy had no configured git
+// destination. This is information, not a failed attempt: no warning and no
+// failed push receipt means next() cannot offer a retry that can never work.
+func (s *Service) recordLocalOnly(rs *runState, p *projectState, action, branch, remote string) {
+	out := RemoteResult{
+		Action: action, Actor: rs.run.Resolution, Remote: remote, Branch: branch,
+		Status: "local_only", Detail: localOnlyDetail(remote),
+	}
+	s.recordPublishReceipt(rs, out)
+	s.writeRemoteReceipt(p, out)
 }
 
 // recordPublishReceipt stores a successful publication receipt onto the run so
@@ -197,6 +244,18 @@ func (s *Service) recordPublishFailure(rs *runState, action, branch string, err 
 		"action": action, "branch": branch, "status": "failed", "error": err.Error(),
 	}
 	rs.run.RemoteReceipts = append(rs.run.RemoteReceipts, receipt)
+}
+
+func publicationInfo(r *runlog.Run) string {
+	for i := len(r.RemoteReceipts) - 1; i >= 0; i-- {
+		receipt := r.RemoteReceipts[i]
+		if receipt["status"] == "local_only" {
+			if detail, ok := receipt["detail"].(string); ok {
+				return detail
+			}
+		}
+	}
+	return ""
 }
 
 // persistPublishResult makes a publication's receipt or failure warning durable
@@ -255,6 +314,10 @@ func (s *Service) publishReleaseTag(ctx context.Context, projectID, projectPath,
 	// branch push fails the tag stays local and the failure is worded.
 	branch := s.baseBranchForPush(p)
 	if _, err := s.Push(ctx, projectID, RemoteRequest{Actor: actor, Branch: branch}); err != nil {
+		var missing *missingRemoteError
+		if errors.As(err, &missing) {
+			return nil
+		}
 		return fmt.Errorf("release %s cut; %s push failed, tag kept local: %w", tag, branch, err)
 	}
 	receipt := RemoteResult{Action: "push", Actor: actor, Branch: tag, Status: "pushed"}
@@ -356,11 +419,37 @@ func (s *Service) Push(ctx context.Context, projectID string, req RemoteRequest)
 		return nil, fmt.Errorf("branch %q does not exist", branch)
 	}
 	if err := p.git.Push(remote, branch); err != nil {
-		return nil, err
+		return nil, classifyPushError(remote, err)
 	}
 	out := &RemoteResult{Action: "push", Actor: req.Actor, Branch: branch, Status: "pushed"}
 	s.writeRemoteReceipt(p, *out)
 	return out, nil
+}
+
+// classifyPushError turns git's backend-specific prose into the few recovery
+// classes an operator can act on. The original error stays attached for the
+// audit trail, but the first sentence no longer calls every failure
+// "unavailable".
+func classifyPushError(remote string, err error) error {
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "non-fast-forward") ||
+		strings.Contains(message, "fetch first") ||
+		(strings.Contains(message, "[rejected]") && strings.Contains(message, "failed to push")) {
+		return fmt.Errorf("remote %q has new commits; pull/rebase before retrying: %w", remote, err)
+	}
+	if strings.Contains(message, "authentication failed") ||
+		strings.Contains(message, "permission denied") ||
+		strings.Contains(message, "could not read username") ||
+		strings.Contains(message, "could not resolve host") ||
+		strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "connection timed out") ||
+		strings.Contains(message, "network is unreachable") ||
+		strings.Contains(message, "unable to access") ||
+		strings.Contains(message, "does not appear to be a git repository") ||
+		strings.Contains(message, "repository not found") {
+		return fmt.Errorf("remote %q is unreachable; check its URL, network, and authentication: %w", remote, err)
+	}
+	return fmt.Errorf("push to remote %q failed: %w", remote, err)
 }
 
 func (s *Service) PR(ctx context.Context, projectID string, req RemoteRequest) (*RemoteResult, error) {

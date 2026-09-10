@@ -65,6 +65,14 @@ an accepted intention that changed no requirement.
 
 Steps 5–8 are **never** delegated to a model.
 
+When `[remote].on_accept` resolves to `push` or `pr`, publication follows the
+local commit and never controls its acceptance. A configured remote name that
+does not exist in the repository produces an informational `local_only`
+receipt; it is not a failed remote attempt and offers no retry. A real push
+failure remains retryable and names whether the remote diverged (pull/rebase)
+or could not be reached/authenticated. Config Doctor reports a missing named
+remote before a run starts.
+
 ---
 
 ## 2. Autonomy levels

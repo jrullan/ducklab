@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -150,5 +151,42 @@ reviewer = ["pata"]
 	}
 	if len(findings) != 0 {
 		t.Fatalf("Doctor clean findings = %#v, want none", findings)
+	}
+}
+
+func TestDoctorReportsConfiguredRemoteMissingFromRepository(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	writeDoctorProject(t, root, `schema = 1
+id = "local-only"
+name = "Local only"
+autonomy = "guarded"
+
+[verify]
+mode = "none"
+
+[budget]
+max_usd = 5
+
+[shell]
+allow_prefixes = []
+
+[remote]
+name = "origin"
+on_accept = "push"
+`)
+
+	findings, err := Doctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Finding{{
+		Key: "remote.on_accept", Proposed: "nothing",
+		Reason: "no remote 'origin' in this repository — accepts commit locally only",
+	}}
+	if !reflect.DeepEqual(findings, want) {
+		t.Fatalf("Doctor findings = %#v, want %#v", findings, want)
 	}
 }

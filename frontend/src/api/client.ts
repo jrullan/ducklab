@@ -14,8 +14,10 @@ export type OnAcceptPolicy = "nothing" | "push" | "pr";
 export interface RemoteReceipt {
   action: string;
   actor?: string;
+  remote?: string;
   branch?: string;
   status: string;
+  detail?: string;
   prompt?: string;
   compare_url?: string;
   pr_url?: string;
@@ -60,6 +62,8 @@ export interface AcceptResult {
   commit_sha: string;
   /** Publication failure does not revoke this committed acceptance. */
   warning?: string;
+  /** Non-warning publication consequence, such as a repository with no remote. */
+  info?: string;
 }
 
 export interface Project {

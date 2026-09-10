@@ -203,10 +203,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [actionError, setActionError] = useState<string | null>(null);
   const [publication, setPublication] = useState<{ policy: "nothing" | "push" | "pr"; remote: string; base: string }>({ policy: "push", remote: "origin", base: "main" });
   const [publicationFailure, setPublicationFailure] = useState<{ sha: string; error: string } | null>(null);
+  const [publicationInfo, setPublicationInfo] = useState<string | null>(null);
   const [landingSHA, setLandingSHA] = useState("");
   const [landingNote, setLandingNote] = useState("");
   const [landingOffer, setLandingOffer] = useState<LandingOffer | null>(null);
   const [landingManualOpen, setLandingManualOpen] = useState(false);
+  const persistedPublicationInfo = [...(run?.remote_receipts ?? [])]
+    .reverse()
+    .find((receipt) => receipt.status === "local_only")?.detail;
+  const effectivePublicationInfo = publicationInfo ?? persistedPublicationInfo;
 
   // Fetch the run's history on open.
   //
@@ -948,6 +953,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       // had failed even though the engine recorded no remote action.
       const pushFailure = /push failed:\s*(.+)$/i.exec(res.warning ?? "");
       setPublicationFailure(pushFailure ? { sha: res.commit_sha, error: pushFailure[1]! } : null);
+      setPublicationInfo(res.info ?? null);
     } catch (e) {
       // Never show a commit the engine did not confirm (AC-34).
       store.failAccept(runId, e instanceof Error ? e.message : String(e));
@@ -1842,10 +1848,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           accept failed: {acceptState.message}
         </p>
       )}
-      {acceptState.kind === "committed" && !publicationFailure && (
+      {acceptState.kind === "committed" && !publicationFailure && !effectivePublicationInfo && (
         <p className="m-2 text-good" data-testid="accept-committed">
           committed {acceptState.sha.slice(0, 8)}
         </p>
+      )}
+      {effectivePublicationInfo && !publicationFailure && (
+        <p className="m-2 text-ink-secondary" data-testid="publication-local-only">{effectivePublicationInfo}</p>
       )}
       {publicationFailure && (
         <section className="m-2 rounded-card border border-warning p-3" data-testid="publication-failure">

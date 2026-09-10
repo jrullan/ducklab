@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -18,6 +19,14 @@ type Finding struct {
 // Doctor inspects projectPath's configuration and repository without changing either.
 // Findings are appended in rule and key order; it never ranges over a map.
 func Doctor(projectPath string) ([]Finding, error) {
+	return DoctorWithOnAccept(projectPath, "")
+}
+
+// DoctorWithOnAccept also considers the global publication default. Doctor
+// remains useful to config-only callers, where an absent global default means
+// the documented "nothing" policy; the service passes its actual global value
+// so an inherited push to a nonexistent remote is caught before acceptance.
+func DoctorWithOnAccept(projectPath, globalOnAccept string) ([]Finding, error) {
 	configPath := filepath.Join(projectPath, ".ducklab", "project.toml")
 	p, err := LoadProject(configPath)
 	if err != nil {
@@ -41,6 +50,9 @@ func Doctor(projectPath string) ([]Finding, error) {
 	remote := gitRemoteConfigured(projectPath)
 	_, hasRemote := raw["remote"]
 	_, hasGitHub := raw["github"]
+	if name := declaredRemoteName(raw); name != "" && OnAcceptPolicy(globalOnAccept, p.Remote.OnAccept) != "nothing" && !gitRemoteNamed(projectPath, name) {
+		add("remote.on_accept", "nothing", "no remote '"+name+"' in this repository — accepts commit locally only")
+	}
 	if remote && !hasRemote && !hasGitHub {
 		add("github.enabled", "true", "a git remote is configured but no remote or github configuration declares how ducklab should use it")
 	}
@@ -83,6 +95,19 @@ func frontendPresent(root string) bool {
 func gitRemoteConfigured(root string) bool {
 	b, err := os.ReadFile(filepath.Join(root, ".git", "config"))
 	return err == nil && strings.Contains(string(b), "[remote ")
+}
+func declaredRemoteName(raw map[string]any) string {
+	section, ok := raw["remote"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := section["name"].(string)
+	return strings.TrimSpace(name)
+}
+func gitRemoteNamed(root, name string) bool {
+	cmd := exec.Command("git", "remote", "get-url", name)
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 func githubConsumed(p *Project) bool {
 	for _, s := range []string{p.Verify.Tests, p.Verify.Build, p.Verify.Lint, p.Verify.Custom, p.Install.Command, p.Run.Command} {

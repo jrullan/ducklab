@@ -607,6 +607,7 @@ export interface RunlogRun {
 
 export interface ServiceAcceptResult {
   commit_sha?: string;
+  info?: string;
   warning?: string;
 }
 
@@ -894,8 +895,10 @@ export interface ServiceRemoteResult {
   body?: string;
   branch?: string;
   compare_url?: string;
+  detail?: string;
   pr_url?: string;
   prompt?: string;
+  remote?: string;
   status?: string;
 }
 
