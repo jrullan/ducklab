@@ -486,6 +486,13 @@ configure the host from inside the run.
 Build products are never borrowed. This table is the zero-config default; a
 declared `[verify] link_deps` / `setup` (B-061) is the general form.
 
+Build products never land either: an accept stages the run's work minus its
+dependency links and the build output its tree's markers name (`Cargo.toml`
+→ `target/`, Python markers → `.pytest_cache`) plus the project's own
+`[verify] build_products`, records what it left out as a `landing_excluded`
+event, and the reviewer's diff omits the same paths. A `.gitignore` covering
+them is still the project's business (B-364).
+
 An auto-accept whose reproduction fails **pauses at the human gate wearing the
 error** — never a run stranded as running.
 

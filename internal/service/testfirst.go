@@ -514,8 +514,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		TurnCapSources:       turnCaps.Sources,
 		SmallSeat:            smallSeat,
 		SmallSeatPairReserve: pairReserve,
-		Diff:                 func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
-		OnEvent:              func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		Diff: func() (string, error) {
+			return vcs.New(projectRoot).DiffExcluding(runDiffExclusions(rs.run, projectRoot, rs.projectPath)...)
+		},
+		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
 	// The round gate earns its suite only in pair: two rounds, and a green
@@ -570,7 +572,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase": "after",
 	})
 
-	diff, _ := vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...)
+	diff, _ := vcs.New(projectRoot).DiffExcluding(runDiffExclusions(rs.run, projectRoot, rs.projectPath)...)
 	rs.writer.WriteDiff(diff)
 	rs.writer.WriteVerify(after.Output)
 

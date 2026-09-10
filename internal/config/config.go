@@ -369,6 +369,11 @@ type Verify struct {
 	// LinkDeps are installed dependency trees borrowed from the live project
 	// into an acceptance checkout. They must not be build products.
 	LinkDeps []string `toml:"link_deps" json:"link_deps"`
+	// BuildProducts are directories a run may fill that must never land in
+	// its commit nor appear in its review diff — the project's own additions
+	// to the marker-derived defaults (Cargo.toml → target, Python markers →
+	// .pytest_cache). Relative to the project root (B-364).
+	BuildProducts []string `toml:"build_products" json:"build_products"`
 	// Setup prepares build products in the acceptance checkout before its gate.
 	Setup    string `toml:"setup" json:"setup"`
 	TimeoutS int    `toml:"timeout_s" json:"timeout_s"`

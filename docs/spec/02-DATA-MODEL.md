@@ -323,6 +323,10 @@ build = "go build ./..."
 lint  = ""
 custom = ""                         # used when mode = "custom"
 timeout_s = 900
+# Build output a run may fill but must never land or appear in review diffs,
+# in addition to the marker-derived defaults (Cargo.toml → target,
+# Python markers → .pytest_cache). Dependency trees use link_deps instead.
+build_products = []
 
 [roster]
 architect   = "pato-nube"

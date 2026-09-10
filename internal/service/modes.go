@@ -662,7 +662,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			return gate, log, nil
 		},
 		Diff: func() (string, error) {
-			return vcs.New(root).DiffExcluding(mc.rs.run.LinkedDeps...)
+			return vcs.New(root).DiffExcluding(runDiffExclusions(mc.rs.run, root, mc.entry.Path)...)
 		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)

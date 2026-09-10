@@ -683,6 +683,12 @@
           "build": {
             "type": "string"
           },
+          "build_products": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "custom": {
             "type": "string"
           },
@@ -716,6 +722,7 @@
         },
         "required": [
           "build",
+          "build_products",
           "custom",
           "link_deps",
           "lint",
