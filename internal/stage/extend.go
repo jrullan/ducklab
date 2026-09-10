@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -238,6 +239,7 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		}
 	}
 	placeholder := map[string]string{}
+	newIDs := map[string]bool{}
 	var existing []artifact.Section
 	for _, milestone := range current.Sections {
 		existing = append(existing, milestone.Children...)
@@ -252,7 +254,9 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		if placeholder[key] == "" {
 			placeholder[key] = realID
 		}
+		newIDs[realID] = true
 	}
+	newDependencies := map[string][]string{}
 	for _, amendment := range amendments {
 		old, target := currentTasks[strings.ToUpper(amendment.TaskID)], proposedTasks[strings.ToUpper(amendment.TaskID)]
 		if old == nil || target == nil {
@@ -275,6 +279,9 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 			if !seen[dep] {
 				seen[dep] = true
 				deps = append(deps, dep)
+				if newIDs[dep] {
+					newDependencies[target.ID] = append(newDependencies[target.ID], dep)
+				}
 				added++
 			}
 		}
@@ -283,6 +290,97 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		}
 		setTaskScalarField(target, "Depends on", strings.Join(deps, ", "))
 	}
+	return placeNewPrerequisitesBeforeConsumers(proposed, newIDs, newDependencies)
+}
+
+// placeNewPrerequisitesBeforeConsumers makes the dependency-only amendment a
+// truthful document order. Fresh task IDs must remain stable and therefore may
+// be numerically higher than an existing consumer; the engine moves the new
+// prerequisite (and its new-task dependency closure) immediately before the
+// earliest amended consumer instead of weakening forward-dependency checks.
+func placeNewPrerequisitesBeforeConsumers(plan *artifact.Document, newIDs map[string]bool, dependencies map[string][]string) error {
+	type targetOrder struct {
+		id       string
+		position int
+	}
+	var targets []targetOrder
+	for id := range dependencies {
+		_, _, position, ok := planTaskLocation(plan, id)
+		if !ok {
+			return fmt.Errorf("dependency amendment target %s disappeared during placement", id)
+		}
+		targets = append(targets, targetOrder{id: id, position: position})
+	}
+	sort.SliceStable(targets, func(i, j int) bool { return targets[i].position < targets[j].position })
+
+	for _, target := range targets {
+		visiting := map[string]bool{}
+		placed := map[string]bool{}
+		var place func(string) error
+		place = func(id string) error {
+			id = strings.ToUpper(id)
+			if placed[id] || visiting[id] {
+				return nil // the composition graph check reports a cycle precisely
+			}
+			visiting[id] = true
+			task := plan.Section(id)
+			if task == nil {
+				return fmt.Errorf("new prerequisite %s disappeared during placement", id)
+			}
+			for _, dep := range splitPlanItems(task.Field("depends on")) {
+				if newIDs[dep] {
+					if err := place(dep); err != nil {
+						return err
+					}
+				}
+			}
+			visiting[id] = false
+			placed[id] = true
+			return movePlanTaskBefore(plan, id, target.id)
+		}
+		for _, dep := range dependencies[target.id] {
+			if err := place(dep); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func planTaskLocation(plan *artifact.Document, id string) (milestone, child, position int, ok bool) {
+	for mi := range plan.Sections {
+		for ti := range plan.Sections[mi].Children {
+			if strings.EqualFold(plan.Sections[mi].Children[ti].ID, id) {
+				return mi, ti, position, true
+			}
+			position++
+		}
+	}
+	return 0, 0, position, false
+}
+
+func movePlanTaskBefore(plan *artifact.Document, taskID, targetID string) error {
+	sourceMilestone, sourceChild, sourcePosition, sourceOK := planTaskLocation(plan, taskID)
+	_, _, targetPosition, targetOK := planTaskLocation(plan, targetID)
+	if !sourceOK || !targetOK {
+		return fmt.Errorf("cannot place prerequisite %s before consumer %s", taskID, targetID)
+	}
+	if sourcePosition < targetPosition {
+		return nil
+	}
+	moved := plan.Sections[sourceMilestone].Children[sourceChild]
+	source := plan.Sections[sourceMilestone].Children
+	plan.Sections[sourceMilestone].Children = append(source[:sourceChild], source[sourceChild+1:]...)
+
+	targetMilestone, targetChild, _, targetOK := planTaskLocation(plan, targetID)
+	if !targetOK {
+		return fmt.Errorf("consumer %s disappeared while placing prerequisite %s", targetID, taskID)
+	}
+	target := plan.Sections[targetMilestone].Children
+	target = append(target, artifact.Section{})
+	copy(target[targetChild+1:], target[targetChild:])
+	target[targetChild] = moved
+	plan.Sections[targetMilestone].Children = target
 	return nil
 }
 
@@ -590,7 +688,7 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		"real ids are assigned by the engine. When one of these tasks consumes what another delivers, say so " +
 		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
 		"the real id. Never depend on a task that comes later in your own list.\n" +
-		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and the new placeholder. Other changes are refused.\n" +
+		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and the new placeholder. The engine inserts the new prerequisite before that consumer. Other changes are refused.\n" +
 		"- To replace a listed named section, emit its exact `## <heading>` and complete body. H3 is reserved for task ids.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
 		"- This amendment cannot remove tasks. Retire superseded tasks separately with task_remove.\n" +
@@ -760,6 +858,12 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 			Body:       strings.TrimSpace(strings.Join(kept, "\n")),
 			Implements: t.Implements,
 			Owns:       append([]string(nil), t.Owns...),
+			Fields:     make(map[string]string, len(t.Fields)),
+		}
+		for key, value := range t.Fields {
+			if !strings.EqualFold(key, "milestone") {
+				task.Fields[key] = value
+			}
 		}
 		existing = append(existing, task)
 
