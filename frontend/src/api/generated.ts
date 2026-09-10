@@ -191,6 +191,7 @@ export interface ConfigShellPolicy {
 
 export interface ConfigVerify {
   build?: string;
+  build_products?: string[];
   custom?: string;
   link_deps?: string[];
   lint?: string;

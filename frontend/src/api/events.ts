@@ -335,6 +335,9 @@ export const KNOWN_EVENT_TYPES = [
   "tests_modified",
   "test_retired",
   "budget_lifted",
+  // What an accept left out of the commit on purpose: dependency links and
+  // build products (B-364). Paths in data.paths.
+  "landing_excluded",
   "findings_filed",
   "sections_removed",
   "survey_inventory",

@@ -1563,7 +1563,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
 		ActiveCapabilities:   activeCapabilities,
 		WorkspaceDiff: func() (string, error) {
-			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
+			return vcs.New(root).DiffExcluding(runDiffExclusions(rs.run, root, entry.Path)...)
 		},
 		Answers: rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
@@ -1815,7 +1815,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
 		ActiveCapabilities:   activeCapabilities,
 		WorkspaceDiff: func() (string, error) {
-			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
+			return vcs.New(root).DiffExcluding(runDiffExclusions(rs.run, root, entry.Path)...)
 		},
 		Answers: rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
@@ -2065,7 +2065,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	// Get diff
 	git := vcs.New(ectx.ProjectRoot)
-	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
+	diff, _ := git.DiffExcluding(runDiffExclusions(rs.run, ectx.ProjectRoot, rs.projectPath)...)
 	rs.writer.WriteDiff(diff)
 	if rs.run.HarnessProfile != nil {
 		var capabilityIDs []string
@@ -2780,11 +2780,13 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// Persist the work branch with the acceptance record. This is the provenance
 	// that lets status distinguish accepted work from work shipped on main.
 	rs.run.Branch, _ = git.CurrentBranch()
-	// Stage candidate work, never runtime dependency links.
-	if err := stageRun(git, rs.run, entry.Path); err != nil {
+	// Stage candidate work, never runtime dependency links or build products.
+	present, err := stageRun(git, rs.run, entry.Path)
+	if err != nil {
 		s.failRun(rs, fmt.Errorf("git add: %w", err))
 		return err
 	}
+	recordLandingExclusions(rs, present)
 
 	// Accepting work that is already committed is a no-op, not a failure.
 	//
@@ -2946,9 +2948,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			return fmt.Errorf("rebase is still in progress in %s; resolve the files, run git add and git rebase --continue, then retry Accept", rs.run.WorktreePath)
 		}
 	}
-	if err := stageRun(workGit, rs.run, entry.Path); err != nil {
+	present, err := stageRun(workGit, rs.run, entry.Path)
+	if err != nil {
 		return fmt.Errorf("stage worktree: %w", err)
 	}
+	recordLandingExclusions(rs, present)
 	if clean, err := workGit.IsClean(); err != nil {
 		return err
 	} else if !clean {
@@ -3246,6 +3250,76 @@ func linkedDependencyPaths(root string) []string {
 		paths = append(paths, cfg.Verify.LinkDeps...)
 	}
 	return paths
+}
+
+// buildProductPaths names the build output a run may have filled in the tree
+// it worked in. They are derived from the same kind of marker that names a
+// dependency tree: a Cargo.toml means cargo's target/, a Python marker means
+// .pytest_cache. The project adds its own under [verify] build_products.
+//
+// Fledge's first landing would have committed 470 files and 133 MB of
+// target/: the task produced no .gitignore because its plan never asked for
+// one, and the staging boundary knew node_modules and .venv but nothing of
+// Rust (B-364). Markers are read from the tree being landed — a worktree run
+// creates its Cargo.toml there, not in the registered checkout.
+func buildProductPaths(tree, projectRoot string) []string {
+	var paths []string
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(tree, name))
+		return err == nil
+	}
+	if exists("Cargo.toml") {
+		paths = append(paths, "target")
+	}
+	for _, marker := range []string{"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "pytest.ini", "tox.ini", "Pipfile"} {
+		if exists(marker) {
+			paths = append(paths, ".pytest_cache")
+			break
+		}
+	}
+	if cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml")); err == nil {
+		paths = append(paths, cfg.Verify.BuildProducts...)
+	}
+	return paths
+}
+
+// landingExclusions is everything that never rides a run's commit or its
+// review diff: runtime dependency links and build products. tree is where the
+// run worked (its worktree, or the registered checkout); projectRoot is where
+// the project's configuration lives.
+func landingExclusions(tree, projectRoot string) []string {
+	return append(linkedDependencyPaths(projectRoot), buildProductPaths(tree, projectRoot)...)
+}
+
+// presentExclusions reports which excluded paths actually exist in the tree,
+// so an accept can say what it left out instead of silently dropping it.
+func presentExclusions(tree string, excluded []string) []string {
+	var present []string
+	for _, p := range uniqueStrings(excluded) {
+		if _, err := os.Stat(filepath.Join(tree, p)); err == nil {
+			present = append(present, p)
+		}
+	}
+	return present
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range in {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// runDiffExclusions is the review diff's boundary: the same as landing's, plus
+// the links this run was given at start.
+func runDiffExclusions(run *runlog.Run, tree, projectRoot string) []string {
+	return append(append([]string(nil), run.LinkedDeps...), landingExclusions(tree, projectRoot)...)
 }
 
 // linkInstalledDeps symlinks installed dependency trees from the live
@@ -4107,14 +4181,33 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 }
 
 // stageRun is the sole staging path for a run. LinkedDeps are runtime
-// symlinks supplied to an isolated checkout and must never enter a commit.
-func stageRun(git *vcs.Git, run *runlog.Run, projectRoot string) error {
+// symlinks supplied to an isolated checkout and must never enter a commit;
+// neither may build products (B-364). It returns the excluded paths that
+// were actually present, so the accept can put them on the record.
+func stageRun(git *vcs.Git, run *runlog.Run, projectRoot string) ([]string, error) {
 	// LinkedDeps is runtime-only and deliberately omitted from persisted run
 	// state. Reconstruct its configured paths too, so an accept after restart
 	// has the same staging boundary as an in-memory chain.
 	excluded := append([]string(nil), run.LinkedDeps...)
-	excluded = append(excluded, linkedDependencyPaths(projectRoot)...)
-	return git.AddAllExcluding(excluded...)
+	excluded = append(excluded, landingExclusions(git.Root, projectRoot)...)
+	present := presentExclusions(git.Root, excluded)
+	if err := git.AddAllExcluding(excluded...); err != nil {
+		return nil, err
+	}
+	return present, nil
+}
+
+// recordLandingExclusions says what stageRun left out of the commit. A
+// person reading the accept must not have to diff the worktree against the
+// commit to learn that 133 MB of target/ were dropped on purpose.
+func recordLandingExclusions(rs *runState, present []string) {
+	if len(present) == 0 || rs == nil || rs.writer == nil {
+		return
+	}
+	rs.writer.AppendEvent("landing_excluded", map[string]interface{}{
+		"paths":  present,
+		"detail": "dependency links and build products never land; add them to .gitignore as product work if the tree should know it too",
+	})
 }
 
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {
