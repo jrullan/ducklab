@@ -347,8 +347,8 @@ func TestModeDefaultsPublishesPhaseDefaultsAndScriptCeilings(t *testing.T) {
 	if got.PhaseTurns["build"] != 40 || got.PhaseTurns["test"] != 60 {
 		t.Fatalf("phase defaults = %#v", got.PhaseTurns)
 	}
-	if got.TurnCeilings["pair.reviewer"] != 8 {
-		t.Fatalf("pair reviewer ceiling = %d, want 8", got.TurnCeilings["pair.reviewer"])
+	if _, hidden := got.TurnCeilings["pair.reviewer"]; hidden {
+		t.Fatalf("pair reviewer still publishes a hidden ceiling: %#v", got.TurnCeilings)
 	}
 }
 

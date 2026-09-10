@@ -253,7 +253,7 @@ type ModeDefaultsView struct {
 
 // ScriptRoleTurns inventories roles and their designed script fallbacks for
 // clients. Explicit phase/role/run portions are resolved by resolveTurnCaps;
-// hard script invariants are published separately as TurnCeilings.
+// genuine hard script invariants are published separately as TurnCeilings.
 //
 // A reviewer gets fewer than an implementer on purpose: reviewing is reading and
 // giving a verdict, not iterating. A judge gets one — it chooses between
