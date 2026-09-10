@@ -1093,6 +1093,36 @@ func TestTurnExhaustionStillFailsWhenTheConclusionIsEmpty(t *testing.T) {
 	}
 }
 
+// B-358 was observed before the small-seat pair reserve became a configurable
+// default. Keep the resulting advice tied to controls the runtime honors: the
+// reserve setting and a per-run override, never the old generic instruction to
+// raise a role cap that lost precedence to the reserve.
+func TestNoAnswerAtSmallSeatReserveNamesRaiseableControls(t *testing.T) {
+	toolCall := "```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.go\"}}\n```"
+	p := &countingProvider{replies: []string{toolCall, toolCall}, fallback: ""}
+	loop := testLoop(p, 0)
+	loop.Registry = tools.NewRegistry()
+	turn := &Turn{
+		Role: config.RoleImplementer, Prompt: "implement", Contract: "freeform",
+		MaxTurns: 2, MaxTurnsRequested: 2, MaxTurnsSource: "small-seat pair reserve (default)",
+		MaxTurnsReserve: 2, MaxTurnsReserveSource: "small-seat pair reserve (default)",
+		Toolbelt: []string{"fs_read"},
+	}
+
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("err = %v, want ErrNoAnswer", err)
+	}
+	for _, want := range []string{"defaults.small_seat_pair_reserve", "Settings", "run calls/reply override", "narrow the task"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("reserve exhaustion advice %q does not name %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "Raise the turn cap for this role") {
+		t.Fatalf("reserve exhaustion restored the ineffective generic advice: %v", err)
+	}
+}
+
 // A spec regeneration hit pato-sonnet's 8192 output cap, and the truncation
 // retry — "stop deliberating, be brief" — cannot shrink a whole document into
 // the same budget: it burned a duplicate call and died on the same wall,
