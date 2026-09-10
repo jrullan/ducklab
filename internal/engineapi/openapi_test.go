@@ -82,7 +82,7 @@ func TestPublicationStateIsDocumented(t *testing.T) {
 	schemas, _ := components["schemas"].(map[string]any)
 	for schema, fields := range map[string][]string{
 		"ConfigRemote":        {"on_accept"},
-		"ServiceAcceptResult": {"commit_sha", "warning"},
+		"ServiceAcceptResult": {"commit_sha", "warning", "info"},
 		"ServiceStatus":       {"ahead", "behind"},
 		"RunlogRun":           {"remote_receipts"},
 	} {

@@ -183,7 +183,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	// Findings become inert amendment cards in the consultation. The event is
 	// deliberately advisory: it does not invoke ProjectUpdate; that remains the
 	// desktop person's explicit Apply click.
-	if findings, doctorErr := config.Doctor(entry.Path); req.AboutKind != "document" && doctorErr == nil {
+	if findings, doctorErr := s.configDoctorAt(entry.Path); req.AboutKind != "document" && doctorErr == nil {
 		cfg, _ := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
 		for _, finding := range findings {
 			old := ""
@@ -543,7 +543,7 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 		// serialize the config struct: provider/environment credentials may grow in it.
 		fmt.Fprintf(&b, "\n## Current project configuration\n\n[verify] mode=%q tests=%q link_deps=%q\n[remote] name=%q fetch_on_open=%t allow_mcp_verbs=%q\n[github] pr_base=%q pr_draft=%t pr_tool=%q pr_body_by_scribe=%t\n[shell] allow_prefixes=%q deny=%q\n[git] protected_paths=%q\n", cfg.Verify.Mode, cfg.Verify.Tests, cfg.Verify.LinkDeps, cfg.Remote.Name, cfg.Remote.FetchOnOpen, cfg.Remote.AllowMCPVerbs, cfg.GitHub.PRBase, cfg.GitHub.PRDraft, cfg.GitHub.PRTool, cfg.GitHub.PRBodyByScribe, cfg.Shell.AllowPrefixes, cfg.Shell.Deny, cfg.Git.ProtectedPaths)
 	}
-	if findings, err := config.Doctor(projectRoot); aboutKind != "document" && err == nil && len(findings) > 0 {
+	if findings, err := s.configDoctorAt(projectRoot); aboutKind != "document" && err == nil && len(findings) > 0 {
 		b.WriteString("\n## Configuration findings (priority order)\n\n")
 		for i, f := range findings {
 			fmt.Fprintf(&b, "%d. `%s`: propose `%s` — %s\n", i+1, f.Key, f.Proposed, f.Reason)

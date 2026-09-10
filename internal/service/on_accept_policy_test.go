@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -343,6 +344,74 @@ func TestOnAcceptPushFailureLeavesAcceptedRunWithExactWarning(t *testing.T) {
 	}
 	if detail.Run.Warning != result.Warning {
 		t.Fatalf("stored warning = %q, result warning = %q", detail.Run.Warning, result.Warning)
+	}
+}
+
+func TestOnAcceptWithoutNamedGitRemoteIsInformationalAndHasNoRetry(t *testing.T) {
+	s := serviceWithAcceptPolicy(t, "push")
+	id, root := projectWithDocs(t, s, nil)
+	setProjectRemote(t, root)
+	gitProject(t, root)
+	findings, err := s.ConfigDoctor(context.Background(), id)
+	if err != nil {
+		t.Fatalf("config doctor: %v", err)
+	}
+	var remoteFinding *config.Finding
+	for i := range findings {
+		if findings[i].Key == "remote.on_accept" {
+			remoteFinding = &findings[i]
+			break
+		}
+	}
+	if remoteFinding == nil || remoteFinding.Reason != "no remote 'origin' in this repository — accepts commit locally only" {
+		t.Fatalf("missing-remote doctor findings = %#v", findings)
+	}
+
+	run, _ := pausedWorktreeRun(t, s, id, root, "r-on-accept-local-only")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "local-only.txt"), []byte("accepted locally\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("local-only accept: %v", err)
+	}
+	if result.Warning != "" {
+		t.Fatalf("local-only accept warning = %q, want none", result.Warning)
+	}
+	const wantInfo = "committed locally; no remote 'origin' in this repository"
+	if result.Info != wantInfo {
+		t.Fatalf("local-only accept info = %q, want %q", result.Info, wantInfo)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Run.RemoteReceipts) != 1 || detail.Run.RemoteReceipts[0]["status"] != "local_only" || detail.Run.RemoteReceipts[0]["detail"] != wantInfo {
+		t.Fatalf("local-only receipt = %#v", detail.Run.RemoteReceipts)
+	}
+	if contains(detail.Run.Next, "push") {
+		t.Fatalf("local-only next = %v, must not offer a dead push retry", detail.Run.Next)
+	}
+}
+
+func TestClassifyPushErrorNamesRecoveryClass(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"diverged", "! [rejected] main -> main (non-fast-forward)\nerror: failed to push some refs", "has new commits; pull/rebase before retrying"},
+		{"network", "fatal: unable to access remote: Could not resolve host", "is unreachable; check its URL, network, and authentication"},
+		{"authentication", "remote: Permission denied", "is unreachable; check its URL, network, and authentication"},
+		{"other", "fatal: unexpected transport failure", "push to remote \"origin\" failed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := classifyPushError("origin", fmt.Errorf("%s", test.raw)).Error()
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("classified error = %q, want it to contain %q", got, test.want)
+			}
+		})
 	}
 }
 

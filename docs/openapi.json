@@ -2102,6 +2102,9 @@
           "commit_sha": {
             "type": "string"
           },
+          "info": {
+            "type": "string"
+          },
           "warning": {
             "type": "string"
           }
@@ -3098,10 +3101,16 @@
           "compare_url": {
             "type": "string"
           },
+          "detail": {
+            "type": "string"
+          },
           "pr_url": {
             "type": "string"
           },
           "prompt": {
+            "type": "string"
+          },
+          "remote": {
             "type": "string"
           },
           "status": {

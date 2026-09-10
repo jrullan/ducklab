@@ -199,5 +199,9 @@ mark when built from a tree that differs from HEAD (`/v1/health` reports
   before the tag; a failed branch push keeps the tag local and says so. Accept
   commits without a task are named by stage and subject, never `ducklab: `.
 - **Autonomous publication**: `[remote] on_accept = "push"` publishes each
-  accepted commit with a receipt in `.ducklab/remote-actions.jsonl`; release
-  v0.9.2 and v0.9.3 were cut by the product with notes written by the scribe.
+  accepted commit with a receipt in `.ducklab/remote-actions.jsonl`. If the
+  named git remote does not exist, Doctor reports it before the run and Accept
+  records an informational `local_only` receipt—never a failed push or a dead
+  Retry button. A real push failure distinguishes remote divergence from
+  connectivity/authentication trouble. Release v0.9.2 and v0.9.3 were cut by
+  the product with notes written by the scribe.

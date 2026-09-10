@@ -66,6 +66,40 @@ describe("RunView publication consequences", () => {
     expect(await screen.findByTestId("accept-committed")).toHaveTextContent("committed be7087d9");
     expect(screen.queryByTestId("publication-failure")).not.toBeInTheDocument();
   });
+
+  it("shows a missing repository remote as local-only information without a retry", async () => {
+    useRuns.setState({
+      runs: { "run-1": { id: "run-1", project_id: "project-1", stage: "build", mode: "solo", task_id: "task-1", status: "done", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z", next: ["accept"] } },
+      events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open",
+    });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.projectGet = vi.fn().mockResolvedValue({ config: { remote: { name: "origin", on_accept: "push" } } });
+    client.accept = vi.fn().mockResolvedValue({
+      commit_sha: "abc123456",
+      info: "committed locally; no remote 'origin' in this repository",
+    });
+
+    render(<RunView runId="run-1" client={client as never} />);
+    screen.getByTestId("cycle-accept").click();
+
+    expect(await screen.findByTestId("publication-local-only")).toHaveTextContent("committed locally; no remote 'origin' in this repository");
+    expect(screen.queryByTestId("publication-failure")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("retry-publication")).not.toBeInTheDocument();
+  });
+
+  it("restores local-only publication information from the durable receipt", async () => {
+    const receipt = { action: "push", status: "local_only", detail: "committed locally; no remote 'origin' in this repository" };
+    const run = { id: "run-1", project_id: "project-1", stage: "build", mode: "solo", task_id: "task-1", status: "done", verdict: "PASSED", accepted: true, started_at: "2026-01-01T00:00:00Z", remote_receipts: [receipt] };
+    useRuns.setState({ runs: { "run-1": run as never }, events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open" });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.run = vi.fn().mockResolvedValue({ run, events: [] });
+    client.projectGet = vi.fn().mockResolvedValue({ config: { remote: { name: "origin", on_accept: "push" } } });
+
+    render(<RunView runId="run-1" client={client as never} />);
+
+    expect(await screen.findByTestId("publication-local-only")).toHaveTextContent("committed locally; no remote 'origin' in this repository");
+    expect(screen.queryByTestId("retry-publication")).not.toBeInTheDocument();
+  });
 });
 
 describe("RunView origin panel", () => {

@@ -146,7 +146,7 @@ plan | review | release | operate`.
 | GET | `/v1/runs/{runId}/verify` | `?tail=500` | gate output |
 | POST | `/v1/runs/{runId}/resume` | — | `202` |
 | POST | `/v1/runs/{runId}/abort` | — | `202` |
-| POST | `/v1/runs/{runId}/accept` | `{"message":"commit msg"}` | `AcceptResult` (commit sha) |
+| POST | `/v1/runs/{runId}/accept` | `{"message":"commit msg"}` | `AcceptResult` (commit sha; retryable publication `warning` or local-only `info`) |
 | POST | `/v1/runs/{runId}/reject` | `{"reason":"…"}` | `204` |
 | POST | `/v1/runs/{runId}/answer` | `{"question_id":"q1","answer":"…"}` | `204` — satisfies `ask_human` |
 | POST | `/v1/runs/{runId}/approve-tool` | `{"call_id":"c7","approve":true}` | `204` — manual autonomy |

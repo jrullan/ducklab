@@ -801,7 +801,14 @@ func (s *Service) ConfigDoctor(ctx context.Context, id string) ([]config.Finding
 	if err != nil {
 		return nil, err
 	}
-	return config.Doctor(entry.Path)
+	return s.configDoctorAt(entry.Path)
+}
+
+func (s *Service) configDoctorAt(projectPath string) ([]config.Finding, error) {
+	s.cfgMu.RLock()
+	globalOnAccept := s.cfg.Remote.OnAccept
+	s.cfgMu.RUnlock()
+	return config.DoctorWithOnAccept(projectPath, globalOnAccept)
 }
 
 // ProjectUpdate applies dotted keys to a project's config and saves it.
@@ -1196,6 +1203,7 @@ type LandingOffer struct {
 type AcceptResult struct {
 	CommitSHA string `json:"commit_sha"`
 	Warning   string `json:"warning,omitempty"`
+	Info      string `json:"info,omitempty"`
 }
 
 // RunFilter is a run filter.
@@ -2560,7 +2568,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	// A configuration-shaped failure needs a door to the consultant, not just
 	// its raw error. The finding is recorded on this failed run so the desktop
 	// can seed that consultation without changing configuration on its own.
-	if finding, ok := configFindingForFailure(rs.projectPath, err); ok {
+	if finding, ok := s.configFindingForFailure(rs.projectPath, err); ok {
 		old := ""
 		if cfg, loadErr := config.LoadProject(filepath.Join(rs.projectPath, ".ducklab", "project.toml")); loadErr == nil {
 			old, _ = config.ValueKey(cfg, finding.Key)
@@ -2580,11 +2588,11 @@ func (s *Service) failRun(rs *runState, err error) {
 // only when the failure names that setting or its proposed value. A project can
 // have unrelated doctor findings; surfacing one of those would misdiagnose the
 // run and send the consultant an invented premise.
-func configFindingForFailure(projectPath string, err error) (config.Finding, bool) {
+func (s *Service) configFindingForFailure(projectPath string, err error) (config.Finding, bool) {
 	if projectPath == "" || err == nil {
 		return config.Finding{}, false
 	}
-	findings, doctorErr := config.Doctor(projectPath)
+	findings, doctorErr := s.configDoctorAt(projectPath)
 	if doctorErr != nil {
 		return config.Finding{}, false
 	}
@@ -4087,7 +4095,7 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	// queue must be told the world changed. After continueChain (deferred
 	// inside acceptRun), so a chained build is already at the line's front.
 	s.queue.poke(s)
-	return &AcceptResult{CommitSHA: rs.run.CommitSHA, Warning: rs.run.Warning}, nil
+	return &AcceptResult{CommitSHA: rs.run.CommitSHA, Warning: rs.run.Warning, Info: publicationInfo(rs.run)}, nil
 }
 
 // RunReject rejects a run.
