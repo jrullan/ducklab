@@ -38,7 +38,8 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 			prior = drafts[0]
 		}
 	}
-	prompt, err := buildExtendPrompt(p.ProjectRoot, current, extendChange(p), p.Revision, previousExtensionFragment(current, prior))
+	effectiveChange := effectiveExtendChange(p)
+	prompt, err := buildExtendPrompt(p.ProjectRoot, current, effectiveChange, previousExtensionFragment(current, prior))
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +113,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
 		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 	}
-	mechanical, semantic, err := reviewComposition(ctx, p, kind, extendChange(p), current, proposed)
+	mechanical, semantic, err := reviewComposition(ctx, p, kind, effectiveChange, current, proposed)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +147,19 @@ func extendChange(p Params) string {
 	return fmt.Sprintf("Replace task %s with exactly two narrowly-scoped task sections. Each replacement must have a non-empty **Owns:** field, and their Owns lanes must be pairwise disjoint. Preserve the original task's traceability (Milestone and Implements).", p.SplitTask)
 }
 
+// effectiveExtendChange is the one authority for every actor judging a revised
+// amendment. The original request remains provenance; the operator's revision
+// is authoritative wherever it narrows or changes that request.
+func effectiveExtendChange(p Params) string {
+	change := strings.TrimSpace(extendChange(p))
+	revision := strings.TrimSpace(p.Revision)
+	if revision == "" {
+		return change
+	}
+	return "Original requested change:\n" + change +
+		"\n\nOperator revision (authoritative where it changes or narrows the original):\n" + revision
+}
+
 // normalizeFragment makes the architect's fragment parseable as a plan: the
 // contract's `## TASK — title` headings become H3 tasks under one synthetic
 // milestone, which is what the plan parser reads — models also emit H3 or a
@@ -167,7 +181,7 @@ func normalizeFragment(raw string) string {
 // buildExtendPrompt is compact by design: the plan as an OUTLINE (ids and
 // titles — placement and duplicate-checking need no bodies), the spec as a
 // wiring list, the change, and the fragment contract.
-func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, revision, priorFragment string) (string, error) {
+func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, priorFragment string) (string, error) {
 	var b strings.Builder
 
 	memory, err := artifact.LoadMemory(projectRoot)
@@ -181,9 +195,8 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, revi
 	b.WriteString("## Your task\n\nExtend this plan for the change below, WITHOUT a redesign. " +
 		"Return ONLY the new task section(s) — never the rest of the plan; the engine merges " +
 		"your fragment into the document itself.\n\n")
-	b.WriteString("## The change\n\n" + strings.TrimSpace(change) + "\n\n")
-	if strings.TrimSpace(revision) != "" {
-		b.WriteString("## What the operator asked to change\n\n" + strings.TrimSpace(revision) + "\n\n")
+	b.WriteString("## The effective change\n\n" + strings.TrimSpace(change) + "\n\n")
+	if strings.TrimSpace(priorFragment) != "" {
 		b.WriteString("## Your previous amendment fragment to revise\n\n" + strings.TrimSpace(priorFragment) + "\n\n")
 	}
 
