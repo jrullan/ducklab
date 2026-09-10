@@ -360,7 +360,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		return fmt.Errorf("agent_max_turns must be greater than zero; got %d", v.AgentMaxTurns)
 	}
 	if v.SmallSeatPairReserve < 0 || v.SmallSeatPairReserve > 200 {
-		return fmt.Errorf("small_seat_pair_reserve must be 1 to 200; got %d", v.SmallSeatPairReserve)
+		return fmt.Errorf("small_seat_pair_reserve: 0 keeps the current value; otherwise it must be 1 to 200; got %d", v.SmallSeatPairReserve)
 	}
 	for mode, n := range v.Rounds {
 		if _, ok := ModeRounds[mode]; !ok {

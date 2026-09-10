@@ -797,7 +797,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         )}
       </div>
       <p className="mt-2 text-xs text-ink-muted">
-        Empty phase values use the global implementer fallback ({modes.agent_max_turns}). For build/test implementers precedence is global → phase → small-seat pair reserve → role → run. The reserve protects time for independent review but is a default: raising it, overriding it, or choosing no cap may starve the reviewer's slot; other roles keep their script design until a role or run override applies. A hard script ceiling still wins.
+        Empty phase values use the global implementer fallback ({modes.agent_max_turns}). For build/test implementers precedence is global → phase → role → small-seat pair reserve → run. The reserve protects time for independent review but is a default: raising it, overriding it for a run, or choosing no cap may starve the reviewer's slot; other roles keep their script design until a role or run override applies. A hard script ceiling still wins.
       </p>
 
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>

@@ -430,9 +430,9 @@ func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
 	return s.resolveTurnCapsFor(phase, override, "", false)
 }
 
-// resolveTurnCapsFor adds contextual defaults before the role and run layers.
-// Pair's small-seat reserve is deliberately not a ceiling: an explicit role
-// preference, launch override, or live no-cap remains authoritative.
+// resolveTurnCapsFor adds contextual defaults between the generic role layer
+// and explicit run choices. Pair's small-seat reserve is deliberately not a
+// ceiling: a launch override or live no-cap remains authoritative.
 func (s *Service) resolveTurnCapsFor(phase string, override int, mode string, smallSeat bool) resolvedTurnCaps {
 	s.cfgMu.RLock()
 	global := s.cfg.Defaults.AgentMaxTurns
@@ -455,11 +455,6 @@ func (s *Service) resolveTurnCapsFor(phase string, override int, mode string, sm
 		out.Caps[config.RoleImplementer] = cap
 		out.Sources[config.RoleImplementer] = source
 	}
-	if mode == "pair" && smallSeat {
-		out.Caps[config.RoleImplementer] = pairReserve
-		out.Sources[config.RoleImplementer] = "small-seat pair reserve (default)"
-		out.SmallSeatPairReserve = pairReserve
-	}
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
@@ -468,7 +463,17 @@ func (s *Service) resolveTurnCapsFor(phase string, override int, mode string, sm
 			out.Caps[role] = n
 			out.Sources[role] = string(role) + " role default"
 		}
-		if override != 0 {
+	}
+	if mode == "pair" && smallSeat {
+		out.Caps[config.RoleImplementer] = pairReserve
+		out.Sources[config.RoleImplementer] = "small-seat pair reserve (default)"
+		out.SmallSeatPairReserve = pairReserve
+	}
+	if override != 0 {
+		for _, role := range config.ValidRoles() {
+			if role == config.RoleHuman {
+				continue
+			}
 			out.Caps[role] = capOverride(override)
 			if override < 0 {
 				out.Sources[role] = "run no-cap"
