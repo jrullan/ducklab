@@ -3016,90 +3016,93 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return nil
 	}
 
-	defaultSHA, err := defaultGit.DefaultBranchHead()
-	if err != nil {
-		return fmt.Errorf("read default HEAD: %w", err)
-	}
-	if defaultSHA != rs.run.BaseSHA {
-		files, rebaseErr := workGit.RebaseOnto(defaultSHA)
-		if rebaseErr != nil {
-			detail := fmt.Sprintf("rebase stopped with conflicts from base %s onto default %s in worktree %s; conflicting files: %s. Resolve the files there, run git add and git rebase --continue, then retry Accept; or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
-			pending := map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "worktree": rs.run.WorktreePath, "retain_worktree": true}
-			if len(files) == 0 {
-				// A non-conflict rebase failure has no useful in-progress state for a
-				// person to resolve. Roll it back and say so; never point at a clean
-				// worktree as if conflict markers lived there.
-				workGit.AbortIntegration()
-				detail = fmt.Sprintf("rebase from base %s onto default %s failed and was rolled back: %v. Correct the repository state and retry Accept, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr)
-				pending["detail"] = detail
-			} else {
-				pending["conflicting_files"] = files
-				pending["rebase_in_progress"] = true
+	var rebasedSHA string
+	var onDefault, clean bool
+	var touched []string
+	for attempt := 0; attempt < 2; attempt++ {
+		defaultSHA, err := defaultGit.DefaultBranchHead()
+		if err != nil {
+			return fmt.Errorf("read default HEAD: %w", err)
+		}
+		// Rebase whenever the candidate does not already descend from the
+		// default observed for this attempt. On the second attempt this is the
+		// branch movement that lost the first compare-and-swap.
+		if ancestor, _ := workGit.IsAncestor(defaultSHA, "HEAD"); !ancestor {
+			files, rebaseErr := workGit.RebaseOnto(defaultSHA)
+			if rebaseErr != nil {
+				detail := fmt.Sprintf("rebase stopped with conflicts from base %s onto default %s in worktree %s; conflicting files: %s. Resolve the files there, run git add and git rebase --continue, then retry Accept; or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
+				pending := map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "worktree": rs.run.WorktreePath, "retain_worktree": true}
+				if len(files) == 0 {
+					// A non-conflict rebase failure has no useful in-progress state for a
+					// person to resolve. Roll it back and say so; never point at a clean
+					// worktree as if conflict markers lived there.
+					workGit.AbortIntegration()
+					detail = fmt.Sprintf("rebase from base %s onto default %s failed and was rolled back: %v. Correct the repository state and retry Accept, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr)
+					pending["detail"] = detail
+				} else {
+					pending["conflicting_files"] = files
+					pending["rebase_in_progress"] = true
+				}
+				rs.run.Status, rs.run.PendingKind = "paused", "gate"
+				rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+				rs.run.PendingData = pending
+				rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail})
+				_ = rs.writer.WriteState()
+				return fmt.Errorf("%s", detail)
 			}
+		}
+		rebasedSHA, err = workGit.HeadSHA()
+		if err != nil {
+			return fmt.Errorf("read rebased worktree HEAD: %w", err)
+		}
+		rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
+		reproduction, verifyErr := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		if reproduction != nil {
+			rs.run.GateReproduced = reproduction
+			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
+		}
+		if verifyErr != nil {
+			output := ""
+			if reproduction != nil {
+				output = reproduction.Output
+			}
+			detail := fmt.Sprintf("rebased commit %s failed its gate after base %s diverged to default %s: %v", short(rebasedSHA), short(rs.run.BaseSHA), short(defaultSHA), verifyErr)
 			rs.run.Status, rs.run.PendingKind = "paused", "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-			rs.run.PendingData = pending
-			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail})
+			rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "output": output, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "retain_worktree": true}
+			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail, "output": output})
 			_ = rs.writer.WriteState()
-			return fmt.Errorf("%s", detail)
+			return verifyErr
 		}
-	}
-	rebasedSHA, err := workGit.HeadSHA()
-	if err != nil {
-		return fmt.Errorf("read rebased worktree HEAD: %w", err)
-	}
-	rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
-	reproduction, verifyErr := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
-	if reproduction != nil {
-		rs.run.GateReproduced = reproduction
-		rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
-	}
-	if verifyErr != nil {
-		output := ""
-		if reproduction != nil {
-			output = reproduction.Output
-		}
-		detail := fmt.Sprintf("rebased commit %s failed its gate after base %s diverged to default %s: %v", short(rebasedSHA), short(rs.run.BaseSHA), short(defaultSHA), verifyErr)
-		rs.run.Status, rs.run.PendingKind = "paused", "gate"
-		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-		rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "output": output, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "retain_worktree": true}
-		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail, "output": output})
-		_ = rs.writer.WriteState()
-		return verifyErr
-	}
-	// Check before update-ref: after it moves, the checkout's index appears
-	// dirty against the new HEAD even when it was clean before acceptance.
-	onDefault, err := defaultGit.OnDefaultBranch()
-	if err != nil {
-		return fmt.Errorf("check registered checkout branch: %w", err)
-	}
-	var touched []string
-	clean := true
-	if onDefault {
-		touched, err = defaultGit.ChangedPaths(defaultSHA, rebasedSHA)
+		// Check before update-ref: after it moves, the checkout's index appears
+		// dirty against the new HEAD even when it was clean before acceptance.
+		onDefault, err = defaultGit.OnDefaultBranch()
 		if err != nil {
-			return fmt.Errorf("list accepted paths: %w", err)
+			return fmt.Errorf("check registered checkout branch: %w", err)
 		}
-		// Cleanliness is judged on the paths the sync will TOUCH, because the
-		// sync is path-scoped: SyncPathsToRevision checks out only `touched`,
-		// so those are the only files a local change can lose.
-		//
-		// The whole-checkout rule this replaces (B-267's first landing) was
-		// safe-sounding and fatal in practice: .ducklab/bugs/audit.jsonl and
-		// project.toml change on every bug move and Settings edit — the
-		// engine dirties its own registered checkout continuously — so the
-		// whole-tree check made the fast-forward DEAD CODE. Measured: the
-		// first clean-tree accept of the feature's life (T-222) still warned
-		// "left untouched" because the engine had filed bugs that evening,
-		// and the person's checkout silently kept the INVERSE of the landed
-		// work — the stale-tree class the sync exists to kill.
-		clean, err = defaultGit.PathsAreClean(touched)
-		if err != nil {
-			return fmt.Errorf("check registered checkout paths: %w", err)
+		clean = true
+		if onDefault {
+			touched, err = defaultGit.ChangedPaths(defaultSHA, rebasedSHA)
+			if err != nil {
+				return fmt.Errorf("list accepted paths: %w", err)
+			}
+			clean, err = defaultGit.PathsAreClean(touched)
+			if err != nil {
+				return fmt.Errorf("check registered checkout paths: %w", err)
+			}
 		}
-	}
-	if err := defaultGit.FastForwardDefault(rs.run.Branch, defaultSHA); err != nil {
-		return fmt.Errorf("fast-forward-only merge of rebased %s: %w", short(rebasedSHA), err)
+		if err := defaultGit.FastForwardDefault(rs.run.Branch, defaultSHA); err == nil {
+			break
+		} else {
+			latest, headErr := defaultGit.DefaultBranchHead()
+			if attempt == 0 && headErr == nil && latest != defaultSHA {
+				rs.writer.AppendEvent("accept_retry", map[string]interface{}{
+					"reason": "default branch moved during acceptance", "from": defaultSHA, "to": latest,
+				})
+				continue
+			}
+			return fmt.Errorf("fast-forward-only merge of rebased %s: default branch moved again while acceptance reproduced its gate; retry Accept: %w", short(rebasedSHA), err)
+		}
 	}
 	// update-ref above intentionally does not alter the person's checkout. When
 	// it was on the landed branch, move its files too unless candidate paths have
