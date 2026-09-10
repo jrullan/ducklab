@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
@@ -158,22 +158,36 @@ func TestPlanExtendCanSeatItsCompositionReviewerFromTheLaunchLineUp(t *testing.T
 		artifact.KindPlan: "## M-01 — Core\n\n### T-001 — Existing task\n\n**Implements:** SPEC-001\n",
 	})
 
-	run, err := s.StageStart(context.Background(), id, StageRequest{
-		Stage: "plan", Extend: "add another task", Ducklings: []string{"pato-architect", "pato-reviewer"},
-	})
+	entry, err := s.registry.Get(id)
 	if err != nil {
-		t.Fatalf("explicit composition reviewer was rejected: %v", err)
+		t.Fatal(err)
 	}
-	if run.Mode != "solo" {
-		t.Fatalf("extend mode = %q, want solo", run.Mode)
+	projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for run.Roster["reviewer"] == "" && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	roster, _ := s.resolveRoster(projCfg, "solo")
+	needsReviewer, err := stageNeedsReviewer(entry.Path, "plan", "solo", false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if run.Roster["architect"] != "pato-architect" || run.Roster["reviewer"] != "pato-reviewer" {
-		t.Fatalf("effective stage roster = %#v", run.Roster)
+	s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
+	applyStageLineup(roster, []string{"pato-architect", "pato-reviewer"})
+	if roster[config.RoleArchitect] != "pato-architect" || roster[config.RoleReviewer] != "pato-reviewer" {
+		t.Fatalf("effective stage roster = %#v", roster)
 	}
-	_ = s.RunAbort(context.Background(), run.ID)
-	_, _ = s.waitForRun(context.Background(), run.ID)
+}
+
+func TestSoloAdoptDoesNotRequireACompositionReviewer(t *testing.T) {
+	s := writableService(t, "pato-architect")
+	_, root := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Existing requirement\n\n**Priority:** must\n",
+	})
+	needsReviewer, err := stageNeedsReviewer(root, "intake", "solo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needsReviewer {
+		t.Fatal("solo adoption required a reviewer although it does not run composition review")
+	}
 }

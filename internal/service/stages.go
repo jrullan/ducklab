@@ -263,7 +263,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		return nil, fmt.Errorf("load project config: %w", err)
 	}
 	roster, _ := s.resolveRoster(projCfg, mode)
-	needsReviewer, err := stageNeedsReviewer(entry.Path, req.Stage, mode)
+	needsReviewer, err := stageNeedsReviewer(entry.Path, req.Stage, mode, req.Adopt)
 	if err != nil {
 		return nil, err
 	}
@@ -362,9 +362,15 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	return run, nil
 }
 
-func stageNeedsReviewer(projectRoot, stageName, mode string) (bool, error) {
+func stageNeedsReviewer(projectRoot, stageName, mode string, adopt bool) (bool, error) {
 	if mode != "solo" {
 		return true, nil
+	}
+	// Adoption writes a whole first document through the solo artifact script;
+	// it does not take the existing-document fragment path and therefore never
+	// invokes the independent composition reviewer.
+	if adopt {
+		return false, nil
 	}
 	kind := stage.Name(stageName).Kind()
 	current, err := artifact.Load(projectRoot, kind)
@@ -666,7 +672,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// real spend that must land on this run's ledger.
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
-	needsReviewer, _ := stageNeedsReviewer(projectRoot, req.Stage, rs.run.Mode)
+	needsReviewer, _ := stageNeedsReviewer(projectRoot, req.Stage, rs.run.Mode, req.Adopt)
 	documentFilled := s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
 	// A request naming its own seats overrides for THIS run alone. An empty
 	// request means THE RESOLVED ROSTER DECIDES — project seats included.
