@@ -664,6 +664,13 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		Diff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(runDiffExclusions(mc.rs.run, root, mc.entry.Path)...)
 		},
+		InvariantFindings: func() ([]conv.Finding, error) {
+			paths, err := vcs.New(root).WorkingChangedPaths(runDiffExclusions(mc.rs.run, root, mc.entry.Path)...)
+			if err != nil {
+				return nil, err
+			}
+			return taskLaneFindings(mc.entry.Path, mc.req.TaskID, paths), nil
+		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
 			if kind == "turn_interrupted" {
