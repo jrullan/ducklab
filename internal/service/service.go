@@ -3072,18 +3072,20 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if ancestor, _ := workGit.IsAncestor(defaultSHA, "HEAD"); !ancestor {
 			files, rebaseErr := workGit.RebaseOnto(defaultSHA)
 			if rebaseErr != nil {
-				detail := fmt.Sprintf("rebase stopped with conflicts from base %s onto default %s in worktree %s; conflicting files: %s. Resolve the files there, run git add and git rebase --continue, then retry Accept; or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
+				detail := fmt.Sprintf("rebase from base %s onto default %s failed in worktree %s and was rolled back; conflicting files: %s. Retry Accept to rebase the unchanged run commit onto the then-current default, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
 				pending := map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "worktree": rs.run.WorktreePath, "retain_worktree": true}
+				// A materialized conflict pins the run to the default head seen by
+				// this attempt. Another accept may advance that head before a person
+				// resolves it, making the advertised resolution stale. Preserve the
+				// paths as evidence, but restore the branch to its candidate commit;
+				// the next Accept performs one fresh rebase against its observed head.
+				workGit.AbortIntegration()
 				if len(files) == 0 {
-					// A non-conflict rebase failure has no useful in-progress state for a
-					// person to resolve. Roll it back and say so; never point at a clean
-					// worktree as if conflict markers lived there.
-					workGit.AbortIntegration()
 					detail = fmt.Sprintf("rebase from base %s onto default %s failed and was rolled back: %v. Correct the repository state and retry Accept, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr)
 					pending["detail"] = detail
 				} else {
 					pending["conflicting_files"] = files
-					pending["rebase_in_progress"] = true
+					pending["rebase_aborted"] = true
 				}
 				rs.run.Status, rs.run.PendingKind = "paused", "gate"
 				rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -4321,9 +4323,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
-	// An accept-time rebase conflict is intentionally left materialized so the
-	// person can resolve it in the named worktree. Reject is the abort door: put
-	// the branch back before normal snapshot restoration and cleanup run.
+	// Runs paused by an older engine may still carry a materialized accept-time
+	// rebase. Reject remains the abort door for that durable legacy state before
+	// normal snapshot restoration and cleanup run.
 	rebaseInProgress, _ := rs.run.PendingData["rebase_in_progress"].(bool)
 	if rs.run.PendingKind == "gate" && rebaseInProgress {
 		vcs.New(runRoot(rs.run, rs.projectPath)).AbortIntegration()

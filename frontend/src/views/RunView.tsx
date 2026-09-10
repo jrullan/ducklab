@@ -1660,12 +1660,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       {run.pending_kind === "gate" && Array.isArray(run.pending_data?.conflicting_files) && (
         <section data-testid="worktree-conflict" className="m-2 rounded-card border border-serious p-3">
           <h2 className="text-sm font-medium text-serious">Rebase conflict</h2>
-          <p className="mt-1 text-sm text-ink">The rebase is stopped with conflict markers at <code>{String(run.pending_data?.worktree ?? run.worktree_path ?? "the worktree")}</code>. Resolve the files there, run <code>git add</code> and <code>git rebase --continue</code>, then retry Accept; or reject this run.</p>
+          <p className="mt-1 text-sm text-ink">The failed rebase was rolled back at <code>{String(run.pending_data?.worktree ?? run.worktree_path ?? "the worktree")}</code>. The run commit is intact; retry Accept to use the latest default branch.</p>
           <p className="mt-1 font-mono text-xs text-ink-muted">base {String(run.pending_data?.base_sha ?? "—")} · default {String(run.pending_data?.default_sha ?? "—")}</p>
           <ul className="mt-2 list-disc pl-5 font-mono text-sm text-ink-secondary">
             {(run.pending_data?.conflicting_files as unknown[]).map((file) => <li key={String(file)}>{String(file)}</li>)}
           </ul>
-          <p className="mt-2 text-sm text-ink-muted">Lawful options: complete the materialized rebase at the shown path, or reject.</p>
+          <p className="mt-2 text-sm text-ink-muted">Lawful options: retry acceptance against the current default branch, or reject.</p>
         </section>
       )}
       {run.warning && (
