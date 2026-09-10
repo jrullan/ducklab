@@ -1250,6 +1250,35 @@ func TestAStageCarriesItsOwnCallCap(t *testing.T) {
 	s.waitForRun(context.Background(), run.ID)
 }
 
+func TestStageRunStartRecordsTheEffectiveRequest(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "add provider isolation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detail.Run.StageRequest["extend"]; got != "add provider isolation" {
+		t.Fatalf("run stage_request extend = %#v", got)
+	}
+	s.runsMu.RLock()
+	runDir := s.runs[run.ID].runDir
+	s.runsMu.RUnlock()
+	data, err := os.ReadFile(filepath.Join(runDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"stage_request":{`) || !strings.Contains(string(data), `"extend":"add provider isolation"`) {
+		t.Fatalf("run_start omitted the request:\n%s", data)
+	}
+	_ = s.RunAbort(context.Background(), run.ID)
+}
+
 // The declared-fallback door: provider weather paused a spec mid-draft, the
 // person clicked once, and the run resumed with its seats on the stand-in —
 // recorded, never a router's silent choice. The stage's persisted request

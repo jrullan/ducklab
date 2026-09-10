@@ -4,7 +4,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -773,13 +775,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
-		fmt.Printf("run %s: %s (task %s)\n", run["id"], run["status"], run["task_id"])
-		fmt.Printf("  verdict: %s\n", run["verdict"])
-		// A run that says only FAILED sends you to events.jsonl. Some of these
-		// messages are written to be acted on.
-		if why := str(run["failure"]); why != "" {
-			fmt.Printf("  failure: %s\n", why)
-		}
+		printRunSummary(os.Stdout, run)
 		return 0
 	case "diff":
 		if len(args) < 1 {
@@ -985,6 +981,21 @@ func runCmd(verb string, args []string, repo string) int {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown run command: %s\n", verb)
 		return 2
+	}
+}
+
+func printRunSummary(w io.Writer, run map[string]interface{}) {
+	fmt.Fprintf(w, "run %s: %s (task %s)\n", str(run["id"]), str(run["status"]), str(run["task_id"]))
+	fmt.Fprintf(w, "  verdict: %s\n", str(run["verdict"]))
+	if request, ok := run["stage_request"].(map[string]interface{}); ok && len(request) > 0 {
+		if body, err := json.MarshalIndent(request, "    ", "  "); err == nil {
+			fmt.Fprintf(w, "  request:\n    %s\n", body)
+		}
+	}
+	// A run that says only FAILED sends you to events.jsonl. Some of these
+	// messages are written to be acted on.
+	if why := str(run["failure"]); why != "" {
+		fmt.Fprintf(w, "  failure: %s\n", why)
 	}
 }
 

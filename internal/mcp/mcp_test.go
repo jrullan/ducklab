@@ -645,6 +645,17 @@ func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 	}
 }
 
+func TestRunGetCarriesTheStageRequest(t *testing.T) {
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{
+		"r-stage": {"id": "r-stage", "stage": "plan", "stage_request": map[string]interface{}{"extend": "add provider isolation"}},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "run_get", `{"run_id":"r-stage"}`))
+	body, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(body, "add provider isolation") {
+		t.Fatalf("run_get omitted stage_request: error=%v body=%s", isErr, body)
+	}
+}
+
 func TestRunGetCarriesStructuredReviewerFindings(t *testing.T) {
 	findings := []interface{}{
 		map[string]interface{}{"severity": "high", "file": "internal/mcp/tools.go", "line": 42, "issue": "missing action", "fix": "add the tool"},
