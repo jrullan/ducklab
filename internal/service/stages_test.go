@@ -1277,6 +1277,7 @@ func TestStageRunStartRecordsTheEffectiveRequest(t *testing.T) {
 		t.Fatalf("run_start omitted the request:\n%s", data)
 	}
 	_ = s.RunAbort(context.Background(), run.ID)
+	_, _ = s.waitForRun(context.Background(), run.ID)
 }
 
 // The declared-fallback door: provider weather paused a spec mid-draft, the
