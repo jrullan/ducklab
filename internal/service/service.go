@@ -3568,9 +3568,12 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 		// The atomic is what a loop already in flight reads before its next
 		// call; the record is what a resume re-enters with.
 		rs.capLifted.Store(true)
-		w.AppendEvent("budget_lifted", map[string]interface{}{
-			"kind": kind, "was": was, "by": "human",
-		})
+		data := map[string]interface{}{"kind": kind, "was": was, "by": "human"}
+		if warning := s.smallSeatPairLiftWarning(rs.run); warning != "" {
+			data["warning"] = warning
+			w.AppendEvent("warning", map[string]interface{}{"detail": warning})
+		}
+		w.AppendEvent("budget_lifted", data)
 		if err := w.WriteState(); err != nil {
 			return nil, err
 		}
@@ -3611,6 +3614,18 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 	// The meters everywhere update now, not at the next model call.
 	s.publishSpend(rs, tracker)
 	return rs.snapshotRun(), nil
+}
+
+func (s *Service) smallSeatPairLiftWarning(run *runlog.Run) string {
+	if run == nil || run.Mode != "pair" {
+		return ""
+	}
+	implementer := config.DucklingID(run.Roster["implementer"])
+	tier, _ := s.resolvedDucklingTier(implementer)
+	if tier != config.ModelTierSmall {
+		return ""
+	}
+	return fmt.Sprintf("this lifts defaults.small_seat_pair_reserve for small implementer %s; the independent reviewer's slot may starve before review begins", implementer)
 }
 
 // RunAbort aborts a run.
@@ -4369,21 +4384,21 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			data["ceiling"] = t.MaxTurnsCeiling
 			data["ceiling_source"] = t.MaxTurnsCeilingSource
 		}
+		if t.MaxTurnsReserve > 0 {
+			data["reserve"] = t.MaxTurnsReserve
+			data["reserve_source"] = t.MaxTurnsReserveSource
+			data["reserve_duckling"] = t.MaxTurnsReserveDuckling
+			data["reserve_lifted"] = t.MaxTurnsRequested > t.MaxTurnsReserve
+		}
 		rs.writer.AppendEvent("reply_call", data)
 	}
 	// In time to act: the reply is about to spend its last allowed call,
 	// and the lift that could save it sits one tick away in the budget card.
 	cache.onCapNear = func(t *agent.Turn, used, max int) {
-		detail := fmt.Sprintf("%s is on the LAST of its %d calls for this reply — tick "+
-			"\"no cap\" on calls/reply in the budget card to let it keep working, or it "+
-			"will answer from what it has", t.Role, max)
-		if t.MaxTurnsCeiling > 0 && max == t.MaxTurnsCeiling && t.MaxTurnsRequested >= t.MaxTurnsCeiling {
-			detail = fmt.Sprintf("%s is on the LAST of its %d calls for this reply — %s is a hard ceiling; defaults, overrides, and no-cap cannot raise it", t.Role, max, t.MaxTurnsCeilingSource)
-		}
 		rs.writer.AppendEvent("warning", map[string]interface{}{
 			"round": t.Round, "turn": t.Index,
 			"role": string(t.Role), "duckling": string(t.Duckling),
-			"detail": detail,
+			"detail": capNearDetail(t, max),
 		})
 	}
 	// Provider weather, on the record as it happens: the person watching an
@@ -4429,6 +4444,19 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 	// would make the transcript show a model's false starts as its reply, and
 	// the contract parser reads that text.
 	cache.onReasoning = publish("reasoning_delta")
+}
+
+func capNearDetail(t *agent.Turn, max int) string {
+	detail := fmt.Sprintf("%s is on the LAST of its %d calls for this reply — tick "+
+		"\"no cap\" on calls/reply in the budget card to let it keep working, or it "+
+		"will answer from what it has", t.Role, max)
+	if t.MaxTurnsCeiling > 0 && max == t.MaxTurnsCeiling && t.MaxTurnsRequested >= t.MaxTurnsCeiling {
+		return fmt.Sprintf("%s is on the LAST of its %d calls for this reply — %s is a hard ceiling; defaults, overrides, and no-cap cannot raise it", t.Role, max, t.MaxTurnsCeilingSource)
+	}
+	if t.MaxTurnsReserve > 0 && max == t.MaxTurnsReserve {
+		return fmt.Sprintf("%s is on the LAST of its %d calls for this reply — raise defaults.small_seat_pair_reserve in Settings, set a run calls/reply override, or tick no cap; lifting it may starve the independent reviewer's slot", t.Role, max)
+	}
+	return detail
 }
 
 // runHasUnsavedWork reports whether failing this run would destroy something:

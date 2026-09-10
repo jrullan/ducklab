@@ -153,3 +153,50 @@ func TestALiveLiftCannotCrossAHardTurnCeiling(t *testing.T) {
 		t.Fatalf("call caps = %v, want %v", calls, want)
 	}
 }
+
+// Pair's small-seat reserve protects review time by default, but it is not a
+// script invariant. A person watching the run may deliberately cross it; the
+// token, cost, and wallclock budgets remain the guardrails.
+func TestALiveLiftCanCrossASmallSeatPairReserve(t *testing.T) {
+	var lifted atomic.Bool
+	var calls []string
+	fake := provider.NewFake("f")
+	fake.ScriptFunc = func(req provider.ChatRequest, callCount int) *provider.ChatResponse {
+		content := "Finished after the reserve was lifted."
+		if callCount == 1 {
+			content = "Looking.\n```ducklab\n{\"tool\":\"fs_list\",\"args\":{\"path\":\".\"}}\n```"
+			lifted.Store(true)
+		}
+		return &provider.ChatResponse{
+			Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: content}, FinishReason: provider.FinishStop}},
+			Usage:   provider.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}
+	}
+	loop := &Loop{
+		Provider: fake,
+		Duckling: &DucklingConfig{ID: "small", Provider: "local", Model: "m"},
+		Registry: tools.NewRegistry(),
+		Budget:   budget.NewTracker(&budget.Budget{MaxUSD: 10, MaxTokens: 1e6, MaxTurns: 50, MaxWallclockS: 600}),
+		CapLift:  lifted.Load,
+		OnCall: func(turn *Turn, n, max int) {
+			calls = append(calls, fmt.Sprintf("%d/%d/%s", n, max, turn.MaxTurnsSource))
+		},
+	}
+	turn := &Turn{
+		Role: config.RoleImplementer, Prompt: "Implement it.", Contract: "freeform",
+		Toolbelt: []string{"fs_list"}, MaxTurns: 2, MaxTurnsRequested: 2,
+		MaxTurnsSource: "small-seat pair reserve (default)", MaxTurnsReserve: 2,
+	}
+
+	outcome, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Text != "Finished after the reserve was lifted." {
+		t.Fatalf("outcome = %q", outcome.Text)
+	}
+	want := []string{"1/2/small-seat pair reserve (default)", "2/10000/live no-cap"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("call caps = %v, want %v", calls, want)
+	}
+}

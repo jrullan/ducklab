@@ -63,7 +63,7 @@ type Params struct {
 	// shown. Set only when revising, and it changes the job entirely: the
 	// architect edits an existing document rather than writing a new one.
 	Revision string
-	// SmallSeat says the project's implementer is a small seat (a local
+	// SmallSeat says the run's effective implementer is a small seat (a local
 	// model): the plan is portioned for it — few criteria per task.
 	SmallSeat bool
 	// OnEvent, if set, receives the stage's own record events (dedupe).

@@ -24,17 +24,20 @@ import (
 
 // Turn is one scheduled unit of conversation.
 type Turn struct {
-	Role                  config.Role
-	Duckling              config.DucklingID
-	Prompt                string
-	Toolbelt              []string
-	Contract              string
-	MaxTurns              int
-	MaxTurnsRequested     int
-	MaxTurnsSource        string
-	MaxTurnsCeiling       int
-	MaxTurnsCeilingSource string
-	Anonymize             bool
+	Role                    config.Role
+	Duckling                config.DucklingID
+	Prompt                  string
+	Toolbelt                []string
+	Contract                string
+	MaxTurns                int
+	MaxTurnsRequested       int
+	MaxTurnsSource          string
+	MaxTurnsCeiling         int
+	MaxTurnsCeilingSource   string
+	MaxTurnsReserve         int
+	MaxTurnsReserveSource   string
+	MaxTurnsReserveDuckling config.DucklingID
+	Anonymize               bool
 	// Persona narrows the role's system prompt to the situation ("critic" for
 	// a document council's reviewer). Empty keeps the role's default.
 	Persona string
@@ -825,11 +828,14 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 	}
 	if len(outcome.ToolCalls) > 0 && !substantiveAnswer(outcome.Text) {
+		advice := "Raise the turn cap for this role, or the task needs narrowing"
+		if turn.MaxTurnsReserve > 0 && maxTurns == turn.MaxTurnsReserve {
+			advice = "Raise defaults.small_seat_pair_reserve in Settings, set a run calls/reply override, or narrow the task"
+		}
 		return outcome, fmt.Errorf(
 			"%w: %s used all %d of its turns calling tools and never gave a substantive answer "+
-				"(%d tool calls), even when asked to conclude without them. "+
-				"Raise the turn cap for this role, or the task needs narrowing",
-			ErrNoAnswer, turn.Role, maxTurns, len(outcome.ToolCalls))
+				"(%d tool calls), even when asked to conclude without them. %s",
+			ErrNoAnswer, turn.Role, maxTurns, len(outcome.ToolCalls), advice)
 	}
 	if !substantiveAnswer(outcome.Text) {
 		return outcome, fmt.Errorf("%w: %s returned only whitespace or Markdown fences", ErrNoAnswer, turn.Role)

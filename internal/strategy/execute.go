@@ -72,10 +72,14 @@ type ExecuteParams struct {
 	// known coverage instead of inventing a complete topology from an empty
 	// response. Empty preserves the legacy cold-authoring path.
 	PlanSeed []PlanSeedSpec
-	// SmallSeat says the project's implementer is a small local seat: the
+	// SmallSeat says the run's effective implementer is a small local seat: the
 	// plan's structure check enforces the portion rule (≤3 top-level
 	// deliverables per task) instead of only asking for it.
 	SmallSeat bool
+	// SmallSeatPairReserve is evidence about pair's contextual implementer
+	// default. Cap resolution already decided the effective MaxTurns; this
+	// value must never be applied as a hard ceiling here.
+	SmallSeatPairReserve int
 	// StructureCheck adds project/environment facts to the document's
 	// deterministic structure check. The plan stage uses it to distinguish a
 	// valid-but-missing capability from a likely misspelled local capability.
@@ -508,16 +512,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			} else {
 				turn.MaxTurns = requested
 			}
-			if params.SmallSeat && script.Name == "pair" && turn.Role == config.RoleImplementer {
-				// Pair mode promises an independent reviewer. A small local seat
-				// can otherwise spend a configured high role cap on slow calls
-				// until the run wallclock expires before review begins. Large
-				// seats retain the explicit role-cap override contract.
-				turn.MaxTurnsCeiling = 24
-				turn.MaxTurnsCeilingSource = "small-seat pair reserve"
-				if turn.MaxTurns > turn.MaxTurnsCeiling {
-					turn.MaxTurns = turn.MaxTurnsCeiling
-				}
+			if script.Name == "pair" && turn.Role == config.RoleImplementer && params.SmallSeatPairReserve > 0 {
+				turn.MaxTurnsReserve = params.SmallSeatPairReserve
+				turn.MaxTurnsReserveSource = "small-seat pair reserve (default)"
+				turn.MaxTurnsReserveDuckling = params.Roster[config.RoleImplementer]
 			}
 
 			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {

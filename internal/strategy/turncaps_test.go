@@ -90,19 +90,27 @@ func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
 	}
 }
 
-func TestSmallSeatTurnCapsCannotSpendPairReviewReserveOnImplementer(t *testing.T) {
+func TestSmallSeatPairReserveIsNotAHardCeiling(t *testing.T) {
 	var got int
 	var requested int
-	var ceilingSource string
+	var ceiling int
+	var reserve int
+	var reserveSource string
+	var reserveDuckling config.DucklingID
 	params := &ExecuteParams{
-		SmallSeat: true,
-		Roster:    map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "review"},
-		TurnCaps:  map[config.Role]int{config.RoleImplementer: 100},
+		SmallSeat:            true,
+		SmallSeatPairReserve: 24,
+		Roster:               map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "review"},
+		TurnCaps:             map[config.Role]int{config.RoleImplementer: 100},
+		TurnCapSources:       map[config.Role]string{config.RoleImplementer: "run override"},
 		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
 			if turn.Role == config.RoleImplementer {
 				got = turn.MaxTurns
 				requested = turn.MaxTurnsRequested
-				ceilingSource = turn.MaxTurnsCeilingSource
+				ceiling = turn.MaxTurnsCeiling
+				reserve = turn.MaxTurnsReserve
+				reserveSource = turn.MaxTurnsReserveSource
+				reserveDuckling = turn.MaxTurnsReserveDuckling
 				return &agent.Outcome{Text: "done"}, nil
 			}
 			return verdictOutcome("approve"), nil
@@ -113,10 +121,16 @@ func TestSmallSeatTurnCapsCannotSpendPairReviewReserveOnImplementer(t *testing.T
 	if _, err := ExecuteScript(context.Background(), PairScript(), params); err != nil {
 		t.Fatal(err)
 	}
-	if got != 24 {
-		t.Fatalf("pair implementer ran with MaxTurns=%d; configured 100 must not consume the reviewer reserve above ceiling 24", got)
+	if got != 100 || requested != 100 {
+		t.Fatalf("pair implementer ran with MaxTurns=%d requested=%d; run override 100 must cross the default reserve", got, requested)
 	}
-	if requested != 100 || ceilingSource != "small-seat pair reserve" {
-		t.Fatalf("clamp provenance = requested %d, ceiling %q", requested, ceilingSource)
+	if ceiling != 0 {
+		t.Fatalf("small-seat reserve became hard ceiling %d", ceiling)
+	}
+	if reserve != 24 || reserveSource != "small-seat pair reserve (default)" {
+		t.Fatalf("reserve provenance = %d from %q", reserve, reserveSource)
+	}
+	if reserveDuckling != "impl" {
+		t.Fatalf("reserve attributed to %q, want actual implementer impl", reserveDuckling)
 	}
 }

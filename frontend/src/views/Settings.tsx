@@ -390,6 +390,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [roleTurns, setRoleTurns] = useState<Record<string, string>>({});
   const [phaseTurns, setPhaseTurns] = useState<Record<string, string>>({});
   const [agentTurns, setAgentTurns] = useState("");
+  const [smallSeatPairReserve, setSmallSeatPairReserve] = useState("");
   const [buildMode, setBuildMode] = useState("");
   const [testMode, setTestMode] = useState("");
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: unknown }>({
@@ -465,6 +466,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       test: v.phase_turns?.test ? String(v.phase_turns.test) : "",
     });
     setAgentTurns(String(v.agent_max_turns));
+    setSmallSeatPairReserve(String(v.small_seat_pair_reserve ?? 24));
     setBuildMode(v.build_mode ?? "");
     setTestMode(v.test_mode ?? "");
   };
@@ -548,6 +550,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       client.modeDefaultsSet({
         rounds: numbersOnly(rounds),
         agent_max_turns: Number(agentTurns) || 0,
+        small_seat_pair_reserve: Number(smallSeatPairReserve) || 0,
         // Empty seats are UI scaffolding, not preferences.
         build_mode: buildMode,
         test_mode: testMode,
@@ -783,8 +786,18 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
           ),
         )}
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {num(
+          smallSeatPairReserve,
+          setSmallSeatPairReserve,
+          "small-seat pair reserve",
+          "small-seat-pair-reserve",
+          "24",
+          "w-40",
+        )}
+      </div>
       <p className="mt-2 text-xs text-ink-muted">
-        Empty uses the global implementer fallback ({modes.agent_max_turns}). For build/test implementers precedence is global → phase → role → run; other roles keep their script design until a role or run override applies. A hard script ceiling still wins.
+        Empty phase values use the global implementer fallback ({modes.agent_max_turns}). For build/test implementers precedence is global → phase → small-seat pair reserve → role → run. The reserve protects time for independent review but is a default: raising it, overriding it, or choosing no cap may starve the reviewer's slot; other roles keep their script design until a role or run override applies. A hard script ceiling still wins.
       </p>
 
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>

@@ -71,6 +71,9 @@ func TestDefaultGlobal(t *testing.T) {
 	if g.Defaults.Budget.MaxUSD != 2.00 {
 		t.Errorf("Defaults.Budget.MaxUSD = %f, want 2.00", g.Defaults.Budget.MaxUSD)
 	}
+	if g.Defaults.SmallSeatPairReserve != 24 {
+		t.Errorf("Defaults.SmallSeatPairReserve = %d, want 24", g.Defaults.SmallSeatPairReserve)
+	}
 	if g.Engine.MaxConcurrentRuns != 2 {
 		t.Errorf("Engine.MaxConcurrentRuns = %d, want 2", g.Engine.MaxConcurrentRuns)
 	}

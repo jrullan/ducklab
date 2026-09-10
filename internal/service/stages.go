@@ -441,16 +441,11 @@ func (s *Service) acceptedPriorityNames(projectRoot string) map[string]string {
 	return out
 }
 
-// smallImplementerSeat reports whether the project's build implementer is a
-// declared small model. Provider locality remains only as a compatibility
-// fallback for ducklings saved before tiers existed; it is never consulted
-// when a tier is present.
-func (s *Service) smallImplementerSeat(projectID string) bool {
-	cfg, err := s.projectConfig(projectID)
-	if err != nil {
-		return false
-	}
-	roster, _ := s.resolveRoster(cfg, "build")
+// smallImplementerSeat reports whether the implementer actually seated for a
+// run is a declared small model. Provider locality remains only as a
+// compatibility fallback for ducklings saved before tiers existed; it is
+// never consulted when a tier is present.
+func (s *Service) smallImplementerSeat(roster map[config.Role]config.DucklingID) bool {
 	id := roster[config.RoleImplementer]
 	if id == "" {
 		return false
@@ -497,14 +492,14 @@ func validateSupportProfile(profile string) error {
 	}
 }
 
-func (s *Service) stageSupportProfile(projectID, requested string) (name, source string, small bool) {
+func (s *Service) stageSupportProfile(roster map[config.Role]config.DucklingID, requested string) (name, source string, small bool) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "small":
 		return "small", "request", true
 	case "standard":
 		return "standard", "request", false
 	}
-	if s.smallImplementerSeat(projectID) {
+	if s.smallImplementerSeat(roster) {
 		return "small", "implementer tier", true
 	}
 	return "standard", "implementer tier", false
@@ -642,7 +637,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	for _, role := range filled {
 		rs.run.RosterSources[string(role)] = "request"
 	}
-	profile, profileSource, smallSeat := s.stageSupportProfile(rs.run.ProjectID, req.SupportProfile)
+	profile, profileSource, smallSeat := s.stageSupportProfile(roster, req.SupportProfile)
 	rs.run.SupportProfile = profile
 	rs.run.SupportProfileSource = profileSource
 	rs.writer.AppendEvent("support_profile_resolved", map[string]interface{}{
@@ -880,7 +875,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			if fatal != "" {
 				return "", fmt.Errorf("%s", fatal)
 			}
-			turnCaps := s.resolveTurnCaps(req.Stage, req.AgentTurns)
+			turnCaps, pairReserve := s.resolveRosterTurnCaps(req.Stage, req.AgentTurns, rs.run.Mode, roster)
 			res, rerr := strategy.ExecuteScript(ctx, script, &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
@@ -910,11 +905,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					}
 					return inventoryUnaccounted(inventory.Items, doc)
 				},
-				KnownIDs:       s.knownIDs(projectRoot),
-				PriorityByID:   s.acceptedPriorities(projectRoot),
-				PriorityByName: s.acceptedPriorityNames(projectRoot),
-				PlanSeed:       planSeed,
-				SmallSeat:      smallSeat,
+				KnownIDs:             s.knownIDs(projectRoot),
+				PriorityByID:         s.acceptedPriorities(projectRoot),
+				PriorityByName:       s.acceptedPriorityNames(projectRoot),
+				PlanSeed:             planSeed,
+				SmallSeat:            smallSeat,
+				SmallSeatPairReserve: pairReserve,
 				StructureCheck: func(raw string) []string {
 					switch req.Stage {
 					case "spec":

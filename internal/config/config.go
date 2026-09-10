@@ -119,6 +119,10 @@ type Defaults struct {
 	RepairAttempts     int      `toml:"repair_attempts" json:"repair_attempts"`
 	ToolResultMaxBytes int      `toml:"tool_result_max_bytes" json:"tool_result_max_bytes"`
 	AgentMaxTurns      int      `toml:"agent_max_turns" json:"agent_max_turns"`
+	// SmallSeatPairReserve is the default calls/reply portion for a small
+	// implementer in pair mode. It protects time for independent review, but
+	// remains a default: role/run overrides and a live no-cap lift may cross it.
+	SmallSeatPairReserve int `toml:"small_seat_pair_reserve" json:"small_seat_pair_reserve"`
 	// AutopilotMaxTasks caps how many runs one autopilot activation may start
 	// (0 = built-in default). AutopilotMaxFails is how many consecutive
 	// failures stop the loop (0 = built-in default of 2).
@@ -171,6 +175,8 @@ type Defaults struct {
 	TransientRetries int    `toml:"transient_retries" json:"transient_retries"`
 	Budget           Budget `toml:"budget" json:"budget"`
 }
+
+const DefaultSmallSeatPairReserve = 24
 
 // Engine holds engine configuration.
 type Engine struct {
@@ -658,6 +664,9 @@ func (g *Global) Validate(path string) error {
 	if err := ValidateMode(g.Defaults.Mode); err != nil {
 		return &Error{File: path, Key: "defaults.mode", Msg: err.Error()}
 	}
+	if g.Defaults.SmallSeatPairReserve <= 0 || g.Defaults.SmallSeatPairReserve > 200 {
+		return &Error{File: path, Key: "defaults.small_seat_pair_reserve", Msg: "must be 1 to 200"}
+	}
 	if g.Defaults.Budget.MaxUSD <= 0 {
 		return &Error{File: path, Key: "defaults.budget.max_usd", Msg: "must be positive"}
 	}
@@ -718,13 +727,14 @@ func DefaultGlobal() *Global {
 	return &Global{
 		Schema: 1,
 		Defaults: Defaults{
-			Autonomy:           AutonomyGuarded,
-			Mode:               ModeSolo,
-			RepairAttempts:     2,
-			ToolResultMaxBytes: 32768,
-			AgentMaxTurns:      24,
-			HTTPTimeoutS:       300,
-			TransientRetries:   3,
+			Autonomy:             AutonomyGuarded,
+			Mode:                 ModeSolo,
+			RepairAttempts:       2,
+			ToolResultMaxBytes:   32768,
+			AgentMaxTurns:        24,
+			SmallSeatPairReserve: DefaultSmallSeatPairReserve,
+			HTTPTimeoutS:         300,
+			TransientRetries:     3,
 			Budget: Budget{
 				MaxUSD:                        2.00,
 				MaxTokens:                     400000,

@@ -492,7 +492,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
-	turnCaps := s.resolveTurnCaps("test", req.AgentTurns)
+	mode := testMode(req.Mode)
+	turnCaps, pairReserve := s.resolveRosterTurnCaps("test", req.AgentTurns, mode, roster)
+	smallSeat := s.smallImplementerSeat(roster)
 
 	params := &strategy.ExecuteParams{
 		LiveToolEvents: true,
@@ -505,13 +507,15 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Prompt: testFirstPrompt(
 			s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, req.TaskID),
 			before.Command) + humanNote(req.Note) + rs.answeredDecisions(),
-		ExecContext:    ectx,
-		Runner:         s.runnerFor(cache, roster, ectx),
-		Roster:         roster,
-		TurnCaps:       turnCaps.Caps,
-		TurnCapSources: turnCaps.Sources,
-		Diff:           func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
-		OnEvent:        func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		ExecContext:          ectx,
+		Runner:               s.runnerFor(cache, roster, ectx),
+		Roster:               roster,
+		TurnCaps:             turnCaps.Caps,
+		TurnCapSources:       turnCaps.Sources,
+		SmallSeat:            smallSeat,
+		SmallSeatPairReserve: pairReserve,
+		Diff:                 func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
+		OnEvent:              func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
 	// The round gate earns its suite only in pair: two rounds, and a green
@@ -519,7 +523,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// verdict. In solo there is no second round for it to buy, and the
 	// stage's own "after" gate measures the same unchanged tree minutes
 	// later — so solo runs no round gate at all.
-	if testMode(req.Mode) == "pair" {
+	if mode == "pair" {
 		params.Gate = func(ctx context.Context) (string, string, error) {
 			rs.gateRoot = projectRoot
 			rs.run.GateRoot = projectRoot
@@ -532,7 +536,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		}
 	}
 
-	res, err := strategy.ExecuteTestFirstMode(ctx, testMode(req.Mode), params)
+	res, err := strategy.ExecuteTestFirstMode(ctx, mode, params)
 	recordSpend(rs, tracker)
 	if err != nil {
 		// A pause is not a failure. The prompt licenses the test writer to

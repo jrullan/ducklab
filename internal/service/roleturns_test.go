@@ -204,6 +204,122 @@ func TestCallsPerReplyPrecedenceIsGlobalPhaseRoleRun(t *testing.T) {
 	}
 }
 
+// The pair reserve is a contextual default for a small implementer, not a
+// hidden script ceiling. More-specific role and run choices must win, while
+// an untouched small-seat pair gets the configured reserve with provenance.
+func TestSmallSeatPairReserveParticipatesInTurnCapPrecedence(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns:        24,
+		SmallSeatPairReserve: 30,
+		PhaseTurns:           map[string]int{"build": 40},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reserved := s.resolveTurnCapsFor("build", 0, "pair", true)
+	if got := reserved.Caps[config.RoleImplementer]; got != 30 {
+		t.Fatalf("small pair implementer = %d, want configured reserve 30", got)
+	}
+	if got := reserved.Sources[config.RoleImplementer]; got != "small-seat pair reserve (default)" {
+		t.Fatalf("small pair source = %q", got)
+	}
+	standard := s.resolveTurnCapsFor("build", 0, "pair", false)
+	if standard.Caps[config.RoleImplementer] != 40 || standard.Sources[config.RoleImplementer] != "build default" {
+		t.Fatalf("standard pair inherited small reserve: %#v / %#v", standard.Caps, standard.Sources)
+	}
+
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns:        24,
+		SmallSeatPairReserve: 30,
+		PhaseTurns:           map[string]int{"build": 40},
+		RoleTurns:            map[string]int{"implementer": 50},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	role := s.resolveTurnCapsFor("build", 0, "pair", true)
+	if role.Caps[config.RoleImplementer] != 50 || role.Sources[config.RoleImplementer] != "implementer role default" {
+		t.Fatalf("role override did not cross reserve: %#v / %#v", role.Caps, role.Sources)
+	}
+	run := s.resolveTurnCapsFor("build", 70, "pair", true)
+	if run.Caps[config.RoleImplementer] != 70 || run.Sources[config.RoleImplementer] != "run override" {
+		t.Fatalf("run override did not cross reserve: %#v / %#v", run.Caps, run.Sources)
+	}
+	lifted := s.resolveTurnCapsFor("build", -1, "pair", true)
+	if lifted.Caps[config.RoleImplementer] != uncappedTurns || lifted.Sources[config.RoleImplementer] != "run no-cap" {
+		t.Fatalf("run no-cap did not cross reserve: %#v / %#v", lifted.Caps, lifted.Sources)
+	}
+}
+
+// Seat class follows the roster that was actually dispatched. A project may
+// default to a small model and be deliberately reseated for one run; reading
+// project.toml again silently applies policy to the wrong duckling (B-360).
+func TestSmallImplementerClassificationUsesEffectiveRoster(t *testing.T) {
+	s := serviceWithDucklings(t, "small", "large", "reviewer")
+	s.cfgMu.Lock()
+	small := s.cfg.Ducklings["small"]
+	small.Tier = config.ModelTierSmall
+	s.cfg.Ducklings["small"] = small
+	large := s.cfg.Ducklings["large"]
+	large.Tier = config.ModelTierLarge
+	s.cfg.Ducklings["large"] = large
+	s.cfgMu.Unlock()
+
+	if s.smallImplementerSeat(map[config.Role]config.DucklingID{config.RoleImplementer: "large"}) {
+		t.Fatal("a large effective implementer inherited the project's small-seat policy")
+	}
+	if !s.smallImplementerSeat(map[config.Role]config.DucklingID{config.RoleImplementer: "small"}) {
+		t.Fatal("a small effective implementer missed the small-seat policy")
+	}
+	largeCaps, largeReserve := s.resolveRosterTurnCaps("build", 0, "pair", map[config.Role]config.DucklingID{config.RoleImplementer: "large"})
+	if largeReserve != 0 || largeCaps.Sources[config.RoleImplementer] == "small-seat pair reserve (default)" {
+		t.Fatalf("large effective roster received reserve %d: %#v", largeReserve, largeCaps.Sources)
+	}
+	smallCaps, smallReserve := s.resolveRosterTurnCaps("build", 0, "pair", map[config.Role]config.DucklingID{config.RoleImplementer: "small"})
+	if smallReserve != config.DefaultSmallSeatPairReserve || smallCaps.Sources[config.RoleImplementer] != "small-seat pair reserve (default)" {
+		t.Fatalf("small effective roster missed reserve %d: %#v", smallReserve, smallCaps.Sources)
+	}
+}
+
+func TestCapNearNamesTheSmallSeatReserveSettingAndRisk(t *testing.T) {
+	turn := &agent.Turn{
+		Role: config.RoleImplementer, MaxTurnsRequested: 24,
+		MaxTurnsReserve: 24, MaxTurnsReserveSource: "small-seat pair reserve (default)",
+	}
+	detail := capNearDetail(turn, 24)
+	for _, want := range []string{"defaults.small_seat_pair_reserve", "Settings", "reviewer's slot"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("cap warning %q does not name %q", detail, want)
+		}
+	}
+}
+
+func TestLiveCallsLiftWarnsWhenItCrossesASmallSeatPairReserve(t *testing.T) {
+	s := serviceWithDucklings(t, "small", "large")
+	s.cfgMu.Lock()
+	small := s.cfg.Ducklings["small"]
+	small.Tier = config.ModelTierSmall
+	s.cfg.Ducklings["small"] = small
+	large := s.cfg.Ducklings["large"]
+	large.Tier = config.ModelTierLarge
+	s.cfg.Ducklings["large"] = large
+	s.cfgMu.Unlock()
+
+	warning := s.smallSeatPairLiftWarning(&runlog.Run{
+		Mode: "pair", Roster: map[string]string{"implementer": "small"},
+	})
+	for _, want := range []string{"defaults.small_seat_pair_reserve", "small", "reviewer's slot"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("lift warning %q does not name %q", warning, want)
+		}
+	}
+	if got := s.smallSeatPairLiftWarning(&runlog.Run{
+		Mode: "pair", Roster: map[string]string{"implementer": "large"},
+	}); got != "" {
+		t.Fatalf("large implementer received small-seat warning: %q", got)
+	}
+}
+
 func TestEmptyPhaseUsesGlobalFallbackForImplementerOnly(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	resolved := s.resolveTurnCaps("test", 0)
@@ -245,7 +361,12 @@ func TestTaskSeatClassificationRecognizesLocalBuildImplementer(t *testing.T) {
 	s.cfgMu.Unlock()
 
 	projectID, _ := projectWithConfig(t, s, "local-seat")
-	if !s.smallImplementerSeat(projectID) {
+	projectCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster, _ := s.resolveRoster(projectCfg, "build")
+	if !s.smallImplementerSeat(roster) {
 		t.Fatal("local provider selected by the build roster was not classified as a small implementer seat")
 	}
 }
@@ -262,13 +383,18 @@ func TestDeclaredTierOverridesProviderLocality(t *testing.T) {
 	s.cfgMu.Unlock()
 
 	projectID, _ := projectWithConfig(t, s, "declared-large-seat")
-	if s.smallImplementerSeat(projectID) {
+	projectCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster, _ := s.resolveRoster(projectCfg, "build")
+	if s.smallImplementerSeat(roster) {
 		t.Fatal("declared large tier was overridden by local provider address")
 	}
-	if name, source, small := s.stageSupportProfile(projectID, "small"); name != "small" || source != "request" || !small {
+	if name, source, small := s.stageSupportProfile(roster, "small"); name != "small" || source != "request" || !small {
 		t.Fatalf("explicit support profile = %q/%q/%v", name, source, small)
 	}
-	if name, source, small := s.stageSupportProfile(projectID, "auto"); name != "standard" || source != "implementer tier" || small {
+	if name, source, small := s.stageSupportProfile(roster, "auto"); name != "standard" || source != "implementer tier" || small {
 		t.Fatalf("automatic support profile = %q/%q/%v", name, source, small)
 	}
 }

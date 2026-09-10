@@ -2870,6 +2870,9 @@
             },
             "type": "object"
           },
+          "small_seat_pair_reserve": {
+            "type": "integer"
+          },
           "test_mode": {
             "type": "string"
           },
@@ -2889,6 +2892,7 @@
           "script_role_turns",
           "script_rounds",
           "seats",
+          "small_seat_pair_reserve",
           "turn_ceilings"
         ],
         "type": "object"
