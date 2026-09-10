@@ -53,7 +53,7 @@ func TestAScriptCapStandsWhenNoRoleCapIsConfigured(t *testing.T) {
 	}
 }
 
-func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
+func TestConfiguredTurnCapCanRaiseAPairReviewer(t *testing.T) {
 	var got int
 	var requested int
 	var source, ceilingSource string
@@ -79,14 +79,14 @@ func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
 	if _, err := ExecuteScript(context.Background(), PairScript(), params); err != nil {
 		t.Fatal(err)
 	}
-	if got != 8 {
-		t.Fatalf("pair reviewer ran with MaxTurns=%d; configured 100 must not raise its ceiling 8", got)
+	if got != 100 {
+		t.Fatalf("pair reviewer ran with MaxTurns=%d; want configured 100", got)
 	}
 	if requested != 100 || source != "reviewer role default" {
 		t.Fatalf("requested cap = %d from %q, want 100 from reviewer role default", requested, source)
 	}
-	if ceilingSource != "pair ceiling" {
-		t.Fatalf("ceiling source = %q, want pair ceiling", ceilingSource)
+	if ceilingSource != "" {
+		t.Fatalf("ceiling source = %q, want no hidden pair ceiling", ceilingSource)
 	}
 }
 
