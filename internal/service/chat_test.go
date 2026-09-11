@@ -53,6 +53,73 @@ func TestDocumentChatReceivesTheSelectedSectionAndItsChain(t *testing.T) {
 	}
 }
 
+// A chat opened from "Why it stopped" is about the exact run, not merely its
+// task (document runs have no task, and one task can have many attempts). The
+// deterministic dossier puts the recorded failure and decisive timeline in
+// the first prompt so even a small consultant starts from evidence instead of
+// guessing or spending its first turn discovering the run id.
+func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &runlog.Run{
+		ID: "r-stopped", ProjectID: p.ID, TaskID: "T-004", Stage: "build", Mode: "pair",
+		Status: "failed", Verdict: "FAILED", Failure: "reviewer dissent cannot be overridden by a green command",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.AppendEvent("message", map[string]interface{}{
+		"round": 1, "role": "reviewer", "verdict": "request-changes",
+		"findings": []interface{}{map[string]interface{}{"severity": "critical", "issue": "meson.build is outside the task lane"}},
+	})
+	w.AppendEvent("gate", map[string]interface{}{"exit": 0, "cmd": "meson test -C build"})
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	prompt := s.chatPromptFor(context.Background(), &runState{run: &runlog.Run{ProjectID: p.ID}}, dir, "run", target.ID)
+	for _, want := range []string{
+		"r-stopped", "build pair", "T-004", "reviewer dissent cannot be overridden",
+		"request-changes", "meson.build is outside the task lane", "meson test -C build",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("run dossier is missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestRunChatRefusesARunFromAnotherProject(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	one, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "One", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	twoDir := t.TempDir()
+	two, err := s.ProjectInit(context.Background(), InitRequest{Path: twoDir, Name: "Two", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &runlog.Run{ID: "r-other", ProjectID: two.ID, Stage: "build", Status: "failed", StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	w, err := runlog.NewWriter(twoDir, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	_, err = s.ChatStart(context.Background(), one.ID, ChatStartRequest{
+		Duckling: "pato-uno", AboutKind: "run", AboutID: target.ID, Message: "Why did this stop?",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not belong to project") {
+		t.Fatalf("cross-project run chat error = %v", err)
+	}
+}
+
 // A chat is a run: the person picks a duckling, asks about a subject, the
 // consultant answers with the dossier in hand and read-only tools, and the
 // conversation pauses for the next message — memory in the event log, so

@@ -298,6 +298,12 @@ resolution decides. The positional line-up the engine echoes is ordered by the
 mode's seat meaning (pair: implementer, advisor, reviewer), the same order the
 desktop reads.
 
+A run's **Why it stopped / Why it failed** section offers a consultant chat
+about that exact run (`about_kind: run`). The first consultant prompt includes
+the persisted run state, failure and decisive timeline; the user should not
+have to copy technical details or make the consultant rediscover the run before
+asking what happened and what action is safe next.
+
 The original sketch, for what still applies:
 
 - **Left**: the artifact rendered as a document, sections addressable by id

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 import type { EngineClient, Run } from "../api/client";
@@ -56,6 +56,25 @@ describe("relaunching from the run view", () => {
     await waitFor(() => expect(screen.getByTestId("relaunch")).toBeTruthy());
     // Pre-set to what just ran, so one change is one change.
     expect((screen.getByTestId("run-mode") as HTMLSelectElement).value).toBe("pair");
+  });
+
+  it("opens a consultant chat about the exact stopped run", async () => {
+    const chatStart = vi.fn(() => Promise.resolve<Run>({ ...failed, id: "chat-1", stage: "chat", status: "running" }));
+    const client = clientWith({ chatStart });
+    render(<RunView runId="r-1" client={client} />);
+
+    const help = await screen.findByTestId("run-failure-consultant");
+    fireEvent.click(within(help).getByTestId("chat-about"));
+    fireEvent.change(within(help).getByTestId("chat-duckling"), { target: { value: "pato-sonnet" } });
+    expect((within(help).getByTestId("chat-message") as HTMLTextAreaElement).value).toMatch(/explain why this run (failed|stopped)/i);
+    fireEvent.click(within(help).getByTestId("chat-start"));
+
+    await waitFor(() => expect(chatStart).toHaveBeenCalledWith("p", expect.objectContaining({
+      duckling: "pato-sonnet",
+      aboutKind: "run",
+      aboutId: "r-1",
+      message: expect.stringMatching(/root cause.*safest next action/i),
+    })));
   });
 
   it("starts the same task with the changed settings", async () => {

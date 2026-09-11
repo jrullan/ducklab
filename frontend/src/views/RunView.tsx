@@ -1742,6 +1742,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <a className="mt-2 inline-block text-sm underline" href={routeHref({ name: "projects" })}>Clean or commit the workspace</a>
           )}
           {run.local_only && <RecoveryControls client={client} projectId={run.project_id} commitSHA={run.commit_sha} />}
+          <div className="mt-2" data-testid="run-failure-consultant">
+            <ChatAbout
+              key={run.id}
+              client={client}
+              projectId={run.project_id}
+              aboutKind="run"
+              aboutId={run.id}
+              ducklings={fleet}
+              label={`Ask the consultant about this ${run.status === "failed" ? "failure" : "stop"}`}
+              placeholder="What do you want to understand about this run?"
+              initialMessage={`Please explain why this run ${run.status === "failed" ? "failed" : "stopped"}. Distinguish the root cause from downstream symptoms and recommend the safest next action in Ducklab.`}
+            />
+          </div>
         </section>
       )}
 
