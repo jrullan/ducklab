@@ -9,10 +9,12 @@ const fleet = [
   { id: "pato-sonnet", provider: "openrouter", model: "s" },
 ] as Duckling[];
 
-// A combination of models that works is a finding, and re-ticking the same
-// boxes on every run is how a finding gets lost.
+// Saved Settings line-ups are a preference echo, not launch defaults: seeding
+// one as a pick sent it as an explicit request that overrode the project's
+// roster (B-394). Seats come from the resolved roster; untouched seats travel
+// empty so the engine decides; only a hand-made pick is a request.
 describe("the run launcher's saved line-ups", () => {
-  it("fills the boxes when a mode with a saved line-up is picked", () => {
+  it("does not fill the boxes from a saved line-up when a mode is picked", () => {
     const onLaunch = vi.fn();
     render(
       <RunLauncher
@@ -22,18 +24,19 @@ describe("the run launcher's saved line-ups", () => {
       />,
     );
     fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "pair" } });
+    const chips = screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ");
+    expect(chips).not.toContain("pato-sonnet");
+    expect(chips).not.toContain("picked now");
     fireEvent.click(screen.getByTestId("run-start"));
 
-    // In the saved order: pair takes the first as implementer and the second as
-    // reviewer, so the order is the preference, not a set.
     expect(onLaunch).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pair", ducklings: ["pato-sonnet", "pato-atom"] }),
+      expect.objectContaining({ mode: "pair", ducklings: [] }),
     );
   });
 
-  // Clearing them for a mode with no line-up would throw away a selection the
+  // Clearing them for a mode with no roster would throw away a selection the
   // person had just made by hand.
-  it("leaves a hand-made selection alone when the mode has none saved", () => {
+  it("leaves a hand-made selection alone when the mode changes without a roster", () => {
     const onLaunch = vi.fn();
     render(
       <RunLauncher ducklings={fleet} preferred={{ pair: ["pato-sonnet"] }} onLaunch={onLaunch} />,
@@ -48,7 +51,7 @@ describe("the run launcher's saved line-ups", () => {
     );
   });
 
-  it("tells its caller as the boxes change, not only on launch", () => {
+  it("tells its caller as the boxes change by hand, not only on launch", () => {
     const onDucklingsChange = vi.fn();
     render(
       <RunLauncher
@@ -59,6 +62,9 @@ describe("the run launcher's saved line-ups", () => {
       />,
     );
     fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "split" } });
+    expect(onDucklingsChange).not.toHaveBeenCalledWith(["pato-atom"]);
+    fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
+    fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "pato-atom" } });
     expect(onDucklingsChange).toHaveBeenCalledWith(["pato-atom"]);
   });
 });

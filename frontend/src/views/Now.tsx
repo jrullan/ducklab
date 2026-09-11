@@ -37,6 +37,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [nextSteps, setNextSteps] = useState<NextStep[]>([]);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [testRoster, setTestRoster] = useState<RosterEntry[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
   const [buildMode, setBuildMode] = useState("solo");
   const [testMode, setTestMode] = useState("solo");
@@ -79,9 +80,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       .then((all) => setBugs(all))
       .catch(() => setBugs([]));
     client.ducklings().then(setFleet).catch(() => setFleet([]));
-    if (typeof client.roster === "function") {
-      client.roster(projectId).then((r) => setRoster(r.entries)).catch(() => setRoster([]));
-    }
     client
       .modeDefaults()
       .then((d) => {
@@ -157,6 +155,18 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
   const waitingCount = waiting.length + (standalonePlan ? 1 : 0);
   const attentionCount = waitingCount + toVerify.length + failures.length + reopened.length;
+
+  // The launcher seeds its seats from the PROJECT's resolved roster for the
+  // mode it will run, never from the global saved line-up: a global default
+  // seeded as a pick travelled as an explicit request and overrode the
+  // project's pins (B-394). Each phase resolves its own mode.
+  useEffect(() => {
+    if (typeof client.roster !== "function") return;
+    let live = true;
+    client.roster(projectId, buildMode).then((r) => { if (live) setRoster(r.entries); }).catch(() => { if (live) setRoster([]); });
+    client.roster(projectId, testMode).then((r) => { if (live) setTestRoster(r.entries); }).catch(() => { if (live) setTestRoster([]); });
+    return () => { live = false; };
+  }, [client, projectId, buildMode, testMode]);
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -400,6 +410,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     estimates={estimates}
                     busy={false}
                     embedded
+                    testRoster={testRoster}
+                    buildRoster={roster}
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
@@ -411,7 +423,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     key={buildMode}
                     ducklings={fleet}
                     initialMode={buildMode}
-                    initialDucklings={preferred[buildMode] ?? []}
                     preferred={preferred}
                     estimates={estimates}
                     label={`Run ${next.id}`}

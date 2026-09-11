@@ -288,6 +288,16 @@ MCP: `artifact_get kind=intent`.
 record's ladder with the current rung and name the next door (`GET
 /v1/projects/{id}/next/{ref}`): the launcher's label *is* the door.
 
+Every launcher seeds its seats from the project's resolved roster for the mode
+it will run (`GET /v1/projects/{id}/roster?mode=…`), each seat labelled with
+its provenance (`project` or `global`). The global saved line-up
+(`/v1/defaults/modes`) is a Settings echo, not a launch default: it is never
+seeded as a pick. Only a seat the person changes becomes `picked now` and
+travels in the request; untouched seats travel empty so the engine's roster
+resolution decides. The positional line-up the engine echoes is ordered by the
+mode's seat meaning (pair: implementer, advisor, reviewer), the same order the
+desktop reads.
+
 The original sketch, for what still applies:
 
 - **Left**: the artifact rendered as a document, sections addressable by id

@@ -1009,7 +1009,10 @@ function TaskRunner({
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
-  const [runMode, setRunMode] = useState("solo");
+  // The plain launcher opens on the Settings build default, so its roster
+  // must be resolved for THAT mode from the first render; "solo" here seated
+  // a pair launcher from the solo resolution (B-394).
+  const [runMode, setRunMode] = useState(phaseDefaults.build || "solo");
   const [testRoster, setTestRoster] = useState<RosterEntry[]>([]);
   const [testMode, setTestMode] = useState(phaseDefaults.test);
   const [buildRoster, setBuildRoster] = useState<RosterEntry[]>([]);
@@ -1178,7 +1181,6 @@ function TaskRunner({
                 key={phaseDefaults.build}
                 ducklings={ducklings}
                 initialMode={phaseDefaults.build}
-                initialDucklings={preferred[phaseDefaults.build] ?? []}
                 preferred={preferred}
                 estimates={estimates}
                 label="Build again"
@@ -1201,7 +1203,6 @@ function TaskRunner({
               key={phaseDefaults.build}
               ducklings={ducklings}
               initialMode={phaseDefaults.build}
-              initialDucklings={preferred[phaseDefaults.build] ?? []}
               preferred={preferred}
               estimates={estimates}
               busy={busy}

@@ -230,7 +230,7 @@ export function RunLauncher({
   ducklings,
   initialMode = "solo",
   initialDucklings = [],
-  preferred,
+  preferred: _preferred,
   estimates,
   label = "Build it",
   busy = false,
@@ -244,9 +244,8 @@ export function RunLauncher({
   ducklings: readonly Duckling[];
   initialMode?: string;
   initialDucklings?: readonly string[];
-  /** The saved line-up per mode. Picking a mode fills the boxes with it: a
-   * combination that works is a finding, and re-ticking the same boxes on every
-   * run is how a finding gets lost. */
+  /** The saved line-up per mode. Kept for callers' compatibility; it is a
+   * Settings echo and never seeds a seat (B-394). Seats come from the roster. */
   preferred?: Record<string, string[]>;
   /** Average cost per mode from this project's runs. Shown beside each mode:
    * the person deciding how to run something is deciding what to spend, and
@@ -291,7 +290,8 @@ export function RunLauncher({
       setChosen(seatsForMode);
       setSeatProvenance(seatsForMode.map((_, i) => {
         const entry = resolved.find((e) => e.role === seatLabel(mode, i));
-        return entry?.source === "project pin" ? "project" : "global";
+        // "project pin" and "project mode seat" are both the project's word.
+        return entry?.source?.startsWith("project") ? "project" : "global";
       }));
     }
   }, [roster, mode]);
@@ -356,18 +356,16 @@ export function RunLauncher({
                 data-testid={`mode-card-${m}`}
                 aria-pressed={mode === m}
                 onClick={() => {
+                  if (m === mode) return; // a no-op pick must not clear the seated roster (B-394)
                   setMode(m);
                   onModeChange?.(m);
+                  // With a roster in hand a mode change re-resolves from it
+                  // (the seeding effect reseats); without one, a hand-made
+                  // selection stays. Saved Settings line-ups are never picks.
                   if (resolved.length) {
                     changed.current = false;
                     setChosen([]);
                     setSeatProvenance([]);
-                  } else {
-                    const saved = preferred?.[m];
-                    if (saved?.length) {
-                      setChosen([...saved]);
-                      onDucklingsChange?.([...saved]);
-                    }
                   }
                 }}
                 className={`rounded border p-2 text-left text-xs ${
@@ -393,8 +391,11 @@ export function RunLauncher({
           className="text-xs text-ink-muted underline"
           onClick={() => {
             changed.current = false;
-            setChosen(resolved.length ? rosterSeats(mode, resolved) : preferred?.[mode] ?? []);
+            // Back to the roster's word; with no roster resolved the seats
+            // stay empty so the engine decides (never the saved line-up).
+            setChosen(resolved.length ? rosterSeats(mode, resolved) : []);
             setSeatProvenance([]);
+            onDucklingsChange?.([]);
           }}
         >
           use defaults
@@ -406,20 +407,16 @@ export function RunLauncher({
           value={mode}
           onChange={(e) => {
             const next = e.target.value;
+            if (next === mode) return; // a no-op change must not clear the seated roster (B-394)
             setMode(next);
             onModeChange?.(next);
+            // With a roster in hand a mode change re-resolves from it (the
+            // seeding effect reseats); without one, a hand-made selection
+            // stays. Saved Settings line-ups are never seeded as picks.
             if (resolved.length) {
-              // A mode change re-resolves from the canonical roster; saved
-              // Settings line-ups must not clobber the resolver.
               changed.current = false;
               setChosen([]);
               setSeatProvenance([]);
-            } else {
-              const saved = preferred?.[next];
-              if (saved?.length) {
-                setChosen([...saved]);
-                onDucklingsChange?.([...saved]);
-              }
             }
           }}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"

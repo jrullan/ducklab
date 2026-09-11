@@ -319,7 +319,7 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 	for mode, seats := range s.cfg.Defaults.ModeSeats {
 		out.ModeSeats[mode] = seats
 		var ids []string
-		for _, role := range []string{"architect", "implementer", "reviewer", "judge", "advisor"} {
+		for _, role := range modeSeatOrder(mode) {
 			ids = append(ids, seats[role]...)
 		}
 		out.Ducklings[mode] = ids
@@ -638,4 +638,25 @@ func (s *Service) roundsFor(mode string, requested int) int {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg.Defaults.Rounds[mode]
+}
+
+// modeSeatOrder is the positional meaning of a mode's seat list, shared with
+// the desktop (frontend/src/lib/seats.ts seatLabel): position IS the role, so
+// the engine must serialize a mode's line-up in that order. One global order
+// (architect, implementer, reviewer, …) put the pair's reviewer in the advisor
+// seat and the advisor in the reviewer seat on every launcher (B-394).
+func modeSeatOrder(mode string) []string {
+	switch mode {
+	case "solo":
+		return []string{"implementer", "advisor"}
+	case "pair":
+		return []string{"implementer", "advisor", "reviewer"}
+	case "council":
+		return []string{"architect", "reviewer", "advisor"}
+	case "tournament":
+		return []string{"implementer", "judge", "advisor"}
+	case "split":
+		return []string{"architect", "implementer", "advisor", "reviewer"}
+	}
+	return []string{"architect", "implementer", "reviewer", "judge", "advisor"}
 }

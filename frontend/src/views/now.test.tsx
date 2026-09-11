@@ -762,3 +762,50 @@ describe("failures of settled tasks", () => {
     expect(screen.queryByTestId("now-failure")).toBeNull();
   });
 });
+
+// B-394: the ready-task launcher seeded its seats from the GLOBAL saved
+// line-up (GET /v1/defaults/modes), labelled them "picked now" and sent them
+// as an explicit request, so a project whose roster pins beelink-local / luna
+// / dsv4flash launched terra / glm52 / k3 (Neocapture r-20260911-033800-axwh).
+// The launcher seeds from the project's resolved roster for the mode it will
+// run; untouched seats travel empty so the engine's roster resolution wins.
+describe("Now launcher seats come from the project roster, not the global line-up", () => {
+  const projectPair = [
+    { role: "advisor", duckling: "luna", source: "project mode seat" },
+    { role: "architect", duckling: "k3", source: "global mode seat" },
+    { role: "consultant", duckling: "beelink-local", source: "project pin" },
+    { role: "implementer", duckling: "beelink-local", source: "project mode seat" },
+    { role: "judge", duckling: "beelink-local", source: "project pin" },
+    { role: "reviewer", duckling: "dsv4flash", source: "project mode seat" },
+    { role: "scribe", duckling: "beelink-local", source: "project pin" },
+    { role: "triager", duckling: "beelink-local", source: "project pin" },
+  ];
+  const fleet = ["beelink-local", "luna", "dsv4flash", "terra", "k3", "glm52"].map((id) => ({ id, provider: "fake", model: id }));
+
+  it("shows the project's pair seats with their provenance and launches without overriding them", async () => {
+    const roster = vi.fn((_p: string, mode?: string) => Promise.resolve({ entries: mode === "pair" ? projectPair : [] }));
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-012", title: "Define the common capture backend interface", milestone: "M-03", status: "todo", next: ["run"] })),
+      ducklings: vi.fn(() => Promise.resolve(fleet)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: { pair: ["terra", "glm52", "k3"] }, build_mode: "pair", test_mode: "solo" })),
+      roster,
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-next");
+    await waitFor(() => expect(roster).toHaveBeenCalledWith("p", "pair"));
+    fireEvent.click(await screen.findByTestId("launch-modal-trigger"));
+    const chips = await screen.findAllByTestId("seat-chip");
+    await waitFor(() => expect(chips.map((c) => c.textContent).join(" | ")).toContain("beelink-local"));
+    const text = chips.map((c) => c.textContent).join(" | ");
+    expect(text).toContain("implementerbeelink-localproject");
+    expect(text).toContain("advisorlunaproject");
+    expect(text).toContain("reviewerdsv4flashproject");
+    expect(text).not.toContain("picked now");
+    expect(text).not.toContain("terra");
+    fireEvent.click(screen.getByText("Run T-012"));
+    await waitFor(() => expect(client.runStart).toHaveBeenCalled());
+    const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { mode: string; ducklings: string[] };
+    expect(opts.mode).toBe("pair");
+    expect(opts.ducklings).toEqual([]);
+  });
+});
