@@ -904,7 +904,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ? await client.testStart(run.project_id, run.task_id, "", {
               thenBuild: !!chain,
               testMode: opts.mode,
+              // Role modes carry the launcher's picks keyed by role (B-394);
+              // participant modes keep the positional list.
               testDucklings: opts.ducklings,
+              testSeats: opts.seats,
               note: opts.note,
               mode: chain?.mode || "solo",
               ducklings: chain?.ducklings ?? [],

@@ -16,7 +16,7 @@ import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
 import { PlanCard } from "../components/PlanCard";
-import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
 import { VerificationLedger } from "../components/VerificationLedger";
@@ -185,15 +185,20 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     if (!next) return;
     setFailure(null);
     try {
+      // Only hand-made picks travel, keyed by role; the roster seats the
+      // launcher shows stay out of the request so the engine resolves them
+      // (the same contract the Board rail uses; B-394).
       const run = await client.testStart(projectId, next.id, "", {
         thenBuild: true,
         testMode: test.mode,
-        testDucklings: test.ducklings,
-        testSeats: roleSeats(test.mode, test.ducklings),
+        testDucklings: [],
+        testSeats: pickedSeats(test.mode, test),
         mode: build.mode,
-        ducklings: build.ducklings,
+        ducklings: [],
+        seats: pickedSeats(build.mode || buildMode, build),
         maxTokens: build.maxTokens,
         agentTurns: build.agentTurns,
+        note: build.note,
       });
       setStarted(run.id);
     } catch (e) {
@@ -207,8 +212,9 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       const run = await client.testStart(projectId, next.id, "", {
         thenBuild: false,
         testMode: test.mode,
-        testDucklings: test.ducklings,
-        testSeats: roleSeats(test.mode, test.ducklings),
+        testDucklings: [],
+        testSeats: pickedSeats(test.mode, test),
+        note: test.note,
       });
       setStarted(run.id);
     } catch (e) {
@@ -415,7 +421,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
-                      void launch({ mode: b.mode, ducklings: b.ducklings, maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                      void launch({ mode: b.mode, ducklings: [], seats: pickedSeats(b.mode || buildMode, b), maxTokens: b.maxTokens, agentTurns: b.agentTurns, note: b.note })
                     }
                   />
                 ) : (

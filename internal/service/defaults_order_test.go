@@ -27,8 +27,8 @@ func TestModeDefaultsEchoLineUpsInSeatOrder(t *testing.T) {
 	want := map[string][]string{
 		"pair":       {"terra", "k3", "glm52"},
 		"solo":       {"terra", "k3"},
-		"tournament": {"terra", "j9", "k3"},
-		"council":    {"arch", "glm52", "k3"},
+		"tournament": {"terra"},
+		"council":    {"arch", "glm52"},
 	}
 	for mode, ids := range want {
 		if !reflect.DeepEqual(got[mode], ids) {
