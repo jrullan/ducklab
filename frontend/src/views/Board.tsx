@@ -1228,6 +1228,9 @@ function TaskRunner({
               phaseDefaults={phaseDefaults}
               estimates={estimates}
               busy={busy}
+              notePlaceholder={task.blocked?.toLowerCase().includes("no changes")
+                ? "What changed since the tree answered no?"
+                : "Anything this run should know?"}
               testRoster={testRoster}
               buildRoster={buildRoster}
               onPhaseModeChange={(phase, mode) => (phase === "test" ? setTestMode(mode) : setBuildMode(mode || phaseDefaults.build))}

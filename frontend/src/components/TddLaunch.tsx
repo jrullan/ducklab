@@ -26,6 +26,8 @@ export function TddLaunch({
   testRoster,
   buildRoster,
   onPhaseModeChange,
+  embedded = false,
+  notePlaceholder = "Anything this run should know?",
 }: {
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
@@ -41,6 +43,10 @@ export function TddLaunch({
   testRoster?: readonly RosterEntry[];
   buildRoster?: readonly RosterEntry[];
   onPhaseModeChange?: (phase: "test" | "build", mode: string) => void;
+  /** A host card already supplies the boundary; avoid a card inside a card. */
+  embedded?: boolean;
+  /** State-specific guidance. The no-change retry passes its own prompt. */
+  notePlaceholder?: string;
 }) {
   // Opening seats are empty: omitted ducklings leave the resolved roster in charge.
   const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.test, ducklings: [] }));
@@ -63,15 +69,26 @@ export function TddLaunch({
   const seatFor = (cfg: PhaseConfig, role: string, index: number, roster?: readonly RosterEntry[]) =>
     cfg.ducklings[index] || roster?.find((r) => r.role === role)?.duckling || "roster";
   const buildDisplayMode = buildCfg.mode || phaseDefaults.build;
-  const est = estimates?.[buildDisplayMode];
-  const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
-  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0, resolvedTestRoster)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0, resolvedBuildRoster)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2, resolvedBuildRoster)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
+  const average = (mode: string) => {
+    const estimate = estimates?.[mode];
+    return estimate && estimate.runs > 0 ? estimate.usd / estimate.runs : undefined;
+  };
+  const testAvg = average(testCfg.mode);
+  const buildAvg = average(buildDisplayMode);
+  const estimate = testAvg !== undefined && buildAvg !== undefined
+    ? `estimated chain ~$${(testAvg + buildAvg).toFixed(2)} (test ~$${testAvg.toFixed(2)} + build ~$${buildAvg.toFixed(2)})`
+    : buildAvg !== undefined
+      ? `build history ~$${buildAvg.toFixed(2)} · test has no history yet`
+      : testAvg !== undefined
+        ? `test history ~$${testAvg.toFixed(2)} · build has no history yet`
+        : "no history yet for this chain";
+  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0, resolvedTestRoster)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0, resolvedBuildRoster)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2, resolvedBuildRoster)}` : ""} · ${estimate}`;
   // The run's note rides the launch, not one phase: it answers the no-changes
   // brake's demand ("tell the next run what changed") and carries a gate
   // review's findings into the build. One note for one decision.
   const withNote = <C extends PhaseConfig>(cfg: C): C => ({ ...cfg, note: note.trim() || undefined });
   return (
-    <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
+    <div className={embedded ? "space-y-3" : "space-y-2 rounded border border-hairline p-2"} data-testid="tdd-block">
       {/* The common case is one click; the button leads. Seats and caps are
           the exception and fold beneath. */}
       <button
@@ -79,7 +96,7 @@ export function TddLaunch({
         onClick={() => onTdd(withNote(testCfg), withNote(buildCfg))}
         disabled={busy}
         data-testid="tdd-start"
-        className="w-full rounded border border-good px-3 py-1.5 text-sm text-good disabled:opacity-40"
+        className="w-full rounded border border-good bg-good px-4 py-2 text-sm font-medium text-page disabled:opacity-40 sm:w-auto sm:min-w-64"
       >
         {busy ? "Starting…" : "Test first → Build"}
       </button>
@@ -94,8 +111,8 @@ export function TddLaunch({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
-          placeholder="what changed since the tree answered no — or what the next run should address"
-          className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          placeholder={notePlaceholder}
+          className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1.5 text-sm text-ink placeholder:text-ink-muted"
         />
       </label>
       {tuning && (
@@ -141,18 +158,17 @@ export function TddLaunch({
           disabled={busy}
           data-testid="test-first-start"
           title="Write the failing test only; you accept it before any build"
-          className="text-ink-muted underline disabled:opacity-40"
+          className="rounded border border-hairline px-2 py-1 text-ink-secondary hover:bg-surface2 disabled:opacity-40"
         >
           test only
         </button>
-        <span className="text-ink-muted">·</span>
         <button
           type="button"
           onClick={() => onBuildOnly(withNote(buildCfg))}
           disabled={busy}
           data-testid="build-only"
           title="Build without a new test — the gate still judges the whole suite"
-          className="text-ink-muted underline disabled:opacity-40"
+          className="rounded border border-hairline px-2 py-1 text-ink-secondary hover:bg-surface2 disabled:opacity-40"
         >
           build only
         </button>

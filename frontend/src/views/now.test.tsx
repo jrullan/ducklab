@@ -177,7 +177,7 @@ describe("Now — the inbox", () => {
     expect(f.textContent).not.toContain("stack…");
   });
 
-  it("puts running work before every other inbox section", async () => {
+  it("puts decisions before ambient running work", async () => {
     seed([
       base,
       { ...base, id: "r-live", task_id: "T-live", status: "running", verdict: "", pending_kind: undefined },
@@ -208,7 +208,7 @@ describe("Now — the inbox", () => {
       await screen.findByTestId("now-reopened"),
       await screen.findByTestId("now-failures"),
     ]) {
-      expect(running.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(section.compareDocumentPosition(running) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     }
   });
 
@@ -260,6 +260,75 @@ describe("Now — the inbox", () => {
     );
   });
 
+  it("renders one launcher, not a second guide card, for the same ready task", async () => {
+    const task = { id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] };
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve(task)),
+      projectNext: vi.fn(() => Promise.resolve([
+        { kind: "task", id: "test-first", ref: "T-048", action: "Start T-048", reason: "ready" },
+        { kind: "stage", id: "spec-debt", ref: "spec", action: "Teach the spec", reason: "one task wears spec-debt" },
+      ])),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    expect(await screen.findByTestId("now-next")).toHaveTextContent("T-048 — Clipboard inspection");
+    expect(screen.queryByTestId("now-next-group-task")).toBeNull();
+    expect(screen.getAllByText(/T-048/)).toHaveLength(1);
+    expect(screen.getByTestId("now-next-group-stage")).toHaveTextContent("Teach the spec");
+  });
+
+  it("shows one chain estimate derived from per-run history", async () => {
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {}, test_mode: "solo", build_mode: "pair" })),
+      report: vi.fn(() => Promise.resolve({ rows: [
+        { key: "solo", cost_usd: 0.30, runs: 3 },
+        { key: "pair", cost_usd: 0.80, runs: 2 },
+      ] })),
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const summary = await screen.findByTestId("tdd-summary");
+    await waitFor(() => expect(summary).toHaveTextContent("estimated chain ~$0.50 (test ~$0.10 + build ~$0.40)"));
+    expect(screen.getAllByText(/\$0\.50/)).toHaveLength(1);
+  });
+
+  it("uses calm status language and a context-neutral note on a ready task", async () => {
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] })),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const clear = await screen.findByTestId("now-clear");
+    expect(clear).toHaveTextContent("No decisions waiting");
+    expect(clear.parentElement).toHaveAttribute("aria-live", "polite");
+    expect(clear.parentElement).not.toHaveTextContent("0 failed");
+    expect(clear.parentElement).not.toHaveTextContent("0 to verify");
+    expect(screen.queryByText("Nothing needs you.")).toBeNull();
+    expect(screen.getByPlaceholderText("Anything this run should know?")).toBeInTheDocument();
+  });
+
+  it("explains a document run and the consequence of starting current-plan work beside it", async () => {
+    seed([{
+      ...base, id: "r-plan", stage: "plan", task_id: "", mode: "solo", status: "running",
+      verdict: "", pending_kind: undefined, roster: { architect: "beelink-local" },
+    }]);
+    useRuns.setState({ spend: {
+      "r-plan": { usd: 0.12, tokens: 64000, turns: 3, wallclock_s: 125,
+        limit: { usd: 5, tokens: 5000000, turns: 40, wallclock_s: 1800 }, ducklings: {} },
+    } });
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] })),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const row = await screen.findByTestId("now-running-row");
+    expect(row).toHaveTextContent("Drafting the plan");
+    expect(row).toHaveTextContent("beelink-local");
+    expect(row).toHaveTextContent("2m05s");
+    expect(row).toHaveTextContent("64.0k / 5.0M tokens · 3 model turns · $0.1200");
+    expect(within(row).getByRole("link", { name: "Open run" })).toHaveAttribute("href", "#/runs/r-plan");
+    const ready = screen.getByTestId("now-next");
+    expect(screen.getByTestId("now-parallel-note")).toHaveTextContent("review it first if it may change this task");
+    expect(row.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders next steps as a native Now section", async () => {
     const client = clientWith({
       projectNext: vi.fn(() => Promise.resolve([
@@ -298,7 +367,7 @@ describe("Now — the inbox", () => {
     const task = cards.find((c) => c.getAttribute("data-kind") === "task")!;
     expect(within(task).getByRole("link").textContent).toBe("Start T-029");
     expect(task.textContent).toContain("next task whose dependencies are all accepted");
-    await waitFor(() => expect(within(task).getByTestId("now-next-step-cost").textContent).toContain("opens pair · ~$0.94"));
+    await waitFor(() => expect(within(task).getByTestId("now-next-step-cost").textContent).toContain("opens pair · ~$0.3133 per run (3 samples)"));
     const bug = cards.find((c) => c.getAttribute("data-kind") === "bug")!;
     expect(bug.textContent).toContain("2 fixes are waiting");
     expect(within(bug).queryByTestId("now-next-step-cost")).toBeNull();
@@ -463,9 +532,10 @@ describe("the inbox's footer", () => {
     ]);
     render(<Now client={clientWith()} projectId="p" />);
     const footer = await screen.findByTestId("now-footer");
-    expect(footer.textContent).toContain("today $1.50");
-    expect(footer.textContent).toContain("all time $10.50");
-    expect(footer.textContent).toContain("1 of 2 finished runs passed, all time");
+    expect(footer.textContent).toContain("Today $1.50");
+    expect(footer.textContent).toContain("project total $10.50");
+    expect(footer.textContent).toContain("1 of 2 finished runs passed");
+    expect(footer.textContent).toContain("including experimental and unsuccessful attempts");
   });
 
   it("formats zero spend as two decimal places", async () => {
