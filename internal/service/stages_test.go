@@ -313,6 +313,20 @@ func TestTaskLaneUsesProducedFilesBeforeInheritedMilestoneLane(t *testing.T) {
 	}
 }
 
+func TestTaskLaneUsesModifiedFilesAsExplicitWriteLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Core\n\n**Owns:** src/\n\n" +
+			"### T-011 — Amend registry\n\n**Modifies:** file:src/registry.c\n\n**Consumes:** none\n",
+	})
+	if got := s.taskLane(dir, "T-011"); !slices.Equal(got, []string{"src/registry.c"}) {
+		t.Fatalf("task lane = %v, want its Modified file", got)
+	}
+	if findings := taskLaneFindings(dir, "T-011", []string{"src/registry.c"}); len(findings) != 0 {
+		t.Fatalf("declared modification rejected by lane invariant: %+v", findings)
+	}
+}
+
 func TestBuildPromptCarriesProjectMemory(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
@@ -857,7 +871,7 @@ func TestCandidateSyntaxLintReportsCompletePlanContractFailures(t *testing.T) {
 	for _, want := range []string{
 		"invalid_frontmatter: version must be a non-negative integer",
 		"T-001 **Acceptance probes:** must be flat markdown list with one backtick command per item",
-		"T-001 has no **Produces:** field",
+		"T-001 must have a **Produces:** field for created artifacts or a **Modifies:** field",
 		"T-001 **Verification:** must be one backtick command",
 		"T-001 has no **Exercises:** field",
 	} {

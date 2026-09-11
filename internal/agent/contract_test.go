@@ -75,7 +75,7 @@ func TestPlanManifestPatchAcceptsTypedMilestoneCreation(t *testing.T) {
 
 func TestPlanManifestRejectsProbeArtifactKindContradiction(t *testing.T) {
 	base := `{"milestones":[{"id":"M-01","title":"Fixtures","tasks":[{"id":"T-001","title":"Corpus","implements":["SPEC-001"],"work_unit":"create corpus","acceptance_slices":["corpus is a directory"],"acceptance_probes":["test -d fixtures/v1"],"produces":["file:fixtures/v1"],"consumes":[],"verification":"test -d fixtures/v1"}]}]}`
-	if _, err := ParseContract("json:plan_manifest", base); err == nil || !strings.Contains(err.Error(), "Produces declares file:fixtures/v1") {
+	if _, err := ParseContract("json:plan_manifest", base); err == nil || !strings.Contains(err.Error(), "Produces/Modifies declares file:fixtures/v1") {
 		t.Fatalf("file/directory contradiction error = %v", err)
 	}
 
@@ -411,6 +411,16 @@ func TestPlanManifestRejectsDuplicateProducers(t *testing.T) {
 		`]}]}`
 	if _, err := ParseContract("json:plan_manifest", text); err == nil || !strings.Contains(err.Error(), "both produce file:src/main.c") {
 		t.Fatalf("duplicate producer error = %v", err)
+	}
+}
+
+func TestPlanManifestAcceptsModifierWithoutDuplicateCreation(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[` +
+		`{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"work_unit":"scaffold","acceptance_slices":["scaffold exists"],"acceptance_probes":["true"],"produces":["file:src/main.c"],"consumes":[],"verification":"true"},` +
+		`{"id":"T-002","title":"Amend","implements":["SPEC-002"],"work_unit":"amend app","acceptance_slices":["app is amended"],"acceptance_probes":["true"],"modifies":["file:src/main.c"],"consumes":[],"verification":"true"}` +
+		`]}]}`
+	if _, err := ParseContract("json:plan_manifest", text); err != nil {
+		t.Fatalf("modifier was treated as duplicate creation: %v", err)
 	}
 }
 

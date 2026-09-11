@@ -438,6 +438,19 @@ func TestPlanGraphNormalizationDerivesExactLanesAndDependencies(t *testing.T) {
 	}
 }
 
+func TestPlanGraphNormalizationDerivesModifierDependency(t *testing.T) {
+	raw := "## M-01 — Core\n\n### T-001 — Create\n\n**Produces:** file:src/registry.rs\n**Consumes:** none\n\n" +
+		"### T-002 — Amend\n\n**Modifies:** file:src/registry.rs\n**Consumes:** none"
+	out := sectioned(raw, agent.Section{ID: "M-01", Title: "Core", Body: strings.TrimPrefix(raw, "## M-01 — Core\n\n")})
+	normalized, _, err := normalizePlanGraph(out, "markdown_sections:M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(normalized.Text, "### T-002 — Amend\n\n**Depends on:** T-001") {
+		t.Fatalf("modifier dependency was not derived:\n%s", normalized.Text)
+	}
+}
+
 func TestSemanticPlanRevisionPreservesPriorExercises(t *testing.T) {
 	previousText := "## M-01 — Core\n\n### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/registry.rs"
 	currentText := "## M-01 — Core\n\n### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/other.rs"

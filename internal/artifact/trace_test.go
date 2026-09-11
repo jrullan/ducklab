@@ -536,3 +536,23 @@ func TestCheckPlanAcceptsACompleteAcyclicComposition(t *testing.T) {
 		t.Fatalf("valid composition findings: %+v", errs)
 	}
 }
+
+func TestCheckPlanSerializesModifiersBehindTheWriterOfRecord(t *testing.T) {
+	spec, _ := Parse("## SPEC-001 — Registry\n\nContract.\n", KindSpec)
+	plan, _ := Parse("## M-01 — Core\n\n"+
+		"### T-001 — Create\n\n**Implements:** SPEC-001\n**Produces:** file:src/registry.go\n\n"+
+		"### T-002 — Amend\n\n**Implements:** SPEC-001\n**Modifies:** file:src/registry.go\n**Depends on:** T-001\n\n"+
+		"### T-003 — Consume\n\n**Implements:** SPEC-001\n**Consumes:** file:src/registry.go\n**Depends on:** T-002\n", KindPlan)
+	if errs := CheckPlan(spec, plan); len(errs) != 0 {
+		t.Fatalf("serialized modification findings: %+v", errs)
+	}
+
+	broken, _ := Parse(strings.Replace(plan.Raw, "**Depends on:** T-001", "", 1), KindPlan)
+	joined := ""
+	for _, finding := range CheckPlan(spec, broken) {
+		joined += finding.String() + "\n"
+	}
+	if !strings.Contains(joined, `modifies "file:src/registry.go" last written by T-001`) {
+		t.Fatalf("missing modifier dependency escaped check:\n%s", joined)
+	}
+}

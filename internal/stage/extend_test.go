@@ -111,6 +111,29 @@ func TestMergePlacesTasksAndAssignsRealIDs(t *testing.T) {
 	}
 }
 
+// B-388: an amendment changes an accepted artifact; it does not claim that the
+// file was created twice. The composed plan must preserve that distinction.
+func TestMergeExtensionPreservesModificationWithoutDuplicateProducer(t *testing.T) {
+	spec, _ := artifact.Parse("## SPEC-001 — Registry\n\nContract.\n", artifact.KindSpec)
+	current, _ := artifact.Parse("## M-01 — Core\n\n"+
+		"### T-001 — Create registry\n\n**Implements:** SPEC-001\n**Produces:** file:src/registry.rs\n", artifact.KindPlan)
+	task := artifact.Section{
+		ID: "T-NEW", Title: "Amend registry", Implements: []string{"SPEC-001"},
+		Body: "**Implements:** SPEC-001\n**Modifies:** file:src/registry.rs\n**Depends on:** T-001",
+		Fields: map[string]string{
+			"implements": "SPEC-001", "modifies": "file:src/registry.rs", "depends on": "T-001",
+		},
+	}
+	merged := mergeExtension(current, []artifact.Section{task})
+	if errs := artifact.CheckPlan(spec, merged); len(errs) != 0 {
+		t.Fatalf("accepted artifact amendment failed composition: %+v", errs)
+	}
+	landed := merged.Section("T-002")
+	if landed == nil || landed.Field("modifies") != "file:src/registry.rs" {
+		t.Fatalf("extension lost Modifies field: %#v", landed)
+	}
+}
+
 // No sections is the architect's refusal — the change was core, or the output
 // was unusable — and the person deserves its words, not a parse error.
 func TestAnEmptyAmendmentFailsWithTheArchitectsWords(t *testing.T) {

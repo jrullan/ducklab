@@ -161,14 +161,15 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 						out = append(out, fmt.Sprintf("%s has no **Consumes:** line — name prerequisite artifacts/capabilities, or write none", block.id))
 					}
 					produces := taskFieldItems(block.body, "Produces")
+					writes := append(append([]string{}, produces...), taskFieldItems(block.body, "Modifies")...)
 					exercises := taskFieldItems(block.body, "Exercises")
-					if len(produces) == 0 {
-						out = append(out, fmt.Sprintf("%s has no **Produces:** artifacts — name the paths, build targets, or capabilities this task creates", block.id))
+					if len(writes) == 0 {
+						out = append(out, fmt.Sprintf("%s has neither **Produces:** nor **Modifies:** artifacts — name what this task creates or changes", block.id))
 					}
 					if len(exercises) == 0 {
-						out = append(out, fmt.Sprintf("%s has no **Exercises:** artifacts — name which Produced artifacts its Verification actually exercises", block.id))
-					} else if len(produces) > 0 && !itemsOverlap(produces, exercises) {
-						out = append(out, fmt.Sprintf("%s **Exercises:** none of its **Produces:** artifacts — its verification can be green without checking this task's delta", block.id))
+						out = append(out, fmt.Sprintf("%s has no **Exercises:** artifacts — name which Produced or Modified artifacts its Verification actually exercises", block.id))
+					} else if len(writes) > 0 && !itemsOverlap(writes, exercises) {
+						out = append(out, fmt.Sprintf("%s **Exercises:** none of its **Produces:** or **Modifies:** artifacts — its verification can be green without checking this task's delta", block.id))
 					}
 				}
 			}
@@ -729,6 +730,12 @@ func taskGraphFindings(blocks []taskBlock) []string {
 				out = append(out, fmt.Sprintf("%s consumes %s produced by %s but has no **Depends on:** %s", block.id, item, p, p))
 			}
 		}
+		for _, item := range taskFieldItems(block.body, "Modifies") {
+			if p := producer[item]; p != "" && p != block.id && !deps[p] {
+				out = append(out, fmt.Sprintf("%s modifies %s last written by %s but has no **Depends on:** %s", block.id, item, p, p))
+			}
+			producer[item] = block.id
+		}
 	}
 	return out
 }
@@ -935,7 +942,7 @@ func structureRepairInstruction(findings []string, sections []agent.Section, con
 		}
 		descriptors[i].AllowedValues = producedValuesForRepairTarget(sections, descriptors[i].Target)
 		if len(descriptors[i].AllowedValues) > 0 {
-			descriptors[i].Recipe = "Use set_field with field Exercises and one or more comma-separated values copied exactly from allowed_values. These are the current Produces values; choose the values the Verification command actually checks and do not invent aliases."
+			descriptors[i].Recipe = "Use set_field with field Exercises and one or more comma-separated values copied exactly from allowed_values. These are the current Produces/Modifies values; choose the values the Verification command actually checks and do not invent aliases."
 		}
 	}
 	var b strings.Builder
@@ -1062,7 +1069,10 @@ func describeStructureRepairFinding(message string, ctx structureRepairContext) 
 		d.Recipe = "Use set_field with field `Verification` and ONLY one executable shell command enclosed in Markdown backticks, for example `cc -fsyntax-only src/main.c`; do not write prose instructions."
 	case strings.Contains(message, "**Exercises:**"):
 		d.Code, d.Field = "invalid_exercises", "Exercises"
-		d.Recipe = "Use set_field with field `Exercises`; its comma-separated values must literally overlap the paths, targets, or capabilities from Produces that the Verification command checks."
+		d.Recipe = "Use set_field with field `Exercises`; its comma-separated values must literally overlap the paths, targets, or capabilities from Produces or Modifies that the Verification command checks."
+	case strings.Contains(message, "**Modifies:**"):
+		d.Code, d.Field = "invalid_modifies", "Modifies"
+		d.Recipe = "Use set_field with field Modifies and the concrete existing paths, build targets, or capabilities this task changes; add Depends on for the last writer named by the finding."
 	case strings.Contains(message, "**Produces:**"):
 		d.Code, d.Field = "invalid_produces", "Produces"
 		d.Recipe = "Use set_field with field Produces and the concrete paths, build targets, or capabilities this task alone creates; preserve single ownership."
@@ -1118,15 +1128,19 @@ func allowedRepairReferences(contract string, known map[string]bool) []string {
 func producedValuesForRepairTarget(sections []agent.Section, target string) []string {
 	for _, sec := range sections {
 		if sec.ID == target {
-			return taskFieldItems(sec.Body, "Produces")
+			return taskWriteItems(sec.Body)
 		}
 		for _, block := range taskBlocks(sec.Body) {
 			if block.id == target {
-				return taskFieldItems(block.body, "Produces")
+				return taskWriteItems(block.body)
 			}
 		}
 	}
 	return nil
+}
+
+func taskWriteItems(body string) []string {
+	return append(taskFieldItems(body, "Produces"), taskFieldItems(body, "Modifies")...)
 }
 
 func structureRepairBatch(findings []string, sections []agent.Section) ([]string, []string) {
@@ -1459,6 +1473,9 @@ func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) 
 			if !sameStringSet(taskFieldItems(actual.body, "Produces"), task.Produces) {
 				findings = append(findings, fmt.Sprintf("%s **Produces:** differs from the validated manifest — set it to %s", task.ID, strings.Join(task.Produces, ", ")))
 			}
+			if !sameStringSet(taskFieldItems(actual.body, "Modifies"), task.Modifies) {
+				findings = append(findings, fmt.Sprintf("%s **Modifies:** differs from the validated manifest — set it to %s", task.ID, strings.Join(task.Modifies, ", ")))
+			}
 			if !sameStringSet(taskFieldItems(actual.body, "Consumes"), task.Consumes) {
 				value := strings.Join(task.Consumes, ", ")
 				if value == "" {
@@ -1500,7 +1517,7 @@ func reconcilePlanManifestTopology(outcome *agent.Outcome, manifest *agent.PlanM
 
 // restorePlanExercises keeps semantic revisions from rotating verification
 // evidence between frozen task IDs. The previous draft has already passed the
-// deterministic Exercises/Produces check. A dedicated structure-repair turn
+// deterministic Exercises/Produces-or-Modifies check. A dedicated structure-repair turn
 // does not call this helper, so an invalid field remains repairable instead of
 // being restored forever.
 func restorePlanExercises(outcome, previous *agent.Outcome, contract string) (*agent.Outcome, int, error) {
@@ -1587,14 +1604,17 @@ func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManif
 				body = byID[task.ID][0].body
 			}
 			if strings.TrimSpace(body) == "" {
-				body = "Implement " + strings.TrimSpace(task.Title) + " according to the accepted specification.\n\n**Deliverables:**\n- The artifacts listed in **Produces:** below."
+				body = "Implement " + strings.TrimSpace(task.Title) + " according to the accepted specification.\n\n**Deliverables:**\n- The artifacts listed in **Produces:** or **Modifies:** below."
 			}
 			block := "### " + task.ID + " — " + strings.TrimSpace(task.Title) + "\n\n" + strings.TrimSpace(body)
-			fields := []struct{ name, value string }{
-				{"Work unit", task.WorkUnit},
-				{"Produces", manifestItems(task.Produces)},
-				{"Consumes", manifestItems(task.Consumes)},
+			fields := []struct{ name, value string }{{"Work unit", task.WorkUnit}}
+			if len(task.Produces) > 0 {
+				fields = append(fields, struct{ name, value string }{"Produces", manifestItems(task.Produces)})
 			}
+			if len(task.Modifies) > 0 {
+				fields = append(fields, struct{ name, value string }{"Modifies", manifestItems(task.Modifies)})
+			}
+			fields = append(fields, struct{ name, value string }{"Consumes", manifestItems(task.Consumes)})
 			if full {
 				fields = append([]struct{ name, value string }{
 					{"Implements", artifact.FormatTaskImplements(task.Implements)},
@@ -1610,8 +1630,21 @@ func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManif
 					return outcome, 0, err
 				}
 			}
-			if full && !itemsOverlap(task.Produces, taskFieldItems(block, "Exercises")) {
-				block, err = setMarkdownField(block, task.ID, "Exercises", manifestItems(task.Produces))
+			if len(task.Produces) == 0 && taskHasField(block, "Produces") {
+				block, err = removeMarkdownField(block, task.ID, "Produces")
+				if err != nil {
+					return outcome, 0, err
+				}
+			}
+			if len(task.Modifies) == 0 && taskHasField(block, "Modifies") {
+				block, err = removeMarkdownField(block, task.ID, "Modifies")
+				if err != nil {
+					return outcome, 0, err
+				}
+			}
+			writes := append(append([]string{}, task.Produces...), task.Modifies...)
+			if full && !itemsOverlap(writes, taskFieldItems(block, "Exercises")) {
+				block, err = setMarkdownField(block, task.ID, "Exercises", manifestItems(writes))
 				if err != nil {
 					return outcome, 0, err
 				}
@@ -1904,6 +1937,13 @@ func normalizePlanGraph(outcome *agent.Outcome, contract string) (*agent.Outcome
 					deps = append(deps, p)
 					seen[p] = true
 				}
+			}
+			for _, item := range taskFieldItems(block.body, "Modifies") {
+				if p := producer[item]; p != "" && p != block.id && !seen[p] {
+					deps = append(deps, p)
+					seen[p] = true
+				}
+				producer[item] = block.id
 			}
 			if len(deps) > 0 && !slices.Equal(deps, taskFieldItems(block.body, "Depends on")) {
 				var err error

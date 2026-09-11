@@ -36,7 +36,7 @@ var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+(?:\s+[—-])?\s+`)
 
 const sectionedPlanTaskContract = "## Plan task v2 grammar — authoritative\n\n" +
 	"`exactly Work unit plus Acceptance slices` means exactly one `**Work unit:**` field and one `**Acceptance slices:**` block with 1-3 top-level bullets. It does NOT mean those are the task's only fields. " +
-	"`**Implements:**`, `**Produces:**`, `**Consumes:**`, `**Verification:**`, and `**Exercises:**` remain mandatory mechanical metadata; `**Milestone:**`, `**Depends on:**`, `**Out of scope:**`, and `**Assumption:**` remain valid when applicable. " +
+	"`**Implements:**`, one of `**Produces:**` or `**Modifies:**`, `**Consumes:**`, `**Verification:**`, and `**Exercises:**` remain mandatory mechanical metadata; `**Milestone:**`, `**Depends on:**`, `**Out of scope:**`, and `**Assumption:**` remain valid when applicable. " +
 	"Only `**Deliverables:**` (and Work/Acceptance aliases) is legacy. Never ask to remove mandatory metadata in order to satisfy v2.\n\n"
 
 func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {

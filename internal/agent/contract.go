@@ -77,7 +77,7 @@ type ManifestSliceProbeAudit struct {
 	Evidence string `json:"evidence"`
 }
 
-// ManifestOwnershipAudit records whether Produces contains the editable lanes
+// ManifestOwnershipAudit records whether Produces/Modifies contains the editable lanes
 // required by the work unit. A build-target names an output; it does not grant
 // ownership of Cargo.toml, meson.build, or another build definition.
 type ManifestOwnershipAudit struct {
@@ -202,7 +202,8 @@ type ManifestTask struct {
 	WorkUnit         string   `json:"work_unit"`
 	AcceptanceSlices []string `json:"acceptance_slices"`
 	AcceptanceProbes []string `json:"acceptance_probes"`
-	Produces         []string `json:"produces"`
+	Produces         []string `json:"produces,omitempty"`
+	Modifies         []string `json:"modifies,omitempty"`
 	Consumes         []string `json:"consumes"`
 	Verification     string   `json:"verification"`
 }
@@ -364,8 +365,8 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
 				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices)))
 			}
-			if len(task.Produces) == 0 {
-				validationProblems = append(validationProblems, fmt.Sprintf("%s produces must contain at least one typed artifact", taskID))
+			if len(task.Produces) == 0 && len(task.Modifies) == 0 {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s must contain at least one typed artifact in produces or modifies", taskID))
 			}
 			if strings.TrimSpace(task.Verification) == "" {
 				validationProblems = append(validationProblems, fmt.Sprintf("%s verification must not be empty", taskID))
@@ -409,6 +410,14 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				producer[item] = taskID
 				manifest.Milestones[mi].Tasks[ti].Produces[pi] = item
 			}
+			for xi, item := range task.Modifies {
+				item = strings.TrimSpace(item)
+				if !validManifestArtifact(item) {
+					validationProblems = append(validationProblems, fmt.Sprintf("%s modified artifact %q must use file:, dir:, build-target:, or capability:", taskID, item))
+					continue
+				}
+				manifest.Milestones[mi].Tasks[ti].Modifies[xi] = item
+			}
 			for ci, item := range task.Consumes {
 				item = strings.TrimSpace(item)
 				if !validManifestArtifact(item) {
@@ -428,7 +437,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 
 func manifestArtifactKindProblems(taskID string, task ManifestTask) []string {
 	produced := map[string]string{}
-	for _, item := range task.Produces {
+	for _, item := range append(append([]string{}, task.Produces...), task.Modifies...) {
 		kind, path, ok := strings.Cut(item, ":")
 		if ok && (kind == "file" || kind == "dir") {
 			produced[strings.TrimPrefix(strings.TrimSpace(path), "./")] = kind
@@ -449,7 +458,7 @@ func manifestArtifactKindProblems(taskID string, task ManifestTask) []string {
 				want = "dir"
 			}
 			if declared != "" && declared != want {
-				problems = append(problems, fmt.Sprintf("%s acceptance probe %q tests %s as a %s but Produces declares %s:%s", taskID, probe, path, want, declared, path))
+				problems = append(problems, fmt.Sprintf("%s acceptance probe %q tests %s as a %s but Produces/Modifies declares %s:%s", taskID, probe, path, want, declared, path))
 			}
 		}
 	}

@@ -186,7 +186,7 @@ func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
 		}
 	}
 
-	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "outside T-001's declared Produces/Owns lane") {
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "outside T-001's declared Produces/Modifies/Owns lane") {
 		t.Fatalf("accept error = %v, want lane refusal", err)
 	}
 	if got := mustHead(t, git); got != base {

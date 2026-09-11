@@ -208,13 +208,16 @@ every `verify_run`. Gate priority is candidate data resolved by the registry,
 not provider registration order or a language switch in `verify`.
 
 Task topology remains stack-neutral. A build run derives its writable lane from
-the union of the task's explicit `Owns` and concrete file/directory `Produces`,
+the union of the task's explicit `Owns` and concrete file/directory `Produces`
+or `Modifies`,
 and only falls back to an inherited milestone lane when neither exists.
 Every changed path is checked against that lane before each round can be green
 and again before acceptance; an exception therefore requires an approved plan
 amendment, not a reviewer's guess that the extra edit was useful. `Consumes`
 are named separately as read-only inputs; consuming an artifact never transfers
-its ownership. Shared registries and integration files belong to an explicit
+its ownership. `Produces` records the artifact's unique creator; `Modifies`
+records a later writer and serializes it behind the previous writer without
+claiming a second creation. Shared registries and integration files belong to an explicit
 integration task, so parallel leaf tasks do not all discover the same hidden
 write seam at rebase time. The accepted dependency closure supplies build-graph evidence to
 adapters: for example, Meson may require an accepted dependency's C source to

@@ -61,8 +61,8 @@ func taskLaneFindings(projectRoot, taskID string, changed []string) []conv.Findi
 		findings = append(findings, conv.Finding{
 			Severity: "critical", File: path,
 			Issue:     fmt.Sprintf("edit is outside %s's declared write lane (owned by %s)", taskID, owner),
-			Fix:       "revert the edit, or amend and approve the plan so this task explicitly owns or produces the path before accepting",
-			Invariant: "a run may modify only paths in its task's Produces/Owns lane",
+			Fix:       "revert the edit, or amend and approve the plan so this task explicitly owns, produces, or modifies the path before accepting",
+			Invariant: "a run may modify only paths in its task's Produces/Modifies/Owns lane",
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
@@ -180,14 +180,16 @@ func fixtureNarrowingSignal(source string) (int, string) {
 
 func sectionLaneClaims(section artifact.Section) []laneClaim {
 	claims := ownsClaims(section.Owns)
-	for _, item := range strings.Split(section.Field("produces"), ",") {
-		item = strings.TrimSpace(strings.Trim(item, "`"))
-		lower := strings.ToLower(item)
-		switch {
-		case strings.HasPrefix(lower, "file:"):
-			claims = append(claims, laneClaim{path: cleanLanePath(item[len("file:"):])})
-		case strings.HasPrefix(lower, "dir:"):
-			claims = append(claims, laneClaim{path: cleanLanePath(item[len("dir:"):]), tree: true})
+	for _, field := range []string{"produces", "modifies"} {
+		for _, item := range strings.Split(section.Field(field), ",") {
+			item = strings.TrimSpace(strings.Trim(item, "`"))
+			lower := strings.ToLower(item)
+			switch {
+			case strings.HasPrefix(lower, "file:"):
+				claims = append(claims, laneClaim{path: cleanLanePath(item[len("file:"):])})
+			case strings.HasPrefix(lower, "dir:"):
+				claims = append(claims, laneClaim{path: cleanLanePath(item[len("dir:"):]), tree: true})
+			}
 		}
 	}
 	return claims
