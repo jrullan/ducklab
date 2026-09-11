@@ -3011,7 +3011,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return fmt.Errorf("read candidate worktree paths: %w", err)
 	}
 	if laneFindings := taskLaneFindings(entry.Path, rs.run.TaskID, changedPaths); len(laneFindings) > 0 {
-		detail := fmt.Sprintf("accept refused: %d edit(s) are outside %s's declared Produces/Owns lane; amend and approve the plan, or revert those edits", len(laneFindings), rs.run.TaskID)
+		detail := fmt.Sprintf("accept refused: %d edit(s) are outside %s's declared Produces/Modifies/Owns lane; amend and approve the plan, or revert those edits", len(laneFindings), rs.run.TaskID)
 		if rs.run.PendingData == nil {
 			rs.run.PendingData = map[string]interface{}{}
 		}

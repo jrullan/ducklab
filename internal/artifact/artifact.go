@@ -159,7 +159,8 @@ var fieldVocabulary = []FieldDefinition{
 	{Canonical: "Acceptance probes", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeCommandChecklist, Required: true},
 	{Canonical: "Work unit", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeInline, Required: true},
 	{Canonical: "Owns", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Toolchain", Kind: KindPlan, Scope: PlanTaskScope},
-	{Canonical: "Produces", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true, MinItems: 1},
+	{Canonical: "Produces", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, MinItems: 1},
+	{Canonical: "Modifies", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, MinItems: 1},
 	{Canonical: "Consumes", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true},
 	{Canonical: "Verification", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeCommand, Required: true},
 	{Canonical: "Exercises", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true, MinItems: 1},
@@ -509,16 +510,24 @@ func planContractDiagnostics(doc *Document) []FieldError {
 
 func planTaskContractDiagnostics(task Section) []FieldError {
 	var diagnostics []FieldError
+	if len(fieldItems(task.Field("produces"))) == 0 && len(fieldItems(task.Field("modifies"))) == 0 {
+		diagnostics = append(diagnostics, FieldError{
+			ID: task.ID, Key: "Produces or Modifies", Code: "missing_required_field",
+			Detail: fmt.Sprintf("%s must have a **Produces:** field for created artifacts or a **Modifies:** field for existing artifacts", task.ID),
+		})
+	}
 	rules := fieldDefinitions(KindPlan, PlanTaskScope)
 	for _, rule := range rules {
-		if !rule.Required {
+		if rule.Shape == "" {
 			continue
 		}
 		key := strings.ToLower(rule.Canonical)
 		value, present := task.Fields[key]
 		block := fieldBlock(task.Body, rule.Canonical)
 		if !present {
-			diagnostics = append(diagnostics, FieldError{ID: task.ID, Key: rule.Canonical, Code: "missing_required_field", Detail: fmt.Sprintf("%s has no **%s:** field", task.ID, rule.Canonical)})
+			if rule.Required {
+				diagnostics = append(diagnostics, FieldError{ID: task.ID, Key: rule.Canonical, Code: "missing_required_field", Detail: fmt.Sprintf("%s has no **%s:** field", task.ID, rule.Canonical)})
+			}
 			continue
 		}
 		switch rule.Shape {
@@ -613,6 +622,7 @@ func PlanTaskGrammar() string {
 		}
 		lines = append(lines, fmt.Sprintf("**%s:** %s; %s", rule.Canonical, shape, required))
 	}
+	lines = append(lines, "Write contract: at least one of **Produces:** or **Modifies:** is required")
 	return strings.Join(lines, "\n")
 }
 

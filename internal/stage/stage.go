@@ -700,9 +700,10 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"2. `<one command for slice 2, when present>`\n" +
 	"3. `<one command for slice 3, when present>`\n\n" +
 	"**Produces:** <comma-separated repository paths, build-target:NAME, or capability:NAME this task creates>\n\n" +
+	"**Modifies:** <typed existing artifacts this task changes; omit if none>\n\n" +
 	"**Consumes:** <optional comma-separated artifacts from earlier tasks or external capability:NAME values>\n\n" +
 	"**Verification:** <the command or deterministic check that exercises THIS task's changed artifacts; a project build that does not consume them is not verification>\n\n" +
-	"**Exercises:** <comma-separated Produced artifacts that the verification actually loads, compiles, tests, or validates>\n\n" +
+	"**Exercises:** <Produced or Modified artifacts exercised by Verification>\n\n" +
 	"**Out of scope:** <what a diligent implementer might reasonably do and must not>\n\n" +
 	"**Assumption:** <optional — what you took as given>\n\n" +
 	"Top-level Acceptance slices are the implementer's numbered contract; it reports on each by number " +
@@ -736,7 +737,7 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"that task writes, not merely code in the same area — add a **Depends on:** line " +
 	"naming those task ids. Write it only where it is true: a plan where every task " +
 	"depends on the one before it is a plan that can only ever run one task at a " +
-	"time, and a task with no real prerequisite should have no line at all. Every **Consumes:** item produced by another task must name that producer in **Depends on:**; ducklab checks this graph.\n\n" +
+	"time, and a task with no real prerequisite should have no line at all. Every **Consumes:** item and every **Modifies:** item with a prior writer must name that writer in **Depends on:**; ducklab checks this graph. Use **Produces:** only for creation and **Modifies:** for maintenance; a later modifier becomes the writer of record.\n\n" +
 	TaskBodyContract
 
 // hasAsBuilt reports whether any section carries the as-built marker.

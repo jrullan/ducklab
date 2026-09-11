@@ -2226,8 +2226,10 @@ func (s *Service) taskLane(projectRoot, taskID string) []string {
 				// produced src/cli/parser.c but inherited src/main.c and
 				// src/delivery/save/: all three cold attempts were consequently
 				// told to work outside their actual contract.
-				if files := taskArtifactFiles(projectRoot, taskID, "produces"); len(files) > 0 {
-					return files
+				files := taskArtifactFiles(projectRoot, taskID, "produces")
+				files = append(files, taskArtifactFiles(projectRoot, taskID, "modifies")...)
+				if len(files) > 0 {
+					return uniqueStrings(files)
 				}
 				return append([]string(nil), m.Owns...)
 			}

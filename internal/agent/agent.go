@@ -1211,7 +1211,7 @@ different or reduced inputs does not satisfy the slice.`, len(ectx.TaskAcceptanc
 		rolePrompt += fmt.Sprintf(`
 
 Your JSON verdict MUST contain a complete manifest_audit in this exact shape:
-"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete work unit, slice and probe evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces names every editable file/directory required by the work unit"}}]}
+"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete work unit, slice and probe evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces/Modifies names every editable file/directory required by the work unit"}}]}
 Audit every target exactly once. SPEC targets: %s. Task targets: %s. An approval
 requires every entry to pass. A request-changes verdict requires every blocking
 finding to be reflected by at least one failed entry. Do not omit passing
@@ -1538,17 +1538,17 @@ Reply with exactly one JSON object:
   "work_unit":"one cohesive capability",
   "acceptance_slices":["observable outcome 1","observable outcome 2"],
   "acceptance_probes":["executable command for outcome 1","executable command for outcome 2"],
-  "produces":["file:path","dir:path","build-target:name","capability:name"],"consumes":[],
+  "produces":["file:path","dir:path","build-target:name","capability:name"],"modifies":[],"consumes":[],
   "verification":"executable command"}]}]}
 
 Rules:
-- Each task belongs to exactly one milestone and each produced artifact has one producer.
+- Each task belongs to exactly one milestone. Produces names newly created artifacts and each has one creator; Modifies names existing artifacts this task changes.
 - Each task has exactly one cohesive work_unit and 1-3 observable acceptance_slices.
 - Each acceptance_slice has one distinct acceptance_probe at the same array index. Write the executable command itself, without Markdown backticks; never copy one broad verification command into every probe.
 - If a proposed task needs more than three slices or spans independent concerns, split it here before IDs and artifact ownership are frozen.
-- Every produces/consumes item is typed exactly as file:path, dir:path,
+- Every produces/modifies/consumes item is typed exactly as file:path, dir:path,
   build-target:name, or capability:name. Bare paths are invalid.
-- A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
+- A consumer or modifier names the prior writer's artifact byte-for-byte; ducklab derives Depends on. Every task has at least one produces or modifies item.
 - Keep tasks small; the next architect renders work_unit, acceptance_slices, and acceptance_probes verbatim as flat lists. Explanations belong in prose, never as nested list items.
 - Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
@@ -1560,8 +1560,8 @@ JSON manifest. Change only the tasks implicated by the review findings.
 Reply with exactly one JSON object:
 {"operations":[
  {"op":"add_milestone","milestone_id":"M-02","milestone_title":"short title"},
- {"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
- {"op":"add_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
+ {"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"modifies":[],"consumes":[],"verification":"executable command"}},
+ {"op":"add_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":[],"modifies":["file:path"],"consumes":[],"verification":"executable command"}},
  {"op":"delete_task","task_id":"T-003"}
 ]}
 
@@ -1572,10 +1572,11 @@ Rules:
 - A split is replace_task for the original plus add_task for each new task; allocate only unused task IDs for additions.
 - A move is replace_task with the existing task_id and its destination milestone_id.
 - Every add/replace task is complete and uses the same compact task schema as the canonical manifest.
-- Every produced artifact has exactly one producer across the complete
-  manifest. Consumes is read-only. Never repair one task by claiming an
-  artifact already produced by another; repartition the affected work units so
-  only one task edits and produces that artifact.
+- Every created artifact has exactly one producer and one Produces claim across
+  the complete manifest. Consumes is read-only. Never give a second Produces
+  claim to an artifact already produced by another task; use Modifies when a
+  later task changes it. Repartition independent work units, but do not
+  repartition cohesive maintenance merely to evade the creation invariant.
 - Do not repeat an operation for one task_id. Use 1-4 operations. Leave other
   findings for the next review of the preserved candidate instead of making
   one large nested response.
@@ -2142,7 +2143,7 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 			entryShape := `{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}`
 			extraRule := ""
 			if part.kind == "tasks" {
-				entryShape = `{"id":"target","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces names every editable lane required by the work unit"}}`
+				entryShape = `{"id":"target","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces/Modifies names every editable lane required by the work unit"}}`
 				extraRule = " Include one slice_probes entry for every acceptance slice in that task, in order, and one ownership audit. A build-target does not substitute for the build definition the task edits."
 			}
 			conv := append([]provider.Message{}, msgs...)
@@ -2284,7 +2285,7 @@ func repairInstruction(contract string, parseErr error) string {
 
 What was wrong: %v
 
-Reply with ONLY one JSON object: {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"manifest","line":0,"issue":"defect","fix":"bounded remedy"}],"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"exact probe/outcome/polarity evidence"}],"ownership":{"status":"pass|fail","evidence":"editable Produces lanes required by the work unit"}}]}}
+Reply with ONLY one JSON object: {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"manifest","line":0,"issue":"defect","fix":"bounded remedy"}],"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"exact probe/outcome/polarity evidence"}],"ownership":{"status":"pass|fail","evidence":"editable Produces/Modifies lanes required by the work unit"}}]}}
 
 Include every SPEC exactly once: %s. Include every task exactly once: %s.
 Approval requires all entries to pass; request-changes requires at least one

@@ -48,7 +48,7 @@ func TestFormatTaskImplementsRoundTripsThroughGrammar(t *testing.T) {
 // toolchain silently discarded it because only typed file: entries have lane
 // semantics. Grammar 2 must reject the information at its boundary instead.
 func TestPlanContractRejectsUntypedArtifactReferences(t *testing.T) {
-	for _, field := range []string{"Produces", "Consumes", "Exercises"} {
+	for _, field := range []string{"Produces", "Modifies", "Consumes", "Exercises"} {
 		t.Run(field, func(t *testing.T) {
 			body := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
 				"## M-01 — Core\n\n### T-001 — Build\n\n" +
@@ -57,9 +57,13 @@ func TestPlanContractRejectsUntypedArtifactReferences(t *testing.T) {
 				"**Acceptance probes:**\n1. `go test ./...`\n" +
 				"**Produces:** file:src/main.go\n**Consumes:** none\n" +
 				"**Verification:** `go test ./...`\n**Exercises:** file:src/main.go\n"
-			body = strings.Replace(body, "**"+field+":** "+map[string]string{
-				"Produces": "file:src/main.go", "Consumes": "none", "Exercises": "file:src/main.go",
-			}[field], "**"+field+":** src/main.go", 1)
+			if field == "Modifies" {
+				body = strings.Replace(body, "**Produces:** file:src/main.go", "**Modifies:** src/main.go", 1)
+			} else {
+				body = strings.Replace(body, "**"+field+":** "+map[string]string{
+					"Produces": "file:src/main.go", "Consumes": "none", "Exercises": "file:src/main.go",
+				}[field], "**"+field+":** src/main.go", 1)
+			}
 			diagnostics, err := ContractLint(body, KindPlan)
 			if err != nil {
 				t.Fatal(err)
@@ -70,6 +74,34 @@ func TestPlanContractRejectsUntypedArtifactReferences(t *testing.T) {
 				t.Fatalf("%s bare path passed grammar 2: %+v", field, diagnostics)
 			}
 		})
+	}
+}
+
+func TestPlanContractAcceptsModificationWithoutSecondProducer(t *testing.T) {
+	body := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
+		"## M-01 — Core\n\n### T-002 — Amend\n\n" +
+		"**Implements:** SPEC-001\n**Work unit:** amend the registry\n" +
+		"**Acceptance slices:**\n- the registry contains the new entry\n" +
+		"**Acceptance probes:**\n1. `go test ./...`\n" +
+		"**Modifies:** file:src/registry.go\n**Consumes:** none\n" +
+		"**Verification:** `go test ./...`\n**Exercises:** file:src/registry.go\n"
+	diagnostics, err := ContractLint(body, KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("modifier-only task rejected: %+v", diagnostics)
+	}
+
+	body = strings.Replace(body, "**Modifies:** file:src/registry.go\n", "", 1)
+	diagnostics, err = ContractLint(body, KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(diagnostics, func(d FieldError) bool {
+		return d.Code == "missing_required_field" && d.Key == "Produces or Modifies"
+	}) {
+		t.Fatalf("task with no write contract passed: %+v", diagnostics)
 	}
 }
 

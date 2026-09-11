@@ -292,8 +292,17 @@ func CheckPlan(spec, plan *Document) []TraceError {
 		}
 		for _, item := range fieldItems(task.Field("consumes")) {
 			if producer := producers[item]; producer != "" && producer != task.ID && !deps[producer] {
-				errs = append(errs, TraceError{Kind: MissingDependency, ID: task.ID, Detail: fmt.Sprintf("consumes %q produced by %s without depending on it", item, producer), Missing: producer})
+				errs = append(errs, TraceError{Kind: MissingDependency, ID: task.ID, Detail: fmt.Sprintf("consumes %q last written by %s without depending on it", item, producer), Missing: producer})
 			}
+		}
+		for _, item := range fieldItems(task.Field("modifies")) {
+			if producer := producers[item]; producer != "" && producer != task.ID && !deps[producer] {
+				errs = append(errs, TraceError{Kind: MissingDependency, ID: task.ID, Detail: fmt.Sprintf("modifies %q last written by %s without depending on it", item, producer), Missing: producer})
+			}
+			// A modifier is the producer of record for every later consumer or
+			// modifier. Produces remains the unique creation claim; Modifies
+			// serializes maintenance without inventing a second creator.
+			producers[item] = task.ID
 		}
 	}
 

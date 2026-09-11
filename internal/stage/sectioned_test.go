@@ -498,6 +498,17 @@ func TestPlanCompositionFindingsReportsOnlyNewBreaks(t *testing.T) {
 	}
 }
 
+func TestPlanCompositionAcceptsAmendmentThatModifiesAnAcceptedArtifact(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Registry\n\nContract.\n")
+	base, _ := artifact.Parse("## M-01 — Core\n\n### T-001 — Create\n\n**Implements:** SPEC-001\n**Produces:** file:src/registry.rs\n", artifact.KindPlan)
+	proposed, _ := artifact.Parse(artifact.RenderBody(base)+
+		"\n### T-002 — Amend\n\n**Implements:** SPEC-001\n**Modifies:** file:src/registry.rs\n**Depends on:** T-001\n", artifact.KindPlan)
+	if got := planCompositionFindings(root, base, proposed); len(got) != 0 {
+		t.Fatalf("valid maintenance amendment was blocked: %v", got)
+	}
+}
+
 func TestSectionedPlanReturnsSemanticDissentSeparately(t *testing.T) {
 	root := t.TempDir()
 	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Capture\n\nContract.\n")

@@ -663,9 +663,13 @@ Grammar 2 treats these task fields as a machine-readable contract:
 - `Acceptance slices` is a required flat list of 1–3 observable outcomes.
 - `Acceptance probes` is a required flat list with exactly one numbered,
   backtick-delimited command for each acceptance slice, in the same order.
-- `Produces` and `Exercises` are required comma-separated artifact lists with
-  at least one item. Every item uses `file:`, `dir:`, `build-target:`, or
-  `capability:` followed by a non-empty value. `Consumes` uses the same typed
+- Every task has at least one `Produces` or `Modifies` item. `Produces` names
+  artifacts the task creates and is unique across the plan. `Modifies` names
+  existing artifacts the task changes; it grants the same write lane and makes
+  the task the writer of record for later consumers and modifiers. A modifier
+  depends on the previous writer. `Exercises` is required and must overlap the
+  task's `Produces`/`Modifies` set. Every item uses `file:`, `dir:`,
+  `build-target:`, or `capability:` followed by a non-empty value. `Consumes` uses the same typed
   items, or exactly `none` when the task has no input artifacts. Bare paths and
   mixed lists containing `none` are invalid because downstream lane and
   toolchain consumers do not infer an artifact kind.
