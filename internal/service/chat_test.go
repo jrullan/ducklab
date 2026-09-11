@@ -87,6 +87,8 @@ func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
 	})
 	w.AppendEvent("gate", map[string]interface{}{"exit_code": 0, "command": "meson test -C build"})
 	w.AppendEvent("verdict", map[string]interface{}{"verdict": "FAILED"})
+	w.AppendEvent("human_needed", map[string]interface{}{"kind": "question"})
+	w.AppendEvent("error", map[string]interface{}{})
 	w.Close()
 	s.RecoverRuns(context.Background())
 
@@ -95,6 +97,7 @@ func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
 		"r-stopped", "build pair", "T-004", "reviewer dissent cannot be overridden",
 		"request-changes", "meson.build is outside the task lane", "meson test -C build",
 		"pending: error · next: resume, abort", "Capture X11 frames", "src/backend/x11_capture.c",
+		"waiting for a human: question",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("run dossier is missing %q:\n%s", want, prompt)
