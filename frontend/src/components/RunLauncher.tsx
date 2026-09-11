@@ -35,7 +35,15 @@ function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
       roster.find((entry) => entry.role === seatLabel(mode, i))?.duckling ?? "",
     );
   }
-  return roster.map((entry) => entry.duckling);
+  // Participant modes (tournament's contestants, split's workers) are the
+  // implementer seat's plural line-up. The roster response names EVERY role
+  // (advisor, architect, judge, scribe, triager…); mapping all of them made
+  // each of those a contestant, and one pick then sent them all as explicit
+  // participants (B-394).
+  const implementer = roster.find((entry) => entry.role === "implementer");
+  const participants = (implementer?.ducklings ?? []).filter(Boolean);
+  if (participants.length) return participants;
+  return implementer?.duckling ? [implementer.duckling] : [];
 }
 
 export function roleSeats(mode: string, ducklings: readonly string[]): Record<string, string> {
@@ -144,7 +152,10 @@ export function LaunchConfig({
             role: seatLabel(displayMode, i),
             duckling: value.seatProvenance?.[i] === "picked now"
               ? value.ducklings[i] ?? ""
-              : roster?.find((entry) => entry.role === seatLabel(displayMode, i))?.duckling ?? "",
+              // Role seats read the roster entry of their role; participant
+              // seats (contestant N, worker N) have no role entry and show
+              // the projected line-up instead of "default".
+              : roster?.find((entry) => entry.role === seatLabel(displayMode, i))?.duckling ?? value.ducklings[i] ?? "",
             provenance: value.seatProvenance?.[i] === "picked now"
               ? "picked now"
               : (() => {
