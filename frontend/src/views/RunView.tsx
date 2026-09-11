@@ -1326,7 +1326,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 .then(() => client.abort(runId))
                 .then(() => client.runStart(run.project_id, task.id, {
                   mode: run.mode,
-                  ducklings: seatsFromRoster(run.mode, run.roster),
+                  // The recorded seats travel keyed by role; a positional
+                  // echo of the roster is redundant for role modes and, for
+                  // a tournament or split, would name every role a
+                  // participant (B-394).
+                  ducklings: [],
                   seats: run.roster,
                   note: `Relaunched by human after amending ${task.id}'s task body from ${runId}.`,
                   redo: true,

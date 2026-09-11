@@ -220,3 +220,102 @@ describe("the seat configurator's roster prefill", () => {
     expect(seeded[seeded.length - 1]).toEqual(["terra", "qwen38-max", "glm52"]);
   });
 });
+
+// B-394 (review): tournament's contestants and split's workers are the
+// implementer seat's plural line-up. The roster response names every role, and
+// projecting all eight entries made the advisor, architect, judge, scribe and
+// triager contestants — then one pick sent them all as explicit participants.
+describe("participant modes project the implementer line-up, not every role", () => {
+  const tournamentRoster: RosterEntry[] = [
+    { role: "advisor", duckling: "qwen38-max", ducklings: ["qwen38-max"], source: "global mode seat" },
+    { role: "architect", duckling: "k3", ducklings: ["k3"], source: "global mode seat" },
+    { role: "consultant", duckling: "luna", ducklings: ["luna"], source: "global mode seat" },
+    { role: "implementer", duckling: "terra", ducklings: ["terra", "glm52"], source: "project mode seat" },
+    { role: "judge", duckling: "j9", ducklings: ["j9"], source: "global mode seat" },
+    { role: "reviewer", duckling: "s1", ducklings: ["s1"], source: "global mode seat" },
+    { role: "scribe", duckling: "s1", ducklings: ["s1"], source: "global mode seat" },
+    { role: "triager", duckling: "t7", ducklings: ["t7"], source: "global mode seat" },
+  ];
+
+  it("seats a tournament with exactly the configured contestants and sends nothing untouched", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} initialMode="tournament" roster={tournamentRoster} onLaunch={onLaunch} />);
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain("terra");
+    expect(chips[1]!.textContent).toContain("glm52");
+    for (const stranger of ["qwen38-max", "k3", "j9", "t7", "luna"]) {
+      expect(chips.map((c) => c.textContent).join(" | ")).not.toContain(stranger);
+    }
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect(launchCall(onLaunch)).toEqual(expect.objectContaining({ mode: "tournament", ducklings: [] }));
+  });
+
+  it("sends the whole participant list, and only participants, after one pick", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} initialMode="tournament" roster={tournamentRoster} onLaunch={onLaunch} />);
+    fireEvent.click(screen.getAllByTestId("seat-chip")[1]!);
+    fireEvent.change(screen.getByTestId("seat-pick-1"), { target: { value: "j9" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    const call = launchCall(onLaunch) as { mode: string; ducklings: string[]; seats?: unknown };
+    expect(call.mode).toBe("tournament");
+    expect(call.ducklings).toEqual(["terra", "j9"]);
+    expect(call.seats).toBeUndefined();
+  });
+
+  it("seats split's workers from the same plural line-up", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} initialMode="split" roster={tournamentRoster} onLaunch={onLaunch} />);
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips.map((c) => c.textContent).join(" | ")).toContain("terra");
+    expect(chips.map((c) => c.textContent).join(" | ")).toContain("glm52");
+    expect(chips.map((c) => c.textContent).join(" | ")).not.toContain("k3");
+  });
+
+  it("falls back to the single implementer when no plural line-up is configured", () => {
+    const onLaunch = vi.fn();
+    const single = tournamentRoster.map((e) => e.role === "implementer" ? { ...e, ducklings: [] } : e);
+    render(<RunLauncher ducklings={fleet} initialMode="tournament" roster={single} onLaunch={onLaunch} />);
+    const chips = screen.getAllByTestId("seat-chip");
+    // A tournament opens two seats; the second stays default until picked.
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain("terra");
+    expect(chips[1]!.textContent).toContain("default");
+    expect(chips.map((c) => c.textContent).join(" | ")).not.toContain("k3");
+  });
+
+  it("re-seats participants from the plural line-up when the mode changes from pair to tournament", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} initialMode="pair" roster={tournamentRoster} onLaunch={onLaunch} />);
+    expect(screen.getAllByTestId("seat-chip")).toHaveLength(3);
+    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain("terra");
+    expect(chips[1]!.textContent).toContain("glm52");
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect(launchCall(onLaunch)).toEqual(expect.objectContaining({ mode: "tournament", ducklings: [] }));
+  });
+
+  it("shows the projected contestants in the TDD block's tuning, not default", () => {
+    render(
+      <TddLaunch
+        ducklings={fleet}
+        preferred={{}}
+        phaseDefaults={{ test: "solo", build: "tournament" }}
+        busy={false}
+        onTdd={() => {}}
+        onTestOnly={() => {}}
+        onBuildOnly={() => {}}
+        testRoster={tournamentRoster}
+        buildRoster={tournamentRoster}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("tdd-tune"));
+    const text = screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ");
+    expect(text).toContain("contestant 1terra");
+    expect(text).toContain("contestant 2glm52");
+    expect(text).not.toContain("k3");
+  });
+});

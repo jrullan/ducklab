@@ -38,6 +38,13 @@ export function seatsFromRoster(
       return [r.implementer, r.advisor].filter(Boolean) as string[];
     case "pair":
       return [r.implementer, r.advisor, r.reviewer].filter(Boolean) as string[];
+    case "tournament":
+    case "split":
+      // A run record names one duckling per role; the contestants / workers
+      // beyond the implementer are not in it. Projecting every role made the
+      // advisor, judge, scribe and triager participants of the relaunch
+      // (B-394). Seed the implementer only; the roster resolves the rest.
+      return r.implementer ? [r.implementer] : [];
   }
   return Object.values(r).filter((id, i, all) => !!id && all.indexOf(id) === i);
 }
