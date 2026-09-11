@@ -982,9 +982,21 @@ describe("the rail follows the contract's order", () => {
   });
 
   // The plain launcher — a test-ready task where run is primary — opens on
-  // the same Settings default as the TDD block: a habit that held in one
-  // rendering of the rail and not the other was half a setting.
-  it("opens the plain launcher on the Settings build default too", async () => {
+  // the same Settings default MODE as the TDD block: a habit that held in one
+  // rendering of the rail and not the other was half a setting. Its SEATS,
+  // however, come from the project's resolved roster, never from the global
+  // saved line-up: seeding the line-up as a pick sent it as an explicit
+  // request that overrode the project's pins (B-394).
+  it("opens the plain launcher on the Settings build default, seated from the project roster", async () => {
+    const rosterGet = vi.fn((_p: string, mode?: string) =>
+      Promise.resolve({ entries: mode === "pair"
+        ? [
+            { role: "advisor", duckling: "pato-luna", source: "project mode seat" },
+            { role: "implementer", duckling: "pato-local", source: "project mode seat" },
+            { role: "reviewer", duckling: "pato-judge", source: "global mode seat" },
+          ]
+        : [] }),
+    );
     const client = railClient({
       tasks: vi.fn(() =>
         Promise.resolve([
@@ -996,16 +1008,22 @@ describe("the rail follows the contract's order", () => {
         Promise.resolve({
           rounds: {}, agent_max_turns: 24,
           build_mode: "pair",
-          ducklings: { pair: ["pato-sonnet", "pato-local"] },
+          ducklings: { pair: ["pato-sonnet", "pato-atom", "pato-nube"] },
         }),
       ),
-    } as Partial<EngineClient>);
+      rosterGet,
+    } as unknown as Partial<EngineClient>);
     render(<Board client={client} projectId="p" />);
     await openRail();
     expect((screen.getByTestId("run-mode") as HTMLSelectElement).value).toBe("pair");
-    const chips = screen.getAllByTestId("seat-chip");
-    expect(chips[0]!.textContent).toContain("pato-sonnet");
-    expect(chips[1]!.textContent).toContain("pato-local");
+    await waitFor(() => expect(rosterGet).toHaveBeenCalledWith("p", "pair"));
+    await waitFor(() => expect(screen.getAllByTestId("seat-chip")[0]!.textContent).toContain("pato-local"));
+    const text = screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ");
+    expect(text).toContain("implementerpato-localproject");
+    expect(text).toContain("advisorpato-lunaproject");
+    expect(text).toContain("reviewerpato-judgeglobal");
+    expect(text).not.toContain("pato-sonnet");
+    expect(text).not.toContain("picked now");
   });
 
   // A committed failing test is a promise with two exits, and the rail must
