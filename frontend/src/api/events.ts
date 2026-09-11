@@ -241,6 +241,7 @@ export const KNOWN_EVENT_TYPES = [
   "run_queued",
   "run_started",
   "accept_retry",
+  "run_reconciled",
   "invariant_violation",
   "capabilities_resolved",
   "review_evidence",

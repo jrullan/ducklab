@@ -159,6 +159,9 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 					_ = w.WriteState()
 				}
 			}
+			if changed, err := s.reconcileAcceptedRun(rs); err == nil && changed {
+				repaired++
+			}
 
 			if run.Status == "running" || run.Status == "queued" {
 				if err := s.markEngineRestart(rs); err == nil {
@@ -197,6 +200,51 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// reconcileAcceptedRun repairs the authoritative half-settled state: the
+// acceptance and commit were persisted, and Git says that commit is on the
+// default branch, but a losing client request later rewrote the run as a
+// paused gate. Git decides whether the landing happened; a stale transport
+// error must never reverse it.
+func (s *Service) reconcileAcceptedRun(rs *runState) (bool, error) {
+	if rs == nil || rs.run == nil || !rs.run.Accepted || strings.TrimSpace(rs.run.CommitSHA) == "" {
+		return false, nil
+	}
+	root := rs.projectPath
+	if root == "" {
+		if entry, err := s.entryFor(rs); err == nil {
+			root = entry.Path
+		}
+	}
+	if root == "" || vcs.New(root).IsReachableFromDefault(rs.run.CommitSHA) != nil {
+		return false, nil
+	}
+	if rs.run.Status == "done" && rs.run.PendingKind == "" && rs.run.PendingSince == "" && len(rs.run.PendingData) == 0 {
+		return false, nil
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return false, err
+	}
+	previousStatus, previousPending := rs.run.Status, rs.run.PendingKind
+	rs.run.Status = "done"
+	if rs.run.EndedAt == "" {
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	clearPending(rs.run)
+	if err := w.AppendEvent("run_reconciled", map[string]interface{}{
+		"commit_sha":       rs.run.CommitSHA,
+		"previous_status":  previousStatus,
+		"previous_pending": previousPending,
+		"detail":           "accepted commit is reachable from the default branch; cleared a stale pending decision",
+	}); err != nil {
+		return false, err
+	}
+	if err := w.WriteState(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // hygieneWorktrees reconciles persistent run records with git at engine start.
