@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { Settings } from "./Settings";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 import { EngineClient, type Run } from "../api/client";
+import { routeHref } from "../app/routes";
 
 const run: Run = {
   id: "r-1", project_id: "p", stage: "build", mode: "pair", task_id: "T-001",
@@ -174,7 +175,11 @@ describe("RunView", () => {
 
     const failure = screen.getByTestId("run-failure");
     expect(failure.textContent).not.toMatch(/\b(clean|commit)\b/i);
-    expect(failure.querySelectorAll("button, a")).toHaveLength(0);
+    // The generic consultant door is available for every stopped run; this
+    // unrelated failure must still not receive the special workspace-cleanup
+    // action.
+    expect(within(failure).getByTestId("chat-about")).toBeInTheDocument();
+    expect(failure.querySelector(`a[href="${routeHref({ name: "projects" })}"]`)).toBeNull();
   });
 
   it("renders the conversation, gate and budget", async () => {

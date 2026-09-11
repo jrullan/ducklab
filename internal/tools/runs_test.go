@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,5 +58,36 @@ func TestRunHistoryTools(t *testing.T) {
 	res, _ = read.Execute(context.Background(), ectx, json.RawMessage(`{"id":"../../secret"}`))
 	if !res.IsError {
 		t.Error("a path-shaped id was accepted")
+	}
+}
+
+func TestRunSummaryForPromptKeepsTheHeaderAndRecentEvidence(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".ducklab", "runs", "r-long")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"id":"r-long","stage":"plan","status":"failed","failure":"the final failure"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var events strings.Builder
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&events, `{"type":"error","data":{"error":"error-%02d"}}`+"\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := ReadRunSummaryForPrompt(root, "r-long", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"r-long", "the final failure", "8 earlier timeline lines omitted", "error-11"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("bounded summary lost %q:\n%s", want, summary)
+		}
+	}
+	if strings.Contains(summary, "error-00") {
+		t.Errorf("bounded summary retained stale evidence:\n%s", summary)
 	}
 }

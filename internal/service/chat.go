@@ -107,7 +107,7 @@ type ChatStartRequest struct {
 	// Duckling is the model the person chose from the fleet.
 	Duckling string `json:"duckling"`
 	// AboutKind and AboutID name the subject: "bug" B-004, "task" T-050,
-	// or "document" REQ-001/SPEC-001/M-001/T-001.
+	// "run" r-..., or "document" REQ-001/SPEC-001/M-001/T-001.
 	AboutKind string `json:"about_kind"`
 	AboutID   string `json:"about_id"`
 	// Message is the person's opening question.
@@ -138,6 +138,15 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	if req.AboutKind == "document" {
 		if _, err := s.TraceShow(ctx, projectID, req.AboutID); err != nil {
 			return nil, fmt.Errorf("document chat subject: %w", err)
+		}
+	}
+	if req.AboutKind == "run" {
+		detail, err := s.RunGet(ctx, req.AboutID)
+		if err != nil {
+			return nil, fmt.Errorf("run chat subject: %w", err)
+		}
+		if detail.Run.ProjectID != projectID {
+			return nil, fmt.Errorf("run %q does not belong to project %q", req.AboutID, projectID)
 		}
 	}
 
@@ -490,6 +499,17 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 					fmt.Fprintf(&b, "- run %s: %s %s %s (accepted=%v)\n", r.ID, r.Stage, r.Status, r.Verdict, r.Accepted)
 				}
 			}
+		}
+	case "run":
+		// The door was opened from this exact record. Put the same bounded,
+		// authoritative summary exposed by run_read into the first prompt so a
+		// small consultant can explain immediately, while retaining run_read for
+		// follow-up investigation.
+		if summary, err := tools.ReadRunSummaryForPrompt(projectRoot, aboutID, 40); err == nil {
+			b.WriteString(summary)
+			b.WriteString("\nUse this record as evidence. Distinguish the root cause from downstream symptoms, and recommend actions the person can take in Ducklab; do not claim the run can be resumed or accepted unless its recorded state permits it.\n")
+		} else {
+			fmt.Fprintf(&b, "Run %s could not be loaded: %v\n", aboutID, err)
 		}
 	case "document":
 		if node, walkErr := s.TraceShow(ctx, rs.run.ProjectID, aboutID); walkErr == nil {

@@ -123,12 +123,24 @@ func (t *RunReadTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
+	summary, err := ReadRunSummary(ectx.Docs(), a.ID)
+	if err != nil {
+		return ErrorResult("%v", err), nil
+	}
+	return SuccessResult("%s", summary), nil
+}
+
+// ReadRunSummary is the authoritative reading of a run record used by both the
+// run_read tool and deterministic consultant dossiers. Keeping one formatter
+// prevents the chat door from describing a different run than the tool the
+// consultant can call while investigating it.
+func ReadRunSummary(projectRoot, runID string) (string, error) {
 	// The id is a directory name here; a path would escape the record.
-	id := filepath.Base(strings.TrimSpace(a.ID))
-	dir := filepath.Join(ectx.Docs(), ".ducklab", "runs", id)
+	id := filepath.Base(strings.TrimSpace(runID))
+	dir := filepath.Join(projectRoot, ".ducklab", "runs", id)
 	st, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if err != nil {
-		return ErrorResult("no run %q — run_list shows what exists", id), nil
+		return "", fmt.Errorf("no run %q — run_list shows what exists", id)
 	}
 	var s struct {
 		Stage    string                 `json:"stage"`
@@ -143,7 +155,7 @@ func (t *RunReadTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 		Pending  map[string]interface{} `json:"pending_data"`
 	}
 	if err := json.Unmarshal(st, &s); err != nil {
-		return ErrorResult("unreadable record: %v", err), nil
+		return "", fmt.Errorf("unreadable record: %v", err)
 	}
 
 	var b strings.Builder
@@ -220,7 +232,30 @@ func (t *RunReadTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 			}
 		}
 	}
-	return SuccessResult("%s", b.String()), nil
+	return b.String(), nil
+}
+
+// ReadRunSummaryForPrompt keeps the state/failure header and the most recent
+// timeline evidence. A long repair loop must not consume a small consultant's
+// context before it can answer; run_read remains available when older history
+// is relevant to a follow-up.
+func ReadRunSummaryForPrompt(projectRoot, runID string, maxTimelineLines int) (string, error) {
+	summary, err := ReadRunSummary(projectRoot, runID)
+	if err != nil || maxTimelineLines <= 0 {
+		return summary, err
+	}
+	const marker = "\n### timeline\n"
+	header, timeline, ok := strings.Cut(summary, marker)
+	if !ok {
+		return summary, nil
+	}
+	lines := strings.Split(strings.TrimSuffix(timeline, "\n"), "\n")
+	if len(lines) <= maxTimelineLines {
+		return summary, nil
+	}
+	omitted := len(lines) - maxTimelineLines
+	return fmt.Sprintf("%s%s- … %d earlier timeline lines omitted; use run_read if needed\n%s\n",
+		header, marker, omitted, strings.Join(lines[omitted:], "\n")), nil
 }
 
 func truncate(s string, n int) string {
