@@ -46,6 +46,16 @@ function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
   return implementer?.duckling ? [implementer.duckling] : [];
 }
 
+/** The roster entry a seat reads its provenance from. Role seats read the
+ * entry of their role; participant seats (contestant N, worker N) carry
+ * labels that are not roster roles, so every participant reads the
+ * implementer entry whose plural line-up seated it. */
+function seatEntry(mode: string, roster: readonly RosterEntry[] | undefined, i: number): RosterEntry | undefined {
+  if (!roster) return undefined;
+  const role = fixedSeats(mode) > 0 ? seatLabel(mode, i) : "implementer";
+  return roster.find((entry) => entry.role === role);
+}
+
 export function roleSeats(mode: string, ducklings: readonly string[]): Record<string, string> {
   return Object.fromEntries(ducklings.map((id, i) => [seatLabel(mode, i), id]));
 }
@@ -112,7 +122,7 @@ export function LaunchConfig({
       ducklings: resolved.map((id, i) => value.seatProvenance?.[i] === "picked now" ? value.ducklings[i] ?? "" : id),
       seatProvenance: resolved.map((_, i) => {
         if (value.seatProvenance?.[i] === "picked now") return "picked now";
-        const source = roster.find((entry) => entry.role === seatLabel(displayMode, i))?.source;
+        const source = seatEntry(displayMode, roster, i)?.source;
         return source?.startsWith("project") ? "project" : "global";
       }),
     });
@@ -164,7 +174,7 @@ export function LaunchConfig({
             provenance: value.seatProvenance?.[i] === "picked now"
               ? "picked now"
               : (() => {
-                  const source = roster?.find((entry) => entry.role === seatLabel(displayMode, i))?.source;
+                  const source = seatEntry(displayMode, roster, i)?.source;
                   return source?.startsWith("project") ? "project" : source ? "global" : defaultProvenance;
                 })(),
           }))}
@@ -309,7 +319,7 @@ export function RunLauncher({
       const seatsForMode = rosterSeats(mode, resolved);
       setChosen(seatsForMode);
       setSeatProvenance(seatsForMode.map((_, i) => {
-        const entry = resolved.find((e) => e.role === seatLabel(mode, i));
+        const entry = seatEntry(mode, resolved, i);
         // "project pin" and "project mode seat" are both the project's word.
         return entry?.source?.startsWith("project") ? "project" : "global";
       }));

@@ -103,6 +103,7 @@ describe("relaunching from the run view", () => {
     );
     const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { seats: Record<string, string> };
     expect(opts.seats).not.toHaveProperty("advisor");
+    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated as this run ran/);
   });
 
   it("relaunches a tournament without a positional list, seating contestants from the roster", async () => {
@@ -132,6 +133,9 @@ describe("relaunching from the run view", () => {
     expect(opts.mode).toBe("tournament");
     expect(opts.ducklings).toEqual([]);
     expect(opts.seats).toBeUndefined();
+    // The seats shown are the project roster's, not the run's — say so.
+    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated from the current project roster/);
+    expect(screen.getByTestId("relaunch-provenance").textContent).not.toMatch(/as this run ran/);
   });
 
   it("forwards the entered note when relaunching", async () => {

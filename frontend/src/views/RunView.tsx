@@ -24,7 +24,7 @@ import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, moneyOrZero, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
-import { seatsFromRoster, rolesForMode } from "../lib/seats";
+import { fixedSeats, seatsFromRoster, rolesForMode } from "../lib/seats";
 import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
@@ -1480,7 +1480,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               open with DIFFERENT seats by design, and unlabelled that read
               as one of them being wrong. */}
           <p className="mb-1 text-xs text-ink-muted" data-testid="relaunch-provenance">
-            seated as this run ran — the board launches with your Settings line-up
+            {fixedSeats(relaunchMode) > 0
+              ? "seated as this run ran — the board launches with your Flock line-up"
+              // Tournament/split runs record one implementer, not the
+              // contestants; the rerun seats from the project roster instead.
+              : "seated from the current project roster — this run's participants were not recorded by seat"}
           </p>
           <RunLauncher
             measured={measured}
