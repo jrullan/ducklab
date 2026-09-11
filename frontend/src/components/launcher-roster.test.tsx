@@ -298,6 +298,77 @@ describe("participant modes project the implementer line-up, not every role", ()
     expect(launchCall(onLaunch)).toEqual(expect.objectContaining({ mode: "tournament", ducklings: [] }));
   });
 
+  // Provenance for a contestant/worker comes from the implementer entry that
+  // seated it; "contestant N" is a label, not a roster role, and looking it
+  // up by label made every participant read as "global".
+  it("labels every contestant with the implementer entry's project provenance", () => {
+    render(<RunLauncher ducklings={fleet} initialMode="tournament" roster={tournamentRoster} onLaunch={vi.fn()} />);
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.textContent).toMatch(/project/i);
+      expect(chip.textContent).not.toMatch(/global/i);
+    }
+  });
+
+  it("labels every worker with the implementer entry's global provenance", () => {
+    const global = tournamentRoster.map((e) => e.role === "implementer" ? { ...e, source: "global mode seat" } : e);
+    render(<RunLauncher ducklings={fleet} initialMode="split" roster={global} onLaunch={vi.fn()} />);
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.textContent).toMatch(/global/i);
+      expect(chip.textContent).not.toMatch(/project/i);
+    }
+  });
+
+  it("keeps the participant provenance after the mode changes from pair to tournament", () => {
+    render(<RunLauncher ducklings={fleet} initialMode="pair" roster={tournamentRoster} onLaunch={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[1]!.textContent).toMatch(/project/i);
+  });
+
+  function tddTuning(roster: RosterEntry[], build: string) {
+    render(
+      <TddLaunch
+        ducklings={fleet}
+        preferred={{}}
+        phaseDefaults={{ test: "solo", build }}
+        busy={false}
+        onTdd={() => {}}
+        onTestOnly={() => {}}
+        onBuildOnly={() => {}}
+        testRoster={roster}
+        buildRoster={roster}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("tdd-tune"));
+    // The build block's seats are the contestants; the test block (solo) is
+    // the two role seats before them.
+    return screen.getAllByTestId("seat-chip").filter((c) => /contestant|worker/.test(c.textContent ?? ""));
+  }
+
+  it("labels the TDD block's contestants with the implementer entry's project provenance", () => {
+    const chips = tddTuning(tournamentRoster, "tournament");
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.textContent).toMatch(/project/i);
+      expect(chip.textContent).not.toMatch(/global/i);
+    }
+  });
+
+  it("labels the TDD block's workers with the implementer entry's global provenance", () => {
+    const global = tournamentRoster.map((e) => e.role === "implementer" ? { ...e, source: "global mode seat" } : e);
+    const chips = tddTuning(global, "split");
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.textContent).toMatch(/global/i);
+      expect(chip.textContent).not.toMatch(/project/i);
+    }
+  });
+
   it("shows the projected contestants in the TDD block's tuning, not default", () => {
     render(
       <TddLaunch
