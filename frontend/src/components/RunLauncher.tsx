@@ -52,8 +52,13 @@ export function roleSeats(mode: string, ducklings: readonly string[]): Record<st
 
 /** Only a person’s current pick is a request override; roster resolutions stay display-only. */
 export function pickedSeats(mode: string, value: PhaseConfig): Record<string, string> {
+  // A fixed mode has exactly fixedSeats(mode) positions; a pick left over from
+  // a wider mode (a pair's reviewer after switching to solo) has no seat.
+  const limit = fixedSeats(mode);
   return Object.fromEntries(
-    value.ducklings.flatMap((id, i) => value.seatProvenance?.[i] === "picked now" && id ? [[seatLabel(mode, i), id]] : []),
+    value.ducklings.flatMap((id, i) =>
+      value.seatProvenance?.[i] === "picked now" && id && (limit === 0 || i < limit) ? [[seatLabel(mode, i), id]] : [],
+    ),
   );
 }
 
@@ -282,9 +287,13 @@ export function RunLauncher({
   // until wanted: most launches carry nothing extra.
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const changed = useRef(initialDucklings.length > 0 && resolved.length === 0);
-  const [chosen, setChosen] = useState<string[]>(() => resolved.length ? [] : initialDucklings.length ? [...initialDucklings] : []);
-  const [seatProvenance, setSeatProvenance] = useState<string[]>(() => resolved.length ? [] : initialDucklings.map(() => "picked now"));
+  // Explicit initial picks (a relaunch's "what just ran", an escalation's
+  // suggested seat) are picks whether or not the roster has arrived yet;
+  // they must not lose to a roster that resolves a moment later, nor to one
+  // that was already there (B-394).
+  const changed = useRef(initialDucklings.length > 0);
+  const [chosen, setChosen] = useState<string[]>(() => initialDucklings.length ? [...initialDucklings] : []);
+  const [seatProvenance, setSeatProvenance] = useState<string[]>(() => initialDucklings.map((id) => id ? "picked now" : "roster"));
   const [maxTokens, setMaxTokens] = useState("");
   const [yolo, setYolo] = useState(false);
   const [agentTurns, setAgentTurns] = useState("");

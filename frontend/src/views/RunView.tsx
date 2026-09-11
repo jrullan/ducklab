@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section } from "../api/client";
+import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section, RosterEntry } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
 import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
@@ -341,6 +341,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // line-ups on mode change, no measured cost beside the modes — which reads,
   // correctly, as a second implementation.
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  // The project's resolved roster for this run's mode: it seats a relaunch's
+  // untouched positions (a tournament's contestants are not in the run
+  // record) and labels provenance; the run's own seats stay the picks.
+  const [relaunchRoster, setRelaunchRoster] = useState<RosterEntry[]>([]);
   const [estimates, setEstimates] = useState<ModeEstimates>({});
   // Measured spend per duckling, for the relaunch panel's seat chips.
   const [measured, setMeasured] = useState<MeasuredSpend>({});
@@ -387,6 +391,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       .then((d) => setPreferred(d.ducklings ?? {}))
       .catch(() => setPreferred({}));
   }, [client]);
+  const relaunchProject = run?.project_id ?? "";
+  const relaunchMode = run?.mode ?? "";
+  useEffect(() => {
+    if (!relaunchProject || !relaunchMode || typeof client.roster !== "function") return;
+    let live = true;
+    client.roster(relaunchProject, relaunchMode)
+      .then((r) => { if (live) setRelaunchRoster(r.entries); })
+      .catch(() => { if (live) setRelaunchRoster([]); });
+    return () => { live = false; };
+  }, [client, relaunchProject, relaunchMode]);
 
   const projectId = run?.project_id ?? "";
   useEffect(() => {
@@ -621,7 +635,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     .sort((a, b) => (spend[b]?.tokens ?? 0) - (spend[a]?.tokens ?? 0));
   const perDuckling: [string, { calls: number; tokens: number; cost_usd: number } | undefined][] = [
     ...spenders,
-    ...seatsFromRoster(run.mode, run.roster).filter((id) => !spenders.includes(id)),
+    ...seatsFromRoster(run.mode, run.roster).filter((id) => id && !spenders.includes(id)),
   ].map((id) => [id, spend[id]]);
   // A judge's turns are anonymised; the mapping is dropped, not hidden.
   const anonymise = run.mode === "tournament";
@@ -883,8 +897,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // instead: a fresh launch and a re-run are different intents, and each
   // panel says which one it serves.)
   const relaunchDucklings = seatsFromRoster(run.mode, run.roster);
-  const suggestedDucklings = escalationCandidate
-    ? [escalationCandidate, ...relaunchDucklings.filter((id) => id !== escalationCandidate)].slice(0, relaunchDucklings.length)
+  // A stronger seat replaces the IMPLEMENTER position; shifting the list
+  // would move every other seat into a role it never had (B-394). Participant
+  // modes seed nothing positional, so the suggestion cannot ride there.
+  const suggestedDucklings = escalationCandidate && relaunchDucklings.length
+    ? relaunchDucklings.map((id, i) => (i === 0 ? escalationCandidate : id === escalationCandidate ? "" : id))
     : relaunchDucklings;
 
   const relaunch = async (opts: LaunchOpts) => {
@@ -1475,6 +1492,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             ducklings={fleet}
             initialMode={run.mode}
             initialDucklings={suggestedDucklings}
+            roster={relaunchRoster}
             preferred={preferred}
             estimates={estimates}
             label="Run again"

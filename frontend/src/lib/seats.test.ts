@@ -12,8 +12,10 @@ describe("seatsFromRoster", () => {
     reviewer: "luna", scribe: "dsv4flash", triager: "k3",
   };
 
-  it("seats a pair as implementer then reviewer", () => {
-    expect(seatsFromRoster("pair", roster)).toEqual(["deepseekv4pro", "luna"]);
+  it("seats a pair positionally, keeping a missing advisor as an empty seat", () => {
+    // Position is meaning: compacting [implementer, reviewer] made the
+    // role-keyed launcher read the reviewer as the advisor (B-394).
+    expect(seatsFromRoster("pair", roster)).toEqual(["deepseekv4pro", "", "luna"]);
   });
 
   it("seats a solo with its implementer only", () => {
@@ -29,10 +31,11 @@ describe("seatsFromRoster", () => {
   // B-394: a run record names one duckling per role; the contestants and
   // workers beyond the implementer are not in it. Projecting every role made
   // the architect, judge, scribe and triager participants of the relaunch.
-  it("seeds a tournament or split with the implementer only, never every role", () => {
-    expect(seatsFromRoster("tournament", roster)).toEqual(["deepseekv4pro"]);
-    expect(seatsFromRoster("split", roster)).toEqual(["deepseekv4pro"]);
-    expect(seatsFromRoster("tournament", { advisor: "k3" })).toEqual([]);
+  it("seeds nothing positional for a tournament or split: the roster resolves the participants", () => {
+    // A one-name list would fail the mode's cardinality (two participants);
+    // every role as a participant was the original defect.
+    expect(seatsFromRoster("tournament", roster)).toEqual([]);
+    expect(seatsFromRoster("split", roster)).toEqual([]);
   });
 
   it("falls back to the deduplicated roster for a mode it does not know", () => {

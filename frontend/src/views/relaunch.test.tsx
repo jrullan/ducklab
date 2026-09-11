@@ -72,7 +72,9 @@ describe("relaunching from the run view", () => {
         // The run's seats are pre-picked for the relaunch and travel keyed
         // by role, never as a positional echo (B-394).
         ducklings: [],
-        seats: { implementer: "dsv4flash", advisor: "pato-sonnet" },
+        // Solo has no reviewer seat: the pair's reviewer does not become the
+        // advisor; only the implementer pick travels.
+        seats: { implementer: "dsv4flash" },
         maxTokens: 1500000,
         // The relaunch panel's caveat states the situation when the task was
         // finished by a later run; clicking past it is the explicit consent
@@ -81,6 +83,55 @@ describe("relaunching from the run view", () => {
       }),
     );
     expect((await screen.findByTestId("relaunch-link")).getAttribute("href")).toBe("#/runs/r-2");
+  });
+
+  // B-394 (review 3): the run's seats travel keyed by role. A pair recorded
+  // with no advisor keeps its reviewer as the REVIEWER, and a tournament seeds
+  // no positional list (one name fails cardinality); its untouched seats are
+  // resolved by the roster.
+  it("relaunches a pair recorded without an advisor with the reviewer still a reviewer", async () => {
+    const client = clientWith();
+    render(<RunView runId="r-1" client={client} />);
+    await waitFor(() => screen.getByTestId("run-start"));
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() =>
+      expect(client.runStart).toHaveBeenCalledWith("p", "T-015", expect.objectContaining({
+        mode: "pair",
+        ducklings: [],
+        seats: { implementer: "dsv4flash", reviewer: "pato-sonnet" },
+      })),
+    );
+    const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { seats: Record<string, string> };
+    expect(opts.seats).not.toHaveProperty("advisor");
+  });
+
+  it("relaunches a tournament without a positional list, seating contestants from the roster", async () => {
+    const tournament: Run = {
+      ...failed, id: "r-tn", mode: "tournament",
+      roster: { implementer: "dsv4flash", judge: "pato-sonnet", advisor: "pato-sonnet", scribe: "dsv4flash", triager: "dsv4flash" },
+    };
+    useRuns.setState({ runs: { "r-tn": tournament }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const roster = vi.fn((_p: string, mode?: string) => Promise.resolve({ entries: mode === "tournament"
+      ? [
+          { role: "advisor", duckling: "pato-sonnet", ducklings: ["pato-sonnet"], source: "global mode seat" },
+          { role: "implementer", duckling: "dsv4flash", ducklings: ["dsv4flash", "pato-sonnet"], source: "project mode seat" },
+          { role: "judge", duckling: "pato-sonnet", ducklings: ["pato-sonnet"], source: "global mode seat" },
+        ]
+      : [] }));
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: tournament, events: [] })),
+      roster,
+    } as unknown as Partial<EngineClient>);
+    render(<RunView runId="r-tn" client={client} />);
+    await waitFor(() => screen.getByTestId("run-start"));
+    await waitFor(() => expect(roster).toHaveBeenCalledWith("p", "tournament"));
+    await waitFor(() => expect(screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ")).toContain("contestant 2pato-sonnet"));
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() => expect(client.runStart).toHaveBeenCalled());
+    const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { mode: string; ducklings: string[]; seats?: unknown };
+    expect(opts.mode).toBe("tournament");
+    expect(opts.ducklings).toEqual([]);
+    expect(opts.seats).toBeUndefined();
   });
 
   it("forwards the entered note when relaunching", async () => {
