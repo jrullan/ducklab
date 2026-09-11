@@ -652,11 +652,12 @@ func modeSeatOrder(mode string) []string {
 	case "pair":
 		return []string{"implementer", "advisor", "reviewer"}
 	case "council":
-		return []string{"architect", "reviewer", "advisor"}
-	case "tournament":
-		return []string{"implementer", "judge", "advisor"}
-	case "split":
-		return []string{"architect", "implementer", "advisor", "reviewer"}
+		// architect first, then every critic (reviewer); the advisor is not a
+		// positional seat of the council list.
+		return []string{"architect", "reviewer"}
+	case "tournament", "split":
+		// every position is a contestant / worker: the implementer list.
+		return []string{"implementer"}
 	}
 	return []string{"architect", "implementer", "reviewer", "judge", "advisor"}
 }

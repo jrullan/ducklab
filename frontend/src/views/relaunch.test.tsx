@@ -69,7 +69,10 @@ describe("relaunching from the run view", () => {
     await waitFor(() =>
       expect(client.runStart).toHaveBeenCalledWith("p", "T-015", {
         mode: "solo",
-        ducklings: ["dsv4flash", "pato-sonnet"],
+        // The run's seats are pre-picked for the relaunch and travel keyed
+        // by role, never as a positional echo (B-394).
+        ducklings: [],
+        seats: { implementer: "dsv4flash", advisor: "pato-sonnet" },
         maxTokens: 1500000,
         // The relaunch panel's caveat states the situation when the task was
         // finished by a later run; clicking past it is the explicit consent
@@ -336,7 +339,8 @@ describe("relaunching a failed test-first", () => {
     const [, taskId, , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];
     expect(taskId).toBe("T-076");
     expect(chain.thenBuild).toBe(true);
-    expect(chain.testDucklings).toContain("dsv4flash");
+    expect(chain.testDucklings).toEqual([]);
+    expect(chain.testSeats).toEqual({ implementer: "dsv4flash" });
     // The promised build keeps ITS recorded seats and settings.
     expect(chain.mode).toBe("pair");
     expect(chain.ducklings).toEqual(["glm52", "qwen38-max"]);

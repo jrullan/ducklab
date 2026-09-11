@@ -509,8 +509,19 @@ export function RunLauncher({
               mode,
               // The roster is the source of truth for untouched defaults. Keep
               // the visible pins in the launcher, but leave them out of the
-              // request so the engine can resolve the canonical roster.
-              ducklings: resolved.length && !changed.current ? [] : chosen,
+              // request so the engine can resolve the canonical roster. Role
+              // modes (solo, pair) send only the hand-made picks, keyed by
+              // role: the engine's positional list reads pair as
+              // [implementer, reviewer] while the launcher shows
+              // [implementer, advisor, reviewer], so a positional echo of
+              // the visible seats seated the advisor as reviewer (B-394).
+              // Participant modes (tournament, split) keep the whole list.
+              ...(fixedSeats(mode) > 0
+                ? (() => {
+                    const seats = pickedSeats(mode, { mode, ducklings: chosen, seatProvenance });
+                    return { ducklings: [], ...(Object.keys(seats).length ? { seats } : {}) };
+                  })()
+                : { ducklings: changed.current ? chosen : [] }),
               ...(Number(maxTokens) ? { maxTokens: Number(maxTokens) } : {}),
               ...(note.trim() ? { note: note.trim() } : {}),
               ...(turnsNoCap || Number(agentTurns) ? { agentTurns: turnsNoCap ? -1 : Number(agentTurns) } : {}),

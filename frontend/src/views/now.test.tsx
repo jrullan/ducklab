@@ -808,4 +808,29 @@ describe("Now launcher seats come from the project roster, not the global line-u
     expect(opts.mode).toBe("pair");
     expect(opts.ducklings).toEqual([]);
   });
+
+  it("opening adjust seats & caps on the TDD chain without touching a seat sends no overrides", async () => {
+    const roster = vi.fn((_p: string, mode?: string) => Promise.resolve({ entries: mode === "pair" ? projectPair : [] }));
+    const testStart = vi.fn(() => Promise.resolve({ id: "r-10" }));
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-012", title: "Define the common capture backend interface", milestone: "M-03", status: "todo", next: ["test_first", "run"] })),
+      ducklings: vi.fn(() => Promise.resolve(fleet)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: { pair: ["terra", "glm52", "k3"] }, build_mode: "pair", test_mode: "solo" })),
+      roster,
+      testStart,
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("tdd-block");
+    await waitFor(() => expect(roster).toHaveBeenCalledWith("p", "pair"));
+    fireEvent.click(screen.getByTestId("tdd-tune"));
+    await screen.findByTestId("tdd-tuning");
+    await waitFor(() => expect(screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ")).toContain("beelink-local"));
+    fireEvent.click(screen.getByTestId("tdd-start"));
+    await waitFor(() => expect(testStart).toHaveBeenCalled());
+    const opts = (testStart.mock.calls[0] as unknown[])[3] as Record<string, unknown>;
+    expect(opts.testDucklings).toEqual([]);
+    expect(opts.ducklings).toEqual([]);
+    expect(opts.testSeats).toEqual({});
+    expect(opts.seats).toEqual({});
+  });
 });

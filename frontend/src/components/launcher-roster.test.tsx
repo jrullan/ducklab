@@ -116,7 +116,7 @@ describe("the run launcher seating from the canonical roster", () => {
     );
   });
 
-  it("sends an empty seat for a defaulted seat instead of compacting the list", () => {
+  it("sends only the hand-made pick, keyed by role, and never the visible roster seats", () => {
     const onLaunch = vi.fn();
     render(
       <RunLauncher
@@ -127,9 +127,10 @@ describe("the run launcher seating from the canonical roster", () => {
       />,
     );
     // Leave the implementer on "default"; pick the reviewer by hand. The
-    // engine resolves an empty position from the roster, so the request must
-    // carry ["", "luna"] — filtering the empty seat out would slide luna
-    // into the implementer's seat.
+    // engine's positional list reads pair as [implementer, reviewer] while
+    // the launcher shows [implementer, advisor, reviewer], so a positional
+    // echo of the visible seats seated the advisor as reviewer (B-394). Role
+    // modes send the picks keyed by role and nothing else.
     fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
     fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "" } });
     fireEvent.click(screen.getAllByTestId("seat-chip")[2]!);
@@ -137,7 +138,18 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["", "qwen38-max", "luna"] }),
+      expect.objectContaining({ mode: "pair", ducklings: [], seats: { reviewer: "luna" } }),
+    );
+  });
+
+  it("changing only the advisor sends only the advisor", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} initialMode="pair" roster={pairRoster} onLaunch={onLaunch} />);
+    fireEvent.click(screen.getAllByTestId("seat-chip")[1]!);
+    fireEvent.change(screen.getByTestId("seat-pick-1"), { target: { value: "k3" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect(launchCall(onLaunch)).toEqual(
+      expect.objectContaining({ mode: "pair", ducklings: [], seats: { advisor: "k3" } }),
     );
   });
 
