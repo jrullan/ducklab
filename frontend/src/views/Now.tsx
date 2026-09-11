@@ -21,7 +21,7 @@ import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
 import { VerificationLedger } from "../components/VerificationLedger";
 import { NextStepCards } from "../components/NextStepCards";
-import { money, moneyOrZero, tokens, waitingFor } from "../lib/format";
+import { duration, moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
@@ -123,6 +123,10 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const planRunID = plan?.proposal?.run_id ?? plan?.run_id;
   const standalonePlan = !!plan?.proposal && (!planRunID || !waitingIDs.has(planRunID));
   const actionSteps = nextSteps.filter((step) => {
+    // taskNext owns the one-click launcher below. ProjectNext describes the
+    // same task as navigation; rendering both produced two doors, two cost
+    // figures and no clear primary action.
+    if (step.kind === "task" && next && step.ref === next.id) return false;
     if (step.kind !== "run" || !step.ref) return true;
     if (waitingIDs.has(step.ref)) return false;
     // Conversations remain reachable from Runs. They are not decisions and a
@@ -152,6 +156,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const quiet =
     waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
   const waitingCount = waiting.length + (standalonePlan ? 1 : 0);
+  const attentionCount = waitingCount + toVerify.length + failures.length + reopened.length;
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -206,31 +211,26 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       <PageHeader
         eyebrow="Your attention"
         title="Now"
-        subtitle="Decisions first, active work second, and the clearest next step when the queue is quiet."
+        subtitle="What needs you, what is moving, and the one clearest next step."
       />
-      <ContextStrip tone={waitingCount > 0 || failures.length > 0 ? "attention" : "neutral"}>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-ink-secondary">
-          <span><strong className="font-medium text-ink" data-testid="now-waiting-count">{waitingCount}</strong> waiting for you</span>
-          <span><strong className="font-medium text-ink">{active.length}</strong> running</span>
-          <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>
-          <span><strong className="font-medium text-ink">{failures.length}</strong> failed</span>
+      <ContextStrip tone={attentionCount > 0 ? "attention" : "neutral"}>
+        <div aria-live="polite" className="flex flex-wrap items-center gap-x-5 gap-y-1 text-ink-secondary">
+          {attentionCount === 0 ? (
+            <span className="font-medium text-good" data-testid="now-clear">✓ No decisions waiting</span>
+          ) : (
+            <>
+              {waitingCount > 0 && <span><strong className="font-medium text-ink" data-testid="now-waiting-count">{waitingCount}</strong> waiting for you</span>}
+              {toVerify.length > 0 && <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>}
+              {failures.length > 0 && <span><strong className="font-medium text-critical">{failures.length}</strong> failed</span>}
+              {reopened.length > 0 && <span><strong className="font-medium text-serious">{reopened.length}</strong> reopened</span>}
+            </>
+          )}
+          {active.length > 0 && <span><strong className="font-medium text-ink">{active.length}</strong> in progress</span>}
         </div>
       </ContextStrip>
-      {/* Running work is owned by Now; the retired guide rail no longer duplicates it. */}
-      {/* The inbox's own live section carries the fuller view
-          with live spend, in the inbox's own flow. */}
-      {quiet && <NextStepCards
-        steps={actionSteps}
-        costFor={(step) => {
-          // A launch's price at the point of use: the mode the step would open
-          // and what runs of that mode have cost here so far.
-          if (step.kind !== "task" || (step.id !== "test-first" && step.id !== "build")) return undefined;
-          const est = estimates[buildMode];
-          if (!est || est.runs === 0) return undefined;
-          return `opens ${buildMode} · ~${money(est.usd)}`;
-        }}
-      />}
 
+      {/* Decisions are the reason this page exists; they precede ambient
+          activity, matching the page's stated hierarchy. */}
       {standalonePlan && plan?.proposal && (
         <PlanCard
           artifact={plan}
@@ -238,17 +238,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           onApprove={() => void client.promote(projectId, "plan").then(() => setPlan(null)).catch(() => {})}
           onChanges={() => void client.artifactDiscard(projectId, "plan").then(() => setPlan(null)).catch(() => {})}
         />
-      )}
-
-      {active.length > 0 && (
-        <section data-testid="now-running">
-          <h2 className="text-sm font-medium text-ink">Running</h2>
-          <ul className="mt-2 space-y-1">
-            {active.map((r) => (
-              <RunningRow key={r.id} run={r} live={spend[r.id]} />
-            ))}
-          </ul>
-        </section>
       )}
 
       {waiting.length > 0 && (
@@ -353,27 +342,55 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         </section>
       )}
 
+      {/* Running work is ambient context, not a decision. Give it enough
+          information to decide whether to open it without turning Now into
+          the full monitoring view. */}
+      {active.length > 0 && (
+        <section data-testid="now-running">
+          <h2 className="text-sm font-medium text-ink">In progress</h2>
+          <ul className="mt-2 space-y-2">
+            {active.map((r) => (
+              <RunningRow key={r.id} run={r} live={spend[r.id]} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {quiet && actionSteps.length > 0 && <NextStepCards
+        steps={actionSteps}
+        costFor={(step) => {
+          // When there is no taskNext launcher, this card is the only cost
+          // surface. Report rows are totals, so always divide by sample count.
+          if (step.kind !== "task" || (step.id !== "test-first" && step.id !== "build")) return undefined;
+          const history = estimates[buildMode];
+          if (!history || history.runs <= 0) return undefined;
+          return `opens ${buildMode} · ~${moneyOrZero(history.usd / history.runs)} per run (${history.runs} samples)`;
+        }}
+      />}
+
       {/* Overview's job, absorbed when it retired (docs/ux-evaluation.md
           phase 3): cost as ambient information rather than a report consulted
           after the money is gone. Spend used to be a prop there, and the one
           caller passed zero. */}
-      <NowFooter runs={nowList} />
-
-
-
       {quiet && (
         <section className="mt-4" data-testid="now-quiet">
-          {active.length === 0 && list.length === 0 && (
+          {active.length === 0 && list.length === 0 && !next && actionSteps.length === 0 && (
             <EmptyState message="No runs yet. Start below, or plan the work from Documents." />
           )}
-          <p className="text-sm text-ink-secondary">Nothing needs you.</p>
-
           {next ? (
-            <div className="mt-2 rounded-card border border-hairline p-3" data-testid="now-next">
-              <p className="text-sm text-ink">
-                Ready to start: <span className="font-mono">{next.id}</span> — {next.title}
+            <div className="rounded-card border border-hairline bg-surface1 p-4" data-testid="now-next">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-ink-muted">Ready when you are</h2>
+              <p className="mt-1 text-md font-medium text-ink">
+                <span className="font-mono">{next.id}</span> — {next.title}
               </p>
-              <div className="mt-2">
+              {active.length > 0 && (
+                <p className="mt-1 text-xs text-ink-secondary" data-testid="now-parallel-note">
+                  {active.some((run) => run.stage === "intake" || run.stage === "spec" || run.stage === "plan")
+                    ? `Ready under the currently accepted plan. A ${active.find((run) => run.stage === "intake" || run.stage === "spec" || run.stage === "plan")!.stage} run is also active; review it first if it may change this task.`
+                    : "Available alongside current work; Ducklab will queue it automatically if the project is held."}
+                </p>
+              )}
+              <div className="mt-3">
                 {(next.next ?? [])[0] === "test_first" ? (
                   <TddLaunch
                     key={`${testMode}:${buildMode}`}
@@ -382,6 +399,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     phaseDefaults={{ build: buildMode, test: testMode }}
                     estimates={estimates}
                     busy={false}
+                    embedded
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
@@ -428,6 +446,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           )}
         </section>
       )}
+      <NowFooter runs={nowList} />
     </div>
   );
 }
@@ -466,21 +485,42 @@ function actionableFailures(list: Run[]): Run[] {
 /** A live run with its live spend: cost as ambient information, not a report
  * consulted after the money is gone. */
 function RunningRow({ run, live }: { run: Run; live?: LiveSpend }) {
+  const title = run.task_id
+    ? `${run.stage === "test" ? "Testing" : run.stage === "review" ? "Reviewing" : "Building"} ${run.task_id}`
+    : run.stage === "intake"
+      ? "Drafting the requirements"
+      : run.stage === "spec"
+        ? "Drafting the specification"
+        : run.stage === "plan"
+          ? "Drafting the plan"
+          : run.subject || runLabel(run);
+  const ducklings = [...new Set(Object.values(run.roster ?? {}).filter(Boolean))];
+  const elapsed = live?.wallclock_s !== undefined
+    ? duration(live.wallclock_s * 1000)
+    : run.started_at
+      ? waitingFor(run.started_at)
+      : "";
   return (
-    <li data-testid="now-running-row" className="flex flex-wrap items-baseline gap-2 text-sm">
-      <StatusChip role={runStatusRole(run.status)} label={run.status} />
-      <a href={routeHref({ name: "run", id: run.id })} className="text-ink underline">
-        {runLabel(run)}
-      </a>
-      <span className="text-xs text-ink-secondary">{run.mode}</span>
+    <li data-testid="now-running-row" className="rounded-card border border-hairline bg-surface1 p-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <StatusChip role={runStatusRole(run.status)} label={run.status === "running" ? "in progress" : run.status} />
+        <span className="text-sm font-medium text-ink">{title}</span>
+        <span className="text-xs text-ink-secondary">{run.mode}</span>
+        {ducklings.length > 0 && <span className="text-xs text-ink-secondary">· {ducklings.slice(0, 2).join(" + ")}{ducklings.length > 2 ? ` +${ducklings.length - 2}` : ""}</span>}
+        {elapsed && <span className="text-xs tabular-nums text-ink-muted">· {elapsed}</span>}
+        <a href={routeHref({ name: "run", id: run.id })} className="ml-auto rounded border border-hairline px-2 py-1 text-xs text-ink hover:bg-surface2">
+          Open run
+        </a>
+      </div>
       {run.status === "queued" && run.queued_reason && (
-        <span className="w-full text-xs text-ink-secondary">{run.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{run.queued_reason}</a> : run.queued_reason}</span>
+        <p className="mt-1 text-xs text-ink-secondary">{run.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{run.queued_reason}</a> : run.queued_reason}</p>
       )}
       {live && (
-        <span className="text-xs tabular-nums text-ink-muted">
-          {tokens(live.tokens)}
-          {live.limit?.tokens ? ` / ${tokens(live.limit.tokens)}` : ""} · {moneyOrZero(live.usd)}
-        </span>
+        <p className="mt-1 text-xs tabular-nums text-ink-muted" data-testid="now-running-spend">
+          {tokens(live.tokens)}{live.limit?.tokens ? ` / ${tokens(live.limit.tokens)} tokens` : " tokens"}
+          {live.turns > 0 ? ` · ${live.turns} model ${live.turns === 1 ? "turn" : "turns"}` : ""}
+          {` · ${moneyOrZero(live.usd)}`}
+        </p>
       )}
     </li>
   );
@@ -498,15 +538,14 @@ function NowFooter({ runs }: { runs: Run[] }) {
   const finished = runs.filter((r) => r.verdict !== "").length;
   const passed = runs.filter((r) => r.verdict === "PASSED").length;
   return (
-    <p className="mt-4 border-t border-hairline pt-2 text-xs text-ink-muted" data-testid="now-footer">
-      today {moneyOrZero(spentToday)} · all time {moneyOrZero(spentAll)}
-      {finished > 0 && (
-        <>
-          {" "}
-          · {passed} of {finished} finished runs passed, all time
-        </>
-      )}
-    </p>
+    <details className="mt-4 border-t border-hairline pt-2 text-xs text-ink-muted" data-testid="now-footer">
+      <summary className="cursor-pointer select-none hover:text-ink">Project history</summary>
+      <p className="mt-1">
+        Today {moneyOrZero(spentToday)} · project total {moneyOrZero(spentAll)}
+        {finished > 0 && <> · {passed} of {finished} finished runs passed</>}
+      </p>
+      {finished > 0 && <p className="mt-1">All project history, including experimental and unsuccessful attempts.</p>}
+    </details>
   );
 }
 

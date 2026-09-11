@@ -31,6 +31,18 @@ Now's "running" section is now the *fuller* view (live spend, limits) and
 the rail's is the glance — correct under the contract, but review any future
 addition against it before placing it.
 
+**September follow-up — Now's decision hierarchy.** The inbox applies that
+contract as one ordered surface: decisions first, then active work, then one
+ready launcher, with project history collapsed last. A task returned by both
+`project.next` and `tasks/next` is rendered once; `tasks/next` owns its launcher.
+The status strip suppresses zero-value alarms and says `No decisions waiting`
+when appropriate, while active work remains independently visible as
+`in progress`. Cost at a launch point is always derived from per-run history
+(`cost_usd / runs`) and includes its sample count; aggregate project spend is
+history, not an estimate. A document run beside a ready implementation task
+must also explain that starting the task uses the currently accepted document,
+so the operator can decide whether to wait for the draft.
+
 **UX-2 · A dead engine wears broken views.** Twice this month a desktop
 window outlived an engine restart and every view degraded into Load Errors
 with no explanation — the person had to know the ritual (relaunch desktop).
