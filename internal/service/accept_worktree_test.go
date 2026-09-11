@@ -675,6 +675,99 @@ func TestAcceptWorktreeConflictRollsBackBeforePausing(t *testing.T) {
 	}
 }
 
+func TestAcceptWorktreeExplicitlyUnionsAdditiveConflictThenReproducesGate(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	registry := filepath.Join(dir, "registry.txt")
+	if err := os.WriteFile(registry, []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("registry.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("registry base"); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-additive-union")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "registry.txt"), []byte("base\nfrom-run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(registry, []byte("base\nfrom-default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("registry.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("default registry addition"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil {
+		t.Fatal("ordinary accept unexpectedly resolved a conflict")
+	}
+
+	result, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{ResolveAdditiveConflicts: true})
+	if err != nil {
+		t.Fatalf("explicit additive union: %v", err)
+	}
+	if result.CommitSHA != mustHead(t, git) {
+		t.Fatalf("landed commit = %s, default = %s", result.CommitSHA, mustHead(t, git))
+	}
+	body, err := os.ReadFile(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"base", "from-default", "from-run"} {
+		if strings.Count(string(body), line) != 1 {
+			t.Fatalf("union lost or duplicated %q:\n%s", line, body)
+		}
+	}
+	events, err := runlog.ReadEvents(filepath.Join(dir, ".ducklab", "runs", run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, event := range events {
+		if event.Type == "accept_retry" && event.Data["strategy"] == "union-additive" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatal("accepted union did not record the explicit recovery strategy")
+	}
+}
+
+func TestAcceptWorktreeAdditiveOptionRefusesEditsAndRollsBack(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-not-additive")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("run replacement\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("default replacement\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	defaultSHA, err := git.Commit("default replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{ResolveAdditiveConflicts: true})
+	if err == nil || !strings.Contains(err.Error(), "additive-only union refused") {
+		t.Fatalf("non-additive conflict error = %v", err)
+	}
+	if got := mustHead(t, git); got != defaultSHA {
+		t.Fatalf("unsafe conflict advanced default to %s, want %s", got, defaultSHA)
+	}
+	body, readErr := os.ReadFile(filepath.Join(run.WorktreePath, "index.html"))
+	if readErr != nil || string(body) != "run replacement\n" {
+		t.Fatalf("refused union did not restore run commit: %v body=%q", readErr, body)
+	}
+}
+
 func TestRejectCleansAWorktreeAfterAbortedAcceptRebase(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

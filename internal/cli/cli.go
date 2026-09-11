@@ -813,14 +813,17 @@ func runCmd(verb string, args []string, repo string) int {
 		return 0
 	case "accept":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run accept <run-id> [--message <msg>]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run accept <run-id> [--message <msg>] [--union-additive]")
 			return 2
 		}
 		msg := ""
+		unionAdditive := false
 		for i := 1; i < len(args); i++ {
 			if args[i] == "--message" && i+1 < len(args) {
 				msg = args[i+1]
 				i++
+			} else if args[i] == "--union-additive" {
+				unionAdditive = true
 			}
 		}
 		info, err := daemon.ReadEngineJSON()
@@ -829,7 +832,7 @@ func runCmd(verb string, args []string, repo string) int {
 			return 9
 		}
 		client := engineclt.New(info)
-		result, err := client.RunAccept(args[0], msg)
+		result, err := client.RunAcceptWithOptions(args[0], msg, unionAdditive)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

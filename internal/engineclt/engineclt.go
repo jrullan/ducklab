@@ -645,8 +645,14 @@ func (c *Client) RunAcceptAs(id, message, actor string) (map[string]interface{},
 }
 
 func (c *Client) RunAccept(id, message string) (map[string]interface{}, error) {
+	return c.RunAcceptWithOptions(id, message, false)
+}
+
+func (c *Client) RunAcceptWithOptions(id, message string, resolveAdditiveConflicts bool) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/runs/"+id+"/accept", map[string]string{"message": message}, &result)
+	err := c.post("/v1/runs/"+id+"/accept", map[string]interface{}{
+		"message": message, "resolve_additive_conflicts": resolveAdditiveConflicts,
+	}, &result)
 	return result, err
 }
 

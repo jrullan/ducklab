@@ -227,6 +227,7 @@ export interface DucklingDuckling {
 
 export interface EngineapiacceptRequest {
   message?: string;
+  resolve_additive_conflicts?: boolean;
 }
 
 export interface EngineapianswerRequest {

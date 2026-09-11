@@ -1329,8 +1329,11 @@ export class EngineClient {
       (r) => r.output ?? "",
     );
   }
-  accept(id: string, message = "") {
-    return this.request<AcceptResult>("POST", `/v1/runs/${id}/accept`, { message });
+  accept(id: string, message = "", resolveAdditiveConflicts = false) {
+    return this.request<AcceptResult>("POST", `/v1/runs/${id}/accept`, {
+      message,
+      resolve_additive_conflicts: resolveAdditiveConflicts,
+    });
   }
   reject(id: string, reason = "") {
     return this.request<void>("POST", `/v1/runs/${id}/reject`, { reason });

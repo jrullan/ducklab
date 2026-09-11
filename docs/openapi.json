@@ -816,6 +816,9 @@
         "properties": {
           "message": {
             "type": "string"
+          },
+          "resolve_additive_conflicts": {
+            "type": "boolean"
           }
         },
         "required": [

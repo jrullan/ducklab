@@ -168,6 +168,25 @@ describe("publication API", () => {
   });
 });
 
+describe("additive conflict acceptance", () => {
+  it("sends the recovery choice only when the person explicitly selects it", async () => {
+    let requestBody = "";
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (_url: string, init?: RequestInit) => {
+        requestBody = String(init?.body ?? "");
+        return new Response(JSON.stringify({ commit_sha: "abc123" }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    await c.accept("run", "", true);
+    expect(JSON.parse(requestBody)).toMatchObject({ resolve_additive_conflicts: true });
+  });
+});
+
 // B-287: a committed accept may leave a failed, retryable publication receipt
 // on the run. The receipt type carries the exact error; the client must hand
 // it through untouched so the retry door can name it.

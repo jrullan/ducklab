@@ -29,6 +29,28 @@ func TestRunEnvDoesNotMutateCaller(t *testing.T) {
 	}
 }
 
+func TestAdditiveLineUnionKeepsBothInsertionsAndRejectsEdits(t *testing.T) {
+	base := []byte("alpha\nomega\n")
+	merged, ok := additiveLineUnion(base,
+		[]byte("alpha\nfrom-default\nomega\n"),
+		[]byte("alpha\nfrom-run\nomega\n"))
+	if !ok || string(merged) != "alpha\nfrom-default\nfrom-run\nomega\n" {
+		t.Fatalf("additive union ok=%v body=%q", ok, merged)
+	}
+	merged, ok = additiveLineUnion(base,
+		[]byte("alpha\nsame\nomega\n"),
+		[]byte("alpha\nsame\nomega\n"))
+	if !ok || strings.Count(string(merged), "same") != 1 {
+		t.Fatalf("identical insertion was duplicated: ok=%v body=%q", ok, merged)
+	}
+	if _, ok := additiveLineUnion(base, []byte("changed\nomega\n"), []byte("alpha\nfrom-run\nomega\n")); ok {
+		t.Fatal("a replacement was accepted as additive")
+	}
+	if _, ok := additiveLineUnion(base, []byte("alpha\n"), []byte("alpha\nfrom-run\nomega\n")); ok {
+		t.Fatal("a deletion was accepted as additive")
+	}
+}
+
 func newRepo(t *testing.T) (*Git, string) {
 	t.Helper()
 	dir := t.TempDir()

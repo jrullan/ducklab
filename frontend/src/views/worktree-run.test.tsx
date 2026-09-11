@@ -42,7 +42,9 @@ describe("RunView worktree surface", () => {
     expect(card).toHaveTextContent("failed rebase was rolled back");
     expect(card).toHaveTextContent("retry Accept to use the latest default branch");
     expect(card).toHaveTextContent("reject");
-    expect(screen.getByTestId("cycle-accept")).toHaveTextContent("Accept");
+	expect(screen.getByTestId("cycle-accept")).toHaveTextContent("Accept");
+    expect(screen.getByTestId("accept-union-additive")).toHaveTextContent("Retry with additive merge");
+    expect(card).toHaveTextContent("Edits and deletions are never auto-resolved");
     expect(screen.getByTestId("reject-button")).toHaveTextContent("Reject");
     expect(screen.getByTestId("decision-consequence")).not.toHaveTextContent("only after the rebase has been completed");
   });
