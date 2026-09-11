@@ -102,6 +102,10 @@ type runState struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	wmu         sync.Mutex
+	// decisionMu makes accept, reject, and manual land a compare-and-set on one
+	// run. The writer mutex cannot serve this purpose: acceptance calls helpers
+	// that reopen and write the run log while the decision is active.
+	decisionMu sync.Mutex
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
@@ -4060,6 +4064,18 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	// Accepted is the compare-and-set winner. A second client may have entered
+	// before the first response reached it; return the durable result instead
+	// of trying to inspect the worktree the winner has already removed.
+	if rs.run.Accepted {
+		_, _ = s.reconcileAcceptedRun(rs)
+		return acceptedResult(rs.run), nil
+	}
+	if rs.run.Status == "done" {
+		return nil, fmt.Errorf("run %q is already settled (%s); there is no acceptance decision pending", id, rs.run.Resolution)
+	}
 	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
@@ -4106,6 +4122,17 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	// inside acceptRun), so a chained build is already at the line's front.
 	s.queue.poke(s)
 	return &AcceptResult{CommitSHA: rs.run.CommitSHA, Warning: rs.run.Warning, Info: publicationInfo(rs.run)}, nil
+}
+
+func acceptedResult(run *runlog.Run) *AcceptResult {
+	info := fmt.Sprintf("already accepted as %s", short(run.CommitSHA))
+	if resolution := strings.TrimSpace(run.Resolution); resolution != "" {
+		info += " (" + resolution + ")"
+	}
+	if publication := publicationInfo(run); publication != "" {
+		info += "; " + publication
+	}
+	return &AcceptResult{CommitSHA: run.CommitSHA, Warning: run.Warning, Info: info}
 }
 
 // RunReject rejects a run.
@@ -4226,11 +4253,20 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 // completed run. A landing is accepted work, so it replaces an earlier reject
 // verdict as well as recording the auditable landing resolution.
 func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) error {
-	s.runsMu.Lock()
-	defer s.runsMu.Unlock()
+	s.runsMu.RLock()
 	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
+	}
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	if rs.run.Accepted {
+		_, _ = s.reconcileAcceptedRun(rs)
+		if strings.TrimSpace(sha) == "" || sha == rs.run.CommitSHA {
+			return nil
+		}
+		return fmt.Errorf("run %q is already accepted as %s; refusing to replace it with %s", id, short(rs.run.CommitSHA), short(sha))
 	}
 	if rs.run.Status != "done" && (rs.run.Status != "paused" || rs.run.PendingKind != "gate") {
 		return fmt.Errorf("run %q is %s; only done runs or paused gates may be landed", id, rs.run.Status)
@@ -4545,6 +4581,12 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
+	}
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	if rs.run.Accepted {
+		_, _ = s.reconcileAcceptedRun(rs)
+		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {

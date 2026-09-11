@@ -26,6 +26,21 @@ func runNext(r *runlog.Run) []string {
 	if r == nil {
 		return nil
 	}
+	// Acceptance is durable authority, even if an older or racing client left
+	// a stale paused/gate status behind. Never expose Accept or Reject once the
+	// record says work landed; recovery repairs the stored status from Git.
+	if r.Accepted {
+		switch r.Stage {
+		case "intake":
+			return []string{"run_spec"}
+		case "spec":
+			return []string{"run_plan"}
+		}
+		if failedPush(r) {
+			return []string{"push"}
+		}
+		return nil
+	}
 	switch r.Status {
 	case "running", "queued":
 		return []string{"abort"}
@@ -81,29 +96,8 @@ func runNext(r *runlog.Run) []string {
 		}
 		return []string{"abort"}
 	default:
-		// done and failed are endings for TASK runs — relaunching travels on
-		// the task's own list. An accepted STAGE run is different: it is the
-		// middle of one process. New requirements feed the spec, the spec
-		// feeds the plan, and the person was made to leave the run view and
-		// find the Documents screen to take a step the acceptance itself
-		// implies. The engine states the next step; the view renders it in
-		// place.
-		if r.Accepted {
-			switch r.Stage {
-			case "intake":
-				return []string{"run_spec"}
-			case "spec":
-				return []string{"run_plan"}
-			}
-			// A successful accept is not always the end. If its on_accept
-			// publication failed, the acceptance stands but the commit never
-			// reached the remote: the same push door that published it in the
-			// first place is the retry, so the person can finish the job from
-			// the run view instead of hunting for it (B-266).
-			if failedPush(r) {
-				return []string{"push"}
-			}
-		}
+		// Done and failed are endings for task runs. Relaunching travels on
+		// the task's own list; accepted stage transitions were handled above.
 		return nil
 	}
 }
