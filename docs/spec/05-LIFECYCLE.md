@@ -536,7 +536,13 @@ If rebasing the run commit onto the default branch conflicts, Ducklab records
 the observed default SHA and conflicting paths, aborts the rebase, and pauses
 with the original run commit intact. Retrying Accept performs a fresh rebase
 against the default head observed by that retry; a paused worktree is never
-left pinned mid-rebase to a head that other accepted runs can make stale.
+left pinned mid-rebase to a head that other accepted runs can make stale. The
+person may explicitly choose `resolve_additive_conflicts` (CLI:
+`--union-additive`). Ducklab then resolves every conflict only when both sides
+are line insertions relative to their common base, records the strategy, and
+reproduces the full gate before landing. A binary change, edit, deletion, or
+mixed conflict aborts the rebase and remains a manual decision; additive union
+is never the default.
 
 ## 6. Bugs and the operate loop
 

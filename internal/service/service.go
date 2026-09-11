@@ -1206,6 +1206,13 @@ type AcceptResult struct {
 	Info      string `json:"info,omitempty"`
 }
 
+// AcceptOptions contains explicit, non-default recovery choices. A caller may
+// request additive conflict union, but ordinary acceptance never guesses how
+// to resolve a rebase.
+type AcceptOptions struct {
+	ResolveAdditiveConflicts bool `json:"resolve_additive_conflicts,omitempty"`
+}
+
 // RunFilter is a run filter.
 type RunFilter struct {
 	ProjectID string `json:"project_id"`
@@ -2617,6 +2624,10 @@ func tailOf(s string, n int) string {
 
 // acceptRun accepts a run and commits.
 func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string) (err error) {
+	return s.acceptRunWithOptions(ctx, rs, entry, message, actor, AcceptOptions{})
+}
+
+func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string, options AcceptOptions) (err error) {
 	// Every settled acceptance — the human RunAccept path, an automatic accept,
 	// and an auto-triage — goes through here, so publication under the on_accept
 	// policy lives in the common success path, not in any single API wrapper.
@@ -2757,7 +2768,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// Isolated runs own a branch, never the person's checkout. Their acceptance
 	// is therefore a proof about the rebased branch followed by an ff-only land.
 	if rs.run.WorktreePath != "" {
-		return s.acceptWorktreeRun(ctx, rs, entry, git, message, actor)
+		return s.acceptWorktreeRun(ctx, rs, entry, git, message, actor, options)
 	}
 	// Test-first acceptance records the red-test promise even for projects that
 	// have not initialized git yet; the chained BUILD will enforce the normal
@@ -2948,7 +2959,7 @@ func acceptCommitMessage(run *runlog.Run, reason string) string {
 	return subject
 }
 
-func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string) error {
+func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string, options AcceptOptions) error {
 	if rs.run.WorktreePath == "" || rs.run.Branch == "" || rs.run.BaseSHA == "" {
 		return fmt.Errorf("worktree acceptance is missing its path, branch, or base sha")
 	}
@@ -3073,8 +3084,26 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		// branch movement that lost the first compare-and-swap.
 		if ancestor, _ := workGit.IsAncestor(defaultSHA, "HEAD"); !ancestor {
 			files, rebaseErr := workGit.RebaseOnto(defaultSHA)
+			unionRefusal := ""
+			if rebaseErr != nil && options.ResolveAdditiveConflicts && len(files) > 0 {
+				conflicted := append([]string(nil), files...)
+				remaining, unionErr := workGit.ContinueRebaseWithAdditiveUnion(files)
+				if unionErr == nil {
+					rebaseErr = nil
+					rs.writer.AppendEvent("accept_retry", map[string]interface{}{
+						"reason":   "person explicitly requested additive-only conflict union",
+						"strategy": "union-additive", "files": conflicted,
+					})
+				} else {
+					files = remaining
+					unionRefusal = unionErr.Error()
+				}
+			}
 			if rebaseErr != nil {
 				detail := fmt.Sprintf("rebase from base %s onto default %s failed in worktree %s and was rolled back; conflicting files: %s. Retry Accept to rebase the unchanged run commit onto the then-current default, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
+				if unionRefusal != "" {
+					detail = fmt.Sprintf("rebase from base %s onto default %s failed in worktree %s; additive-only union refused: %s. The rebase was rolled back; resolve manually or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, unionRefusal)
+				}
 				pending := map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "worktree": rs.run.WorktreePath, "retain_worktree": true}
 				// A materialized conflict pins the run to the default head seen by
 				// this attempt. Another accept may advance that head before a person
@@ -4043,10 +4072,14 @@ func writeAcceptanceReceipt(root string, run *runlog.Run, actor string) error {
 // the run's resolution. Empty means human — the desktop and CLI, where a
 // person is pressing the button.
 func (s *Service) RunAcceptAs(ctx context.Context, id, msg, actor string) (*AcceptResult, error) {
+	return s.RunAcceptAsWithOptions(ctx, id, msg, actor, AcceptOptions{})
+}
+
+func (s *Service) RunAcceptAsWithOptions(ctx context.Context, id, msg, actor string, options AcceptOptions) (*AcceptResult, error) {
 	if actor == "" {
 		actor = "human"
 	}
-	return s.runAccept(ctx, id, msg, actor)
+	return s.runAcceptWithOptions(ctx, id, msg, actor, options)
 }
 
 func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*AcceptResult, error) {
@@ -4054,6 +4087,10 @@ func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*Accept
 }
 
 func (s *Service) runAccept(ctx context.Context, id string, msg string, actor string) (result *AcceptResult, err error) {
+	return s.runAcceptWithOptions(ctx, id, msg, actor, AcceptOptions{})
+}
+
+func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg string, actor string, options AcceptOptions) (result *AcceptResult, err error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4097,7 +4134,7 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	if rs.run.Status == "paused" && rs.run.PendingKind != "gate" {
 		return nil, fmt.Errorf("run %q is paused for %s, not awaiting acceptance — resolve the condition and resume, or abort", id, rs.run.PendingKind)
 	}
-	if err = s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
+	if err = s.acceptRunWithOptions(ctx, rs, entry, msg, actor, options); err != nil {
 		return nil, err
 	}
 	// The decision freed the working tree this run's diff was holding. Runs

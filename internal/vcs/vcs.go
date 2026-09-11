@@ -647,6 +647,150 @@ func (g *Git) RebaseOnto(rev string) ([]string, error) {
 	return nil, nil
 }
 
+// ContinueRebaseWithAdditiveUnion resolves the current rebase only when every
+// conflicted file is plain text and both stages differ from their merge base
+// exclusively by inserted lines. It is deliberately narrower than a merge
+// strategy: edits, deletions, binary files, or a later non-additive conflict
+// are returned to the person unchanged.
+func (g *Git) ContinueRebaseWithAdditiveUnion(paths []string) ([]string, error) {
+	for attempts := 0; attempts < 100; attempts++ {
+		resolved := make(map[string][]byte, len(paths))
+		for _, path := range paths {
+			base, err := g.conflictStage(path, 1)
+			if err != nil {
+				return paths, fmt.Errorf("read merge base for %s: %w", path, err)
+			}
+			ours, err := g.conflictStage(path, 2)
+			if err != nil {
+				return paths, fmt.Errorf("read default side for %s: %w", path, err)
+			}
+			theirs, err := g.conflictStage(path, 3)
+			if err != nil {
+				return paths, fmt.Errorf("read run side for %s: %w", path, err)
+			}
+			merged, ok := additiveLineUnion(base, ours, theirs)
+			if !ok {
+				return paths, fmt.Errorf("%s contains an edit, deletion, or binary change rather than additive-only hunks", path)
+			}
+			resolved[path] = merged
+		}
+		for path, body := range resolved {
+			clean := filepath.Clean(filepath.FromSlash(path))
+			if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return paths, fmt.Errorf("refuse conflict path outside worktree: %s", path)
+			}
+			full := filepath.Join(g.Root, clean)
+			info, err := os.Lstat(full)
+			if err != nil {
+				return paths, fmt.Errorf("inspect conflicted file %s: %w", path, err)
+			}
+			if !info.Mode().IsRegular() {
+				return paths, fmt.Errorf("%s is not a regular file", path)
+			}
+			if err := os.WriteFile(full, body, info.Mode().Perm()); err != nil {
+				return paths, fmt.Errorf("write additive union for %s: %w", path, err)
+			}
+			if _, err := g.run("add", "--", path); err != nil {
+				return paths, err
+			}
+		}
+		if _, err := g.runEnv(map[string]string{"GIT_EDITOR": "true"}, "rebase", "--continue"); err == nil {
+			return nil, nil
+		}
+		out, _ := g.run("diff", "--name-only", "--diff-filter=U")
+		paths = splitNonEmptyLines(out)
+		if len(paths) == 0 {
+			return nil, fmt.Errorf("continue additive rebase failed without conflicted paths")
+		}
+	}
+	return paths, fmt.Errorf("additive rebase exceeded 100 commits")
+}
+
+func (g *Git) conflictStage(path string, stage int) ([]byte, error) {
+	out, err := g.run("show", fmt.Sprintf(":%d:%s", stage, path))
+	return []byte(out), err
+}
+
+func splitNonEmptyLines(text string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func additiveLineUnion(base, ours, theirs []byte) ([]byte, bool) {
+	if bytes.IndexByte(base, 0) >= 0 || bytes.IndexByte(ours, 0) >= 0 || bytes.IndexByte(theirs, 0) >= 0 {
+		return nil, false
+	}
+	baseLines, baseNL := textLines(base)
+	oursLines, oursNL := textLines(ours)
+	theirsLines, theirsNL := textLines(theirs)
+	oursSlots, ok := insertedLineSlots(baseLines, oursLines)
+	if !ok {
+		return nil, false
+	}
+	theirsSlots, ok := insertedLineSlots(baseLines, theirsLines)
+	if !ok {
+		return nil, false
+	}
+	var merged []string
+	for i := 0; i <= len(baseLines); i++ {
+		seen := map[string]bool{}
+		for _, line := range oursSlots[i] {
+			merged = append(merged, line)
+			seen[line] = true
+		}
+		for _, line := range theirsSlots[i] {
+			if !seen[line] {
+				merged = append(merged, line)
+				seen[line] = true
+			}
+		}
+		if i < len(baseLines) {
+			merged = append(merged, baseLines[i])
+		}
+	}
+	out := []byte(strings.Join(merged, "\n"))
+	if (baseNL || oursNL || theirsNL) && len(out) > 0 {
+		out = append(out, '\n')
+	}
+	return out, true
+}
+
+func textLines(body []byte) ([]string, bool) {
+	text := string(body)
+	newline := strings.HasSuffix(text, "\n")
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return nil, newline
+	}
+	return strings.Split(text, "\n"), newline
+}
+
+func insertedLineSlots(base, side []string) ([][]string, bool) {
+	slots := make([][]string, len(base)+1)
+	position := 0
+	for i, baseLine := range base {
+		match := -1
+		for j := position; j < len(side); j++ {
+			if side[j] == baseLine {
+				match = j
+				break
+			}
+		}
+		if match < 0 {
+			return nil, false
+		}
+		slots[i] = append(slots[i], side[position:match]...)
+		position = match + 1
+	}
+	slots[len(base)] = append(slots[len(base)], side[position:]...)
+	return slots, true
+}
+
 // AbortIntegration clears a rebase or merge left by an interrupted operation.
 func (g *Git) AbortIntegration() {
 	_, _ = g.run("rebase", "--abort")

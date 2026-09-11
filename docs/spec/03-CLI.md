@@ -163,7 +163,7 @@ ducklab run resume <run-id>
 ducklab run list [--status s] [--project p]
 ducklab run show <run-id> [--transcript] [--diff] [--llm] [--candidates]
 ducklab run watch <run-id>                 # attach to the event stream and render
-ducklab run accept <run-id> [--message <commit msg>]
+ducklab run accept <run-id> [--message <commit msg>] [--union-additive]
 ducklab run reject <run-id> [--reason <text>]
 ducklab run answer <run-id> --question <qid> --answer <text>
 ducklab run abort <run-id>

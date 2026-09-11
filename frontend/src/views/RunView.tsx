@@ -806,6 +806,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // card can never claim or discard another run's draft.
   const rejectedDocumentDraft = !!stageToRevise && !!proposal && finished && !run.accepted;
   const materializedRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_in_progress === true;
+  const rolledBackRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_aborted === true && Array.isArray(run.pending_data?.conflicting_files);
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
   const consequence = next.includes("resume")
@@ -946,12 +947,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   };
 
-  const onAccept = async () => {
+  const acceptRun = async (resolveAdditiveConflicts = false) => {
     setActionError(null);
     const store = useRuns.getState();
     store.beginAccept(runId);
     try {
-      const res = await client.accept(runId);
+      const res = await client.accept(runId, "", resolveAdditiveConflicts);
       store.confirmAccept(runId, res.commit_sha);
       // Accept responses also carry unrelated caveats (for example, the
       // benchmark's same-model self-review warning). Treating every warning
@@ -965,6 +966,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       store.failAccept(runId, e instanceof Error ? e.message : String(e));
     }
   };
+  const onAccept = () => acceptRun(false);
 
   // The engine's legal actions are the primary fact whenever a run is
   // waiting. Build this once and place it directly below the sticky identity
@@ -983,6 +985,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
         accepting={acceptState.kind === "pending"}
         onAccept={onAccept}
+        extraAction={rolledBackRebaseConflict ? (
+          <button
+            type="button"
+            data-testid="accept-union-additive"
+            disabled={acceptState.kind === "pending"}
+            onClick={() => void acceptRun(true)}
+            className="rounded border border-warn px-3 py-1 text-sm text-ink disabled:opacity-50"
+          >
+            Retry with additive merge
+          </button>
+        ) : undefined}
         onReject={() => {
           setActionError(null);
           void client.reject(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
@@ -1665,7 +1678,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <ul className="mt-2 list-disc pl-5 font-mono text-sm text-ink-secondary">
             {(run.pending_data?.conflicting_files as unknown[]).map((file) => <li key={String(file)}>{String(file)}</li>)}
           </ul>
-          <p className="mt-2 text-sm text-ink-muted">Lawful options: retry acceptance against the current default branch, or reject.</p>
+          <p className="mt-2 text-sm text-ink-muted">Lawful options: retry acceptance unchanged, explicitly try an additive-only union followed by the full gate, or reject. Edits and deletions are never auto-resolved.</p>
         </section>
       )}
       {run.warning && (

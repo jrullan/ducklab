@@ -1633,14 +1633,17 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Message string `json:"message"`
+		Message                  string `json:"message"`
+		ResolveAdditiveConflicts bool   `json:"resolve_additive_conflicts"`
 		// Actor names the decider when it is not a person: an MCP operator
 		// sends "mcp:<client>". Empty means human. The record must never say
 		// a human decided what a model decided.
 		Actor string `json:"actor"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	result, err := s.svc.RunAcceptAs(r.Context(), id, body.Message, body.Actor)
+	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, body.Actor, service.AcceptOptions{
+		ResolveAdditiveConflicts: body.ResolveAdditiveConflicts,
+	})
 	if err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
