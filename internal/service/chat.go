@@ -613,10 +613,12 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 	return b.String()
 }
 
-// Reserve roughly one sixteenth of the chosen consultant's context for the
-// run record (four bytes per token is the conservative text estimate). The
-// floor keeps tiny/unknown declarations useful; the ceiling prevents a large
-// remote model from turning a dossier into an event-log dump.
+// Reserve roughly one sixteenth of the chosen consultant's context for each
+// bounded dossier section (run record and, when present, task contract; the
+// combined allowance is therefore about one eighth). Four bytes per token is
+// the conservative text estimate. The floor keeps tiny/unknown declarations
+// useful; the ceiling prevents a large remote model from turning either
+// section into an event-log or document dump.
 func runChatDossierBytes(contextTokens int) int {
 	if contextTokens <= 0 {
 		contextTokens = 32768

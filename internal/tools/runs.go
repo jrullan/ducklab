@@ -291,9 +291,14 @@ func runTimelineEntry(eventType string, d map[string]interface{}) string {
 			fmt.Fprintf(&b, " — %v", truncate(compactLine(detail), 200))
 		}
 	case "human_needed":
-		fmt.Fprintf(&b, "- waiting for a human: %v %v", d["kind"], truncate(compactLine(fmt.Sprint(d["detail"])), 200))
+		fmt.Fprintf(&b, "- waiting for a human: %v", d["kind"])
+		if detail := strings.TrimSpace(fmt.Sprint(d["detail"])); detail != "" && detail != "<nil>" {
+			fmt.Fprintf(&b, " %v", truncate(compactLine(detail), 200))
+		}
 	case "error":
-		fmt.Fprintf(&b, "- error: %v", truncate(compactLine(fmt.Sprint(d["error"])), 200))
+		if detail := strings.TrimSpace(fmt.Sprint(d["error"])); detail != "" && detail != "<nil>" {
+			fmt.Fprintf(&b, "- error: %v", truncate(compactLine(detail), 200))
+		}
 	case "run_end":
 		fmt.Fprintf(&b, "- ended: %v", d["verdict"])
 	}
