@@ -27,6 +27,7 @@ func TestRunHistoryTools(t *testing.T) {
 		`{"type":"turn_start","data":{"round":1,"turn":0,"role":"implementer","duckling":"luna"}}`,
 		`{"type":"message","data":{"round":1,"role":"reviewer","verdict":"request-changes","findings":[{"severity":"major","issue":"weak assertion"}]}}`,
 		`{"type":"round_gate","data":{"round":1,"result":"red"}}`,
+		`{"type":"gate","data":{"exit":1,"cmd":"go test ./..."}}`,
 		`{"type":"run_end","data":{"verdict":"FAILED"}}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events), 0o644); err != nil {
@@ -48,7 +49,7 @@ func TestRunHistoryTools(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("run_read: %v %+v", err, res)
 	}
-	for _, must := range []string{"still green", "request-changes", "weak assertion", "gate: red", "luna"} {
+	for _, must := range []string{"still green", "request-changes", "weak assertion", "gate: red", "go test ./...", "luna"} {
 		if !strings.Contains(res.Content, must) {
 			t.Errorf("run_read lost %q:\n%s", must, res.Content)
 		}
@@ -67,27 +68,46 @@ func TestRunSummaryForPromptKeepsTheHeaderAndRecentEvidence(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"id":"r-long","stage":"plan","status":"failed","failure":"the final failure"}`), 0o644); err != nil {
+	failure := strings.Repeat("compiler context that is no longer decisive\n", 300) + "the final compiler error"
+	state, err := json.Marshal(map[string]interface{}{"id": "r-long", "stage": "plan", "status": "failed", "failure": failure})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), state, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var events strings.Builder
-	for i := 0; i < 12; i++ {
-		fmt.Fprintf(&events, `{"type":"error","data":{"error":"error-%02d"}}`+"\n", i)
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&events, `{"type":"error","data":{"error":"error-%02d %s"}}`+"\n", i, strings.Repeat("detail ", 12))
 	}
 	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	summary, err := ReadRunSummaryForPrompt(root, "r-long", 4)
+	summary, err := ReadRunSummaryForPrompt(root, "r-long", 900)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"r-long", "the final failure", "8 earlier timeline lines omitted", "error-11"} {
+	for _, want := range []string{"r-long", "the final compiler error", "earlier bytes omitted", "earlier timeline entries omitted", "error-59"} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("bounded summary lost %q:\n%s", want, summary)
 		}
 	}
 	if strings.Contains(summary, "error-00") {
 		t.Errorf("bounded summary retained stale evidence:\n%s", summary)
+	}
+	if len(summary) > 900 {
+		t.Errorf("bounded summary = %d bytes, want at most 900", len(summary))
+	}
+}
+
+func TestRunSummaryPromptCutKeepsAVerdictWithItsFindings(t *testing.T) {
+	verdict := "- R2 reviewer verdict: request-changes (5 findings)\n" +
+		"    - [major] one\n    - [major] two\n    - [major] three\n    - [major] four\n    - [major] five"
+	entries := []string{verdict, "- gate exit 1: cargo test", "- ended: FAILED"}
+	timeline := strings.Join(entries, "\n") + "\n"
+	got := splitRunTimelineEntries(timeline)
+	if len(got) != 3 || got[0] != verdict {
+		t.Fatalf("timeline entries = %#v, want verdict and findings as one entry", got)
 	}
 }

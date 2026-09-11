@@ -300,9 +300,11 @@ desktop reads.
 
 A run's **Why it stopped / Why it failed** section offers a consultant chat
 about that exact run (`about_kind: run`). The first consultant prompt includes
-the persisted run state, failure and decisive timeline; the user should not
-have to copy technical details or make the consultant rediscover the run before
-asking what happened and what action is safe next.
+the persisted run state, bounded recent timeline, legal next actions and, when
+present, the task contract. The dossier budget derives from the chosen
+consultant's context capacity; the user should not have to copy technical
+details or make the consultant rediscover the run before asking what happened
+and what action is safe next.
 
 The original sketch, for what still applies:
 

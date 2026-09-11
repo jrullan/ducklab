@@ -65,9 +65,16 @@ func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const plan = "## M-01 — Capture\n\n### T-004 — Capture X11 frames\n\n**Owns:** src/backend/x11_capture.c\n\n**Verification:** `meson test -C build`\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	target := &runlog.Run{
 		ID: "r-stopped", ProjectID: p.ID, TaskID: "T-004", Stage: "build", Mode: "pair",
-		Status: "failed", Verdict: "FAILED", Failure: "reviewer dissent cannot be overridden by a green command",
+		Status: "paused", PendingKind: "error", Verdict: "FAILED", Failure: "reviewer dissent cannot be overridden by a green command",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	w, err := runlog.NewWriter(dir, target)
@@ -78,7 +85,8 @@ func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
 		"round": 1, "role": "reviewer", "verdict": "request-changes",
 		"findings": []interface{}{map[string]interface{}{"severity": "critical", "issue": "meson.build is outside the task lane"}},
 	})
-	w.AppendEvent("gate", map[string]interface{}{"exit": 0, "cmd": "meson test -C build"})
+	w.AppendEvent("gate", map[string]interface{}{"exit_code": 0, "command": "meson test -C build"})
+	w.AppendEvent("verdict", map[string]interface{}{"verdict": "FAILED"})
 	w.Close()
 	s.RecoverRuns(context.Background())
 
@@ -86,9 +94,29 @@ func TestRunChatReceivesTheStoppedRunRecord(t *testing.T) {
 	for _, want := range []string{
 		"r-stopped", "build pair", "T-004", "reviewer dissent cannot be overridden",
 		"request-changes", "meson.build is outside the task lane", "meson test -C build",
+		"pending: error · next: resume, abort", "Capture X11 frames", "src/backend/x11_capture.c",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("run dossier is missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "<nil>") {
+		t.Errorf("run dossier rendered absent event fields as values:\n%s", prompt)
+	}
+}
+
+func TestRunChatDossierBudgetFollowsTheConsultantContext(t *testing.T) {
+	for _, tc := range []struct {
+		context int
+		want    int
+	}{
+		{0, 8192},        // unknown uses the ordinary 32k context
+		{16000, 4096},    // small contexts retain a useful floor
+		{65536, 16384},   // ordinary contexts scale directly
+		{1000000, 32768}, // large models do not receive an event-log dump
+	} {
+		if got := runChatDossierBytes(tc.context); got != tc.want {
+			t.Errorf("context %d: dossier bytes = %d, want %d", tc.context, got, tc.want)
 		}
 	}
 }
