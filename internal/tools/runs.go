@@ -180,7 +180,7 @@ func ReadRunSummary(projectRoot, runID string) (string, error) {
 
 	data, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
 	if err == nil {
-		b.WriteString("\n### timeline\n")
+		var timeline []string
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
 				continue
@@ -192,70 +192,155 @@ func ReadRunSummary(projectRoot, runID string) (string, error) {
 			if json.Unmarshal([]byte(line), &e) != nil {
 				continue
 			}
-			d := e.Data
-			switch e.Type {
-			case "turn_start":
-				fmt.Fprintf(&b, "- R%v %v: %v (%v)\n", d["round"], d["role"], d["duckling"], d["turn"])
-			case "message":
-				if v, ok := d["verdict"].(string); ok && v != "" {
-					n := 0
-					if fs, ok := d["findings"].([]interface{}); ok {
-						n = len(fs)
-					}
-					fmt.Fprintf(&b, "- R%v reviewer verdict: %s (%d findings)\n", d["round"], v, n)
-					if fs, ok := d["findings"].([]interface{}); ok {
-						for i, f := range fs {
-							if i >= 5 {
-								fmt.Fprintf(&b, "    … %d more\n", len(fs)-5)
-								break
-							}
-							if fm, ok := f.(map[string]interface{}); ok {
-								fmt.Fprintf(&b, "    - [%v] %v\n", fm["severity"], truncate(fmt.Sprint(fm["issue"]), 200))
-							}
-						}
-					}
-				} else if c, ok := d["content"].(string); ok {
-					fmt.Fprintf(&b, "- R%v %v said: %s\n", d["round"], d["role"], truncate(c, 300))
-				}
-			case "round_gate":
-				fmt.Fprintf(&b, "- R%v gate: %v\n", d["round"], d["result"])
-			case "gate":
-				fmt.Fprintf(&b, "- gate exit %v: %v\n", d["exit"], truncate(fmt.Sprint(d["cmd"]), 120))
-			case "verdict":
-				fmt.Fprintf(&b, "- verdict: %v — %v\n", d["verdict"], truncate(fmt.Sprint(d["detail"]), 200))
-			case "human_needed":
-				fmt.Fprintf(&b, "- waiting for a human: %v %v\n", d["kind"], truncate(fmt.Sprint(d["detail"]), 200))
-			case "error":
-				fmt.Fprintf(&b, "- error: %v\n", truncate(fmt.Sprint(d["error"]), 200))
-			case "run_end":
-				fmt.Fprintf(&b, "- ended: %v\n", d["verdict"])
+			if entry := runTimelineEntry(e.Type, e.Data); entry != "" {
+				timeline = append(timeline, entry)
 			}
+		}
+		if len(timeline) > 0 {
+			b.WriteString("\n### timeline\n")
+			b.WriteString(strings.Join(timeline, "\n"))
+			b.WriteString("\n")
 		}
 	}
 	return b.String(), nil
 }
 
-// ReadRunSummaryForPrompt keeps the state/failure header and the most recent
-// timeline evidence. A long repair loop must not consume a small consultant's
-// context before it can answer; run_read remains available when older history
-// is relevant to a follow-up.
-func ReadRunSummaryForPrompt(projectRoot, runID string, maxTimelineLines int) (string, error) {
+// ReadRunSummaryForPrompt keeps the state/failure header and complete recent
+// timeline entries within maxBytes. A verdict and its findings are one entry:
+// the cut never leaves an orphan finding without the verdict that owns it.
+// A long gate log or repair loop must not consume a small consultant's context
+// before it can answer; run_read remains available for older evidence.
+func ReadRunSummaryForPrompt(projectRoot, runID string, maxBytes int) (string, error) {
 	summary, err := ReadRunSummary(projectRoot, runID)
-	if err != nil || maxTimelineLines <= 0 {
+	if err != nil || maxBytes <= 0 || len(summary) <= maxBytes {
 		return summary, err
 	}
 	const marker = "\n### timeline\n"
 	header, timeline, ok := strings.Cut(summary, marker)
 	if !ok {
-		return summary, nil
+		return boundRunSummaryHeader(summary, maxBytes), nil
 	}
-	lines := strings.Split(strings.TrimSuffix(timeline, "\n"), "\n")
-	if len(lines) <= maxTimelineLines {
-		return summary, nil
+	header = boundRunSummaryHeader(header, maxBytes/2)
+	entries := splitRunTimelineEntries(timeline)
+	// Reserve enough room for the exact omitted marker before selecting whole
+	// entries from newest to oldest.
+	omittedLine := fmt.Sprintf("- … %d earlier timeline entries omitted; use run_read if needed\n", len(entries))
+	available := maxBytes - len(header) - len(marker) - len(omittedLine)
+	if available < 0 {
+		available = 0
 	}
-	omitted := len(lines) - maxTimelineLines
-	return fmt.Sprintf("%s%s- … %d earlier timeline lines omitted; use run_read if needed\n%s\n",
-		header, marker, omitted, strings.Join(lines[omitted:], "\n")), nil
+	start, used := len(entries), 0
+	for start > 0 {
+		entryBytes := len(entries[start-1]) + 1
+		if used+entryBytes > available {
+			break
+		}
+		start--
+		used += entryBytes
+	}
+	omitted := start
+	if omitted == 0 {
+		omittedLine = ""
+	} else {
+		omittedLine = fmt.Sprintf("- … %d earlier timeline entries omitted; use run_read if needed\n", omitted)
+	}
+	return header + marker + omittedLine + strings.Join(entries[start:], "\n") + "\n", nil
+}
+
+func runTimelineEntry(eventType string, d map[string]interface{}) string {
+	var b strings.Builder
+	switch eventType {
+	case "turn_start":
+		fmt.Fprintf(&b, "- R%v %v: %v (%v)", d["round"], d["role"], d["duckling"], d["turn"])
+	case "message":
+		if v, ok := d["verdict"].(string); ok && v != "" {
+			n := 0
+			if fs, ok := d["findings"].([]interface{}); ok {
+				n = len(fs)
+			}
+			fmt.Fprintf(&b, "- R%v reviewer verdict: %s (%d findings)", d["round"], v, n)
+			if fs, ok := d["findings"].([]interface{}); ok {
+				for i, f := range fs {
+					if i >= 5 {
+						fmt.Fprintf(&b, "\n    … %d more", len(fs)-5)
+						break
+					}
+					if fm, ok := f.(map[string]interface{}); ok {
+						fmt.Fprintf(&b, "\n    - [%v] %v", fm["severity"], truncate(compactLine(fmt.Sprint(fm["issue"])), 200))
+					}
+				}
+			}
+		} else if c, ok := d["content"].(string); ok {
+			fmt.Fprintf(&b, "- R%v %v said: %s", d["round"], d["role"], truncate(compactLine(c), 300))
+		}
+	case "round_gate":
+		fmt.Fprintf(&b, "- R%v gate: %v", d["round"], d["result"])
+	case "gate":
+		exit := d["exit"]
+		if exit == nil {
+			exit = d["exit_code"]
+		}
+		command := d["cmd"]
+		if command == nil {
+			command = d["command"]
+		}
+		fmt.Fprintf(&b, "- gate exit %v: %v", exit, truncate(compactLine(fmt.Sprint(command)), 120))
+	case "verdict":
+		fmt.Fprintf(&b, "- verdict: %v", d["verdict"])
+		if detail := strings.TrimSpace(fmt.Sprint(d["detail"])); detail != "" && detail != "<nil>" {
+			fmt.Fprintf(&b, " — %v", truncate(compactLine(detail), 200))
+		}
+	case "human_needed":
+		fmt.Fprintf(&b, "- waiting for a human: %v %v", d["kind"], truncate(compactLine(fmt.Sprint(d["detail"])), 200))
+	case "error":
+		fmt.Fprintf(&b, "- error: %v", truncate(compactLine(fmt.Sprint(d["error"])), 200))
+	case "run_end":
+		fmt.Fprintf(&b, "- ended: %v", d["verdict"])
+	}
+	return b.String()
+}
+
+func compactLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func splitRunTimelineEntries(timeline string) []string {
+	var entries []string
+	for _, line := range strings.Split(strings.TrimSuffix(timeline, "\n"), "\n") {
+		if strings.HasPrefix(line, "- ") {
+			entries = append(entries, line)
+		} else if len(entries) > 0 {
+			entries[len(entries)-1] += "\n" + line
+		}
+	}
+	return entries
+}
+
+func boundRunSummaryHeader(header string, maxBytes int) string {
+	if maxBytes <= 0 || len(header) <= maxBytes {
+		return header
+	}
+	// Preserve identity and state (the first two lines), then the tail of the
+	// failure/pending detail where compilers and gates put the decisive error.
+	first := strings.IndexByte(header, '\n')
+	second := -1
+	if first >= 0 {
+		if next := strings.IndexByte(header[first+1:], '\n'); next >= 0 {
+			second = first + 1 + next
+		}
+	}
+	if second < 0 {
+		return header[:maxBytes]
+	}
+	prefix := header[:second+1]
+	marker := "failure/details: … earlier bytes omitted; use run_read for the full record\n"
+	tailBytes := maxBytes - len(prefix) - len(marker)
+	if tailBytes <= 0 {
+		return prefix[:min(len(prefix), maxBytes)]
+	}
+	tail := header[len(header)-tailBytes:]
+	if newline := strings.IndexByte(tail, '\n'); newline >= 0 && newline+1 < len(tail) {
+		tail = tail[newline+1:]
+	}
+	return prefix + marker + tail
 }
 
 func truncate(s string, n int) string {

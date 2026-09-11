@@ -505,8 +505,31 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 		// authoritative summary exposed by run_read into the first prompt so a
 		// small consultant can explain immediately, while retaining run_read for
 		// follow-up investigation.
-		if summary, err := tools.ReadRunSummaryForPrompt(projectRoot, aboutID, 40); err == nil {
+		contextTokens := 0
+		if consultant, err := s.ducklings.Get(config.DucklingID(rs.run.Roster["consultant"])); err == nil {
+			contextTokens = consultant.Caps.ContextTokens
+		}
+		dossierBytes := runChatDossierBytes(contextTokens)
+		if summary, err := tools.ReadRunSummaryForPrompt(projectRoot, aboutID, dossierBytes); err == nil {
 			b.WriteString(summary)
+			if detail, detailErr := s.RunGet(ctx, aboutID); detailErr == nil {
+				pending := detail.Run.PendingKind
+				if pending == "" {
+					pending = "none"
+				}
+				next := "none"
+				if len(detail.Run.Next) > 0 {
+					next = strings.Join(detail.Run.Next, ", ")
+				}
+				fmt.Fprintf(&b, "\n### Legal state now\n\npending: %s · next: %s\n", pending, next)
+				if detail.Run.TaskID != "" {
+					taskPrompt := s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, detail.Run.TaskID)
+					if len(taskPrompt) > dossierBytes {
+						taskPrompt = firstN(taskPrompt, dossierBytes) + "\n[task context truncated; use task_read for the complete contract]"
+					}
+					b.WriteString("\n### Task context\n\n" + taskPrompt + "\n")
+				}
+			}
 			b.WriteString("\nUse this record as evidence. Distinguish the root cause from downstream symptoms, and recommend actions the person can take in Ducklab; do not claim the run can be resumed or accepted unless its recorded state permits it.\n")
 		} else {
 			fmt.Fprintf(&b, "Run %s could not be loaded: %v\n", aboutID, err)
@@ -588,6 +611,24 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 	}
 	b.WriteString("Reply to the human's last message.")
 	return b.String()
+}
+
+// Reserve roughly one sixteenth of the chosen consultant's context for the
+// run record (four bytes per token is the conservative text estimate). The
+// floor keeps tiny/unknown declarations useful; the ceiling prevents a large
+// remote model from turning a dossier into an event-log dump.
+func runChatDossierBytes(contextTokens int) int {
+	if contextTokens <= 0 {
+		contextTokens = 32768
+	}
+	bytes := contextTokens / 4
+	if bytes < 4096 {
+		return 4096
+	}
+	if bytes > 32768 {
+		return 32768
+	}
+	return bytes
 }
 
 // harnessDossier is what a consultant needs to explain Ducklab itself —
