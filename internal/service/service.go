@@ -856,7 +856,19 @@ func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]
 	s.projMu.Lock()
 	delete(s.projects, id)
 	s.projMu.Unlock()
-	return s.ProjectOpen(ctx, entry.Path)
+	// A config edit is not a project-open lifecycle event. Calling ProjectOpen
+	// here used to re-register the path, optionally fetch it, and — most
+	// expensively — RecoverRuns across every registered project, including
+	// worktree hygiene and remote audits unrelated to this edit (B-401).
+	// Refresh only the edited project's remote diagnosis and return its current
+	// view; lazy consumers will rebuild this project's cache from the saved
+	// configuration on their next access.
+	s.auditRemote(ctx, id, entry.Path, updated.Remote.Name)
+	branch, _ := vcs.New(entry.Path).CurrentBranch()
+	return &Project{
+		ID: id, Path: entry.Path, Name: updated.Name, Branch: branch,
+		Config: &updated, Autonomy: string(updated.Autonomy),
+	}, nil
 }
 
 func sortedKeys(m map[string]string) []string {
