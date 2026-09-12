@@ -774,8 +774,17 @@ export class EngineClient {
         this.opts.onStale?.("restarted", { method, path });
         throw firstError;
       }
+      // A thrown fetch means the browser never got an answer: the engine is
+      // gone, OR the request was refused before it left the window (CORS,
+      // a proxy, the network). Only the binding says which. Re-read it: a
+      // different engine is a restart; the same engine means the request
+      // was blocked, and saying "restarted" then sent people restarting a
+      // healthy engine and losing the edit they had just typed (B-399).
+      const before = { baseUrl: this.opts.baseUrl, token: this.opts.token };
+      let sameEngine = false;
       try {
         const fresh = await this.opts.reconnect();
+        sameEngine = fresh.baseUrl === before.baseUrl && fresh.token === before.token;
         this.opts.baseUrl = fresh.baseUrl;
         this.opts.token = fresh.token;
         this.stale = false;
@@ -793,6 +802,16 @@ export class EngineClient {
           body: body === undefined ? undefined : JSON.stringify(body),
         });
       } catch (retryError) {
+        if (sameEngine) {
+          throw new ApiError(
+            `request blocked before it reached the engine: ${method} ${path} — the engine is still running; ` +
+              "the browser or a proxy refused the request (CORS or network). Nothing was saved.",
+            0,
+            "request_blocked",
+            method,
+            path,
+          );
+        }
         this.stale = "restarted";
         this.opts.onStale?.("restarted", { method, path });
         throw retryError;
