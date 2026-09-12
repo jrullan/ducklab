@@ -17,6 +17,7 @@ import (
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
+	"github.com/jrullan/ducklab/internal/xplat"
 )
 
 // pauseWaitPerRun bounds how long a graceful stop waits for one in-flight run
@@ -251,6 +252,11 @@ func (s *Service) reconcileAcceptedRun(rs *runState) (bool, error) {
 // The prune/reattach pattern is credited to wallfacer's git-worktrees internals (MIT).
 func (s *Service) hygieneWorktrees(projectRoot, projectID string) {
 	git := vcs.New(projectRoot)
+	stateDir, stateErr := xplat.StateDir()
+	ownedRoot := ""
+	if stateErr == nil {
+		ownedRoot = filepath.Join(stateDir, "worktrees", projectID)
+	}
 	s.runsMu.RLock()
 	var runs []*runState
 	for _, rs := range s.runs {
@@ -267,7 +273,7 @@ func (s *Service) hygieneWorktrees(projectRoot, projectID string) {
 	if err == nil {
 		for _, path := range worktrees {
 			path = filepath.Clean(path)
-			if path == filepath.Clean(projectRoot) || known[path] != nil {
+			if path == filepath.Clean(projectRoot) || known[path] != nil || !pathWithin(path, ownedRoot) {
 				continue
 			}
 			_ = git.WorktreeRemove(path)
@@ -299,6 +305,22 @@ func (s *Service) hygieneWorktrees(projectRoot, projectID string) {
 			_ = git.WorktreeAddForce(rs.run.WorktreePath, rs.run.Branch)
 		}
 	}
+}
+
+func pathWithin(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	return err == nil && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // markEngineRestart moves an orphaned run to paused so it can be resumed.
