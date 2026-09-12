@@ -1086,6 +1086,45 @@ func TestMesonWarnsWhenNinjaIgnoresNewSources(t *testing.T) {
 	}
 }
 
+func TestMesonBuildIntegrationPolicyChangesEnforcement(t *testing.T) {
+	diff := "diff --git a/src/new.c b/src/new.c\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.c\n"
+	diagnostic := DefaultRegistry().ObserveGate(GateObservation{
+		Diff: diff, Output: "ninja: no work to do.", Policies: map[string]string{"meson.build-integration": "diagnostic"},
+	}, []string{"meson"})
+	if len(diagnostic) != 1 || diagnostic[0].Enforcement != Diagnostic {
+		t.Fatalf("diagnostic policy findings = %+v", diagnostic)
+	}
+	if off := DefaultRegistry().ObserveGate(GateObservation{
+		Diff: diff, Output: "ninja: no work to do.", Policies: map[string]string{"meson.build-integration": "off"},
+	}, []string{"meson"}); len(off) != 0 {
+		t.Fatalf("off policy findings = %+v", off)
+	}
+}
+
+func TestMesonRejectsAcceptanceProbeForUnownedUndefinedTest(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "meson.build", "project('fixture', 'c')\ntest('registered', executable('fixture-test', 'test.c'))\n")
+	context := PlanTaskContext{
+		ProjectRoot: root,
+		Body:        "**Produces:** file:src/widget.c\n\n**Acceptance probes:**\n- `meson test -C build missing_target`\n",
+	}
+	findings := DefaultRegistry().InspectPlanTask(context)
+	if len(findings) != 1 || findings[0].Capability != "meson" || findings[0].Name != "acceptance-probe-target" ||
+		findings[0].Enforcement != Required || !strings.Contains(findings[0].Detail, "missing_target") {
+		t.Fatalf("undefined Meson target findings = %+v", findings)
+	}
+
+	context.Body = "**Produces:** file:src/widget.c\n\n**Acceptance probes:**\n- `meson test -C build registered`\n"
+	if findings := DefaultRegistry().InspectPlanTask(context); len(findings) != 0 {
+		t.Fatalf("registered Meson target was rejected: %+v", findings)
+	}
+
+	context.Body = "**Modifies:** file:meson.build\n\n**Acceptance probes:**\n- `meson test -C build missing_target`\n"
+	if findings := DefaultRegistry().InspectPlanTask(context); len(findings) != 0 {
+		t.Fatalf("task that owns meson.build could not define its target: %+v", findings)
+	}
+}
+
 func TestMesonUsesCompilationDatabaseToProveNewSourcesAreIntegrated(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "build/compile_commands.json", `[

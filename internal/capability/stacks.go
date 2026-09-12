@@ -3,9 +3,11 @@ package capability
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -220,6 +222,14 @@ func (Meson) Detect(ctx Context) Contributions {
 }
 
 func (Meson) ObserveGate(observation GateObservation) []GateFinding {
+	policy := observation.Policies["meson.build-integration"]
+	if policy == "off" {
+		return nil
+	}
+	enforcement := Required
+	if policy == "diagnostic" {
+		enforcement = Diagnostic
+	}
 	files := addedMesonSources(observation.Diff)
 	dependency := map[string]bool{}
 	for _, file := range observation.BuildGraphFiles {
@@ -252,10 +262,135 @@ func (Meson) ObserveGate(observation GateObservation) []GateFinding {
 		detail = "accepted dependency source files are absent from Meson's compilation database; the project build does not exercise the contracts this task consumes"
 	}
 	return []GateFinding{{
-		Capability: "meson", Kind: "build-integration", Enforcement: Required,
+		Capability: "meson", Kind: "build-integration", Enforcement: enforcement,
 		Detail: detail,
 		Files:  uncovered,
 	}}
+}
+
+var mesonTestCall = regexp.MustCompile(`(?m)(?:^|&&|;)\s*meson\s+test(?:\s+[^;&|]+)?`)
+
+// InspectPlanTask rejects an acceptance probe whose named Meson test cannot
+// exist under the accepted write lane. This is stack knowledge: the document
+// core transports an ordinary required finding and never parses Meson syntax.
+func (Meson) InspectPlanTask(ctx PlanTaskContext) []Inspection {
+	return inspectMesonAcceptanceProbes(ctx.ProjectRoot, planCommandChecklist(ctx.Body, "Acceptance probes"), append(planFieldItems(ctx.Body, "Produces"), planFieldItems(ctx.Body, "Modifies")...))
+}
+
+func planCommandChecklist(body, label string) []string {
+	heading := "**" + strings.ToLower(label) + ":**"
+	in := false
+	var commands []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, heading) {
+			in = true
+			continue
+		}
+		if in && (strings.HasPrefix(trimmed, "**") || strings.HasPrefix(trimmed, "#")) {
+			break
+		}
+		if !in {
+			continue
+		}
+		first := strings.IndexByte(trimmed, '`')
+		last := strings.LastIndexByte(trimmed, '`')
+		if first >= 0 && last > first {
+			commands = append(commands, strings.TrimSpace(trimmed[first+1:last]))
+		}
+	}
+	return commands
+}
+
+func (Meson) InspectAcceptanceProbes(observation AcceptanceProbeObservation) []Inspection {
+	return inspectMesonAcceptanceProbes(observation.ProjectRoot, observation.Probes, observation.WritableFiles)
+}
+
+func inspectMesonAcceptanceProbes(root string, probes, writable []string) []Inspection {
+	if root == "" || mesonDefinitionWritable(writable) {
+		return nil
+	}
+	definitions := mesonTestDefinitions(root)
+	var findings []Inspection
+	for index, probe := range probes {
+		target := mesonTestTarget(probe)
+		if target == "" || definitions[target] {
+			continue
+		}
+		findings = append(findings, Inspection{
+			Capability: "meson", Name: "acceptance-probe-target", Enforcement: Required,
+			Detail: fmt.Sprintf("acceptance probe %d names Meson test %q, but no meson.build defines that test and this task's Produces/Modifies lane cannot change meson.build", index+1, target),
+		})
+	}
+	return findings
+}
+
+func mesonTestTarget(command string) string {
+	match := mesonTestCall.FindString(command)
+	if match == "" {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimLeft(match, "&; "))
+	if len(fields) < 3 || fields[0] != "meson" || fields[1] != "test" {
+		return ""
+	}
+	for i := 2; i < len(fields); i++ {
+		field := strings.Trim(fields[i], "'\"")
+		if field == "-C" || field == "--wd" || field == "--setup" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(field, "-") {
+			continue
+		}
+		return field
+	}
+	return ""
+}
+
+func mesonDefinitionWritable(items []string) bool {
+	for _, item := range items {
+		kind, path, ok := strings.Cut(strings.TrimSpace(strings.Trim(item, "`")), ":")
+		if !ok {
+			continue
+		}
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if kind == "file" && (path == "meson.build" || strings.HasSuffix(path, "/meson.build")) || kind == "dir" && (path == "." || path == "") {
+			return true
+		}
+	}
+	return false
+}
+
+func mesonTestDefinitions(root string) map[string]bool {
+	definitions := map[string]bool{}
+	testDefinition := regexp.MustCompile(`(?m)\btest\s*\(\s*['\"]([^'\"]+)['\"]`)
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".ducklab", "build", "node_modules", "vendor":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if entry.Name() != "meson.build" {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, match := range testDefinition.FindAllSubmatch(body, -1) {
+			definitions[string(match[1])] = true
+		}
+		return nil
+	})
+	return definitions
 }
 
 func addedMesonSources(diff string) []string {

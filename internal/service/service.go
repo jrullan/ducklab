@@ -1565,6 +1565,8 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 	for _, detected := range rs.run.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
+	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
+	taskWritableFiles = append(taskWritableFiles, taskArtifactFiles(entry.Path, req.TaskID, "modifies")...)
 	ectx := &tools.ExecContext{
 		ProjectRoot:          root,
 		DocsRoot:             entry.Path,
@@ -1577,6 +1579,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		HarnessContext:       harnessContext,
 		TaskVerification:     rs.run.HarnessProfile.TaskVerification,
 		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskWritableFiles:    uniqueStrings(taskWritableFiles),
 		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
 		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
 		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
@@ -1816,6 +1819,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	for _, detected := range rs.run.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
+	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
+	taskWritableFiles = append(taskWritableFiles, taskArtifactFiles(entry.Path, req.TaskID, "modifies")...)
 	ectx := &tools.ExecContext{
 		ProjectRoot:          root,
 		DocsRoot:             entry.Path,
@@ -1829,6 +1834,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		HarnessContext:       harnessContext,
 		TaskVerification:     rs.run.HarnessProfile.TaskVerification,
 		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskWritableFiles:    uniqueStrings(taskWritableFiles),
 		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
 		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
 		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
@@ -1844,6 +1850,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.execCtx = ectx
 	rs.run.ExecutionRoot = root
 	rs.writer.WriteState()
+	for _, finding := range tools.InspectAcceptanceProbeContract(ectx) {
+		if finding.Enforcement != capability.Required {
+			continue
+		}
+		s.failRun(rs, fmt.Errorf("acceptance probe contract [%s/%s]: %s", finding.Capability, finding.Name, finding.Detail))
+		return
+	}
 
 	// Tool-level brakes notify the operator. Governance refusals are also kept
 	// on the run: a rejected project-settings edit is itself gate-relevant.
@@ -1986,7 +1999,22 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if taskGateLog != "" {
 		verificationOutput = taskGateLog + "\nproject verification:\n" + verificationOutput
 	}
-	rs.writer.WriteVerify(verificationOutput)
+	probeGate := "none"
+	if taskGate != "red" && verify.IsGreen(gateResult) {
+		var probeLog string
+		probeGate, probeLog, err = tools.RunAcceptanceProbeGate(ctx, ectx)
+		if err != nil {
+			s.failRun(rs, fmt.Errorf("verify acceptance probes: %w", err))
+			return
+		}
+		if probeLog != "" {
+			if probeGate == "red" {
+				verificationOutput = "blocking " + probeLog + "\n\nprior successful verification evidence:\n" + verificationOutput
+			} else {
+				verificationOutput += probeLog
+			}
+		}
+	}
 	// Rendering is optional evidence and a failure is only a caveat.
 	render := projCfg.Render
 	if projCfg.RenderConfigured {
@@ -2011,19 +2039,32 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": false, "reason": renderErr.Error()})
 		}
 	}
-	// Persist render attachments and caveats before the gate state is exposed.
-	rs.writer.WriteState()
-	// The output rides the event, bounded: a FAILED run whose gate event
-	// said only exit:1 sent the person re-running the whole suite by hand
-	// to learn which test broke (B-122).
 	effectiveGate := string(gateResult.Gate)
 	effectiveExit := gateResult.ExitCode
-	if taskGate == "red" {
+	if taskGate == "red" || probeGate == "red" {
 		effectiveGate = "red"
 		if effectiveExit == 0 {
 			effectiveExit = 1
 		}
 	}
+	// Get the candidate once, before publishing the final gate: capability
+	// coverage is part of that gate's verdict, not a warning applied after a
+	// green event has already been recorded (B-400).
+	git := vcs.New(ectx.ProjectRoot)
+	diff, _ := git.DiffExcluding(runDiffExclusions(rs.run, ectx.ProjectRoot, rs.projectPath)...)
+	var coverageFindings []capability.GateFinding
+	if effectiveExit == 0 && verify.IsGreen(gateResult) && len(ectx.ActiveCapabilities) > 0 {
+		coverageFindings = tools.ObserveGateCoverage(ectx, diff, gateResult.Output)
+		effectiveGate, effectiveExit, verificationOutput = applyFinalCapabilityCoverage(
+			effectiveGate, effectiveExit, verificationOutput, coverageFindings,
+		)
+	}
+	rs.writer.WriteVerify(verificationOutput)
+	// Persist render attachments and caveats before the gate state is exposed.
+	rs.writer.WriteState()
+	// The output rides the event, bounded: a FAILED run whose gate event
+	// said only exit:1 sent the person re-running the whole suite by hand
+	// to learn which test broke (B-122).
 	rs.writer.AppendEvent("gate", map[string]interface{}{
 		"gate":       effectiveGate,
 		"command":    gateResult.Command,
@@ -2074,7 +2115,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"status": reviewStatus, "independence": independence, "implementer": implementer,
 		"reviewer": reviewer, "verdict": reviewVerdict, "findings": reviewFindings,
 	})
-	verdict := adjudicateBuildVerdict(projectVerdict, taskGate, dissent)
+	contractGate := taskGate
+	if probeGate == "red" {
+		contractGate = "red"
+	}
+	verdict := adjudicateBuildVerdict(projectVerdict, contractGate, dissent)
 	if dissent {
 		detail := fmt.Sprintf("reviewer ended with %s (%d finding(s)); a green command cannot override contractual dissent", reviewVerdict, reviewFindings)
 		rs.writer.AppendEvent("reviewer_dissent", map[string]interface{}{"verdict": reviewVerdict, "findings": reviewFindings, "detail": detail})
@@ -2082,18 +2127,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.Failure = detail
 		}
 	}
-	// Get diff
-	git := vcs.New(ectx.ProjectRoot)
-	diff, _ := git.DiffExcluding(runDiffExclusions(rs.run, ectx.ProjectRoot, rs.projectPath)...)
 	rs.writer.WriteDiff(diff)
 	if rs.run.HarnessProfile != nil {
-		var capabilityIDs []string
-		for _, detected := range rs.run.HarnessProfile.Capabilities {
-			capabilityIDs = append(capabilityIDs, detected.ID)
-		}
-		for _, finding := range capability.DefaultRegistry().ObserveGate(capability.GateObservation{
-			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: gateResult.Output,
-		}, capabilityIDs) {
+		for _, finding := range coverageFindings {
 			recorded := runlog.GateCoverageFinding{
 				Capability: finding.Capability, Kind: finding.Kind, Detail: finding.Detail,
 				Files: finding.Files, Enforcement: string(finding.Enforcement),
@@ -2288,6 +2324,23 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": verdict})
 	rs.writer.WriteState()
+}
+
+// applyFinalCapabilityCoverage makes the final gate obey the same provider
+// findings as verify_run. It remains a small pure boundary so a required
+// finding cannot regress into post-verdict diagnostic metadata again (B-400).
+func applyFinalCapabilityCoverage(gate string, exit int, output string, findings []capability.GateFinding) (string, int, string) {
+	for _, finding := range findings {
+		output += fmt.Sprintf("\ncapability coverage [%s/%s, %s]:\n%s", finding.Capability, finding.Kind, finding.Enforcement, finding.Detail)
+		if len(finding.Files) > 0 {
+			output += "\nfiles: " + strings.Join(finding.Files, ", ")
+		}
+		if finding.Enforcement == capability.Required {
+			gate = "red"
+			exit = 1
+		}
+	}
+	return gate, exit, output
 }
 
 func (s *Service) emitEscalationAtDecision(rs *runState, point string) {

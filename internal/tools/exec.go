@@ -146,6 +146,11 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 // verify_run and the automatic end-of-round gate. TaskVerification goes first:
 // a task-local contract is part of the decision, not an optional hint.
 func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string, error) {
+	for _, finding := range InspectAcceptanceProbeContract(ectx) {
+		if finding.Enforcement == capability.Required {
+			return "red", fmt.Sprintf("acceptance probe contract [%s/%s, %s]:\n%s", finding.Capability, finding.Name, finding.Enforcement, finding.Detail), nil
+		}
+	}
 	taskGate, taskLog, err := RunTaskVerificationGate(ctx, ectx)
 	if err != nil {
 		return "none", "", err
@@ -170,15 +175,20 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 	if taskLog != "" {
 		projectLog = taskLog + "\nproject verification:\n" + projectLog
 	}
+	probeGate, probeLog, err := RunAcceptanceProbeGate(ctx, ectx)
+	if err != nil {
+		return "none", projectLog, err
+	}
+	if probeGate == "red" {
+		return "red", "blocking " + probeLog + "\n\nprior successful verification evidence:\n" + projectLog, nil
+	}
+	projectLog += probeLog
 	if verify.IsGreen(res) && ectx.WorkspaceDiff != nil && len(ectx.ActiveCapabilities) > 0 {
 		diff, err := ectx.WorkspaceDiff()
 		if err != nil {
 			return "none", projectLog, fmt.Errorf("read candidate diff for gate coverage: %w", err)
 		}
-		findings := capability.DefaultRegistry().ObserveGate(capability.GateObservation{
-			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: res.Output,
-			BuildGraphFiles: ectx.BuildGraphFiles,
-		}, ectx.ActiveCapabilities)
+		findings := ObserveGateCoverage(ectx, diff, res.Output)
 		blocking := false
 		var coverageLog strings.Builder
 		for _, finding := range findings {
@@ -205,6 +215,20 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 	}
 }
 
+// ObserveGateCoverage is the one adapter boundary used by both verify_run and
+// the final gate. Keeping the observation shape here prevents one path from
+// silently dropping dependency files or project policy (B-400).
+func ObserveGateCoverage(ectx *ExecContext, diff, output string) []capability.GateFinding {
+	if ectx == nil {
+		return nil
+	}
+	return capability.DefaultRegistry().ObserveGate(capability.GateObservation{
+		ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: output,
+		BuildGraphFiles: ectx.BuildGraphFiles,
+		Policies:        ectx.Capabilities.Policy,
+	}, ectx.ActiveCapabilities)
+}
+
 // RunTaskVerificationGate executes the task-local Verification contract, when
 // present. The build worker uses it again at the final gate so a green project
 // build cannot overwrite a red task gate after the strategy exhausts its
@@ -227,20 +251,6 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	if !verify.IsGreen(res) {
 		return "red", log + gateEnvironmentHint(res.Output), nil
 	}
-	for index, command := range ectx.TaskAcceptanceProbes {
-		probe, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
-			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
-		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
-		if err != nil {
-			return "none", "", fmt.Errorf("run acceptance probe %d: %w", index+1, err)
-		}
-		diagnostic := fmt.Sprintf("acceptance probe %d:\n%s", index+1, formatGateResult(probe))
-		if !verify.IsGreen(probe) {
-			return "red", "blocking " + diagnostic + "\n\nprior successful task evidence:\n" + log, nil
-		}
-		log += "\n" + diagnostic
-	}
-
 	checks, err := capability.DefaultRegistry().ResolveChecks(capability.Context{
 		ProjectRoot:      ectx.ProjectRoot,
 		TaskVerification: command,
@@ -284,6 +294,50 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		log += "\n" + diagnostic
 	}
 	return "green", log, nil
+}
+
+// RunAcceptanceProbeGate executes the slice probes after the project gate has
+// prepared its build directory. Before executing anything, selected stack
+// providers validate runner targets against the task's writable lane.
+func RunAcceptanceProbeGate(ctx context.Context, ectx *ExecContext) (string, string, error) {
+	if ectx == nil || len(ectx.TaskAcceptanceProbes) == 0 {
+		return "green", "", nil
+	}
+	findings := InspectAcceptanceProbeContract(ectx)
+	for _, finding := range findings {
+		if finding.Enforcement == capability.Required {
+			return "red", fmt.Sprintf("acceptance probe contract [%s/%s, %s]:\n%s", finding.Capability, finding.Name, finding.Enforcement, finding.Detail), nil
+		}
+	}
+	var log string
+	for index, command := range ectx.TaskAcceptanceProbes {
+		probe, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
+		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
+		if err != nil {
+			return "none", "", fmt.Errorf("run acceptance probe %d: %w", index+1, err)
+		}
+		diagnostic := fmt.Sprintf("acceptance probe %d:\n%s", index+1, formatGateResult(probe))
+		if !verify.IsGreen(probe) {
+			return "red", diagnostic, nil
+		}
+		log += "\n" + diagnostic
+	}
+	return "green", log, nil
+}
+
+// InspectAcceptanceProbeContract is the non-executing half of the acceptance
+// gate. The service runs it before dispatching a model so an impossible
+// stack-specific probe fails as a planning/configuration defect rather than
+// consuming an implementation run first (B-402).
+func InspectAcceptanceProbeContract(ectx *ExecContext) []capability.Inspection {
+	if ectx == nil || len(ectx.TaskAcceptanceProbes) == 0 {
+		return nil
+	}
+	return capability.DefaultRegistry().InspectAcceptanceProbes(capability.AcceptanceProbeObservation{
+		ProjectRoot: ectx.ProjectRoot, Probes: ectx.TaskAcceptanceProbes,
+		WritableFiles: ectx.TaskWritableFiles, Policies: ectx.Capabilities.Policy,
+	}, ectx.ActiveCapabilities)
 }
 
 func missingProducedFiles(root string, files []string) []string {

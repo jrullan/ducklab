@@ -185,6 +185,10 @@ type ExecContext struct {
 	// file contracts parsed from the accepted plan. They let the core enforce
 	// existence and capability providers inspect cross-file contracts.
 	TaskProducedFiles []string
+	// TaskWritableFiles is the complete Produces/Modifies lane. Capability
+	// providers use it to decide whether a missing runner target can be created
+	// by this task or makes an acceptance probe impossible by construction.
+	TaskWritableFiles []string
 	TaskConsumedFiles []string
 	// TaskAcceptanceProbes are human-approved, one-command-per-slice
 	// behavioural checks from the plan. BuildGraphFiles are concrete sources
