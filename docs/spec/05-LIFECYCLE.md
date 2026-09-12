@@ -458,8 +458,9 @@ Under artifact grammar 2, every plan task includes an `**Acceptance probes:**`
 block. It contains exactly one numbered, backtick-delimited command for each
 top-level `Acceptance slices` item, in the same order. Legacy task contracts
 may omit the block until migrated. These commands are part of the accepted
-document, execute after the task's `Verification` command and before the
-project gate, stop at the first non-zero exit, and are persisted in the run's
+document, execute after the task's `Verification` command and the project gate
+(so build-system gates can prepare their build directory), stop at the first
+non-zero exit, and are persisted in the run's
 harness profile. They turn observable behavior such as CLI output and exit
 status into gate evidence without teaching the core about a project type.
 When probes exist, the reviewer verdict must contain one concrete
@@ -481,11 +482,21 @@ documents with no frontmatter. This operation is read-only and intentionally
 does not run trace-graph, repository, or semantic checks. A valid document
 exits zero after printing any notices; grammar errors are printed and exit one.
 
+Before dispatching a build seat, resolved stack adapters preflight acceptance
+probe targets that they can interpret. For example, a Meson probe naming a test
+that no `meson.build` defines is rejected when the task's `Produces`/`Modifies`
+lane cannot add that definition. The same preflight runs again at verification,
+before any command, so an accepted legacy plan cannot turn a missing target into
+a misleading build-directory failure.
+
 After the project gate, resolved build-system adapters may inspect their own
 evidence. An adapter may block when a new production source or a source
 provided by the task's accepted dependency closure is absent from the build
 graph. The run profile freezes both the probe commands and dependency source
-set so a resume cannot silently change the contract.
+set so a resume cannot silently change the contract. The round gate and final
+gate receive the same diff, dependency closure, build output, and project
+policy. `capabilities.policy["meson.build-integration"]` is `required` by
+default, may be `diagnostic` for explicitly accepted inherited debt, or `off`.
 
 ### 5.3 Test-tampering guard
 
