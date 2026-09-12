@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/vcs"
+	"github.com/jrullan/ducklab/internal/xplat"
 )
 
 func TestRecoverRunsHygieneReapsOrphansAndReattachesPausedWorktree(t *testing.T) {
@@ -21,7 +23,14 @@ func TestRecoverRunsHygieneReapsOrphansAndReattachesPausedWorktree(t *testing.T)
 	if err := os.RemoveAll(paused.WorktreePath); err != nil {
 		t.Fatal(err)
 	}
-	orphan := t.TempDir() + "/orphan"
+	stateDir, err := xplat.StateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(stateDir, "worktrees", id, "orphan")
+	if err := os.MkdirAll(filepath.Dir(orphan), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := git.WorktreeAdd(orphan, "ducklab/orphan"); err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +48,32 @@ func TestRecoverRunsHygieneReapsOrphansAndReattachesPausedWorktree(t *testing.T)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatalf("orphan worktree remains: %v", err)
+	}
+}
+
+func TestRecoverRunsHygieneLeavesHumanWorktreeOutsideEngineRoot(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	human := filepath.Join(t.TempDir(), "human-review")
+	if err := git.WorktreeAdd(human, "review/pr-397"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = git.WorktreeRemove(human) })
+	change := filepath.Join(human, "uncommitted.txt")
+	if err := os.WriteFile(change, []byte("person's work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(change)
+	if err != nil {
+		t.Fatalf("human worktree was removed during recovery: %v", err)
+	}
+	if string(got) != "person's work\n" {
+		t.Fatalf("human worktree content = %q", got)
 	}
 }
 
