@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bench"
@@ -159,6 +160,30 @@ var allowedOrigins = map[string]bool{
 	"https://wails.localhost": true,
 }
 
+// allowedMethodList names every method the routes table registers, plus
+// OPTIONS for the preflight itself. Computed once on first use: the table is
+// static, and a package-level initializer would cycle through the handlers.
+var (
+	allowedMethodsOnce sync.Once
+	allowedMethods     string
+)
+
+func allowedMethodList() string {
+	allowedMethodsOnce.Do(func() {
+		seen := map[string]bool{"OPTIONS": true}
+		for _, rt := range routeTable() {
+			seen[rt.Method] = true
+		}
+		methods := make([]string, 0, len(seen))
+		for m := range seen {
+			methods = append(methods, m)
+		}
+		sort.Strings(methods)
+		allowedMethods = strings.Join(methods, ", ")
+	})
+	return allowedMethods
+}
+
 func setCORS(w http.ResponseWriter, r *http.Request) {
 	(&Server{}).setCORS(w, r)
 }
@@ -182,7 +207,10 @@ func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {
 		// skew detection, so omitting it here made every browser request fail
 		// preflight against the engine's own contract.
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID, X-Ducklab-Client")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// Derived from the routes table: a literal list omitted PATCH, so the
+		// desktop's only PATCH (project config edits) failed preflight and the
+		// client read the thrown fetch as an engine restart (B-399).
+		w.Header().Set("Access-Control-Allow-Methods", allowedMethodList())
 		w.Header().Set("Access-Control-Expose-Headers", "X-Ducklab-Unknown-Route")
 	}
 }

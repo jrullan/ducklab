@@ -103,6 +103,46 @@ describe("what an error names", () => {
     expect(stale).toBe(false);
   });
 
+  // A PATCH refused by the webview's CORS check threw before reaching the
+  // engine, and the client called that "the engine was restarted outside the
+  // app"; the person restarted a healthy engine and lost the gate they had
+  // typed (B-399). The reconnect probe is the arbiter.
+  it("reports a blocked mutating request as blocked, not as a restart, when the binding is unchanged", async () => {
+    let stale: string | false = false;
+    let probes = 0;
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      onStale: (reason) => { stale = reason; },
+      reconnect: async () => { probes++; return { baseUrl: "http://engine", token: "t" }; },
+      fetchFn: (async () => { throw new TypeError("Load failed"); }) as unknown as typeof fetch,
+    });
+    const err = await c.projectUpdate("p", { "verify.mode": "build" }).catch((e) => e);
+    expect(probes).toBe(1);
+    expect(stale).toBe(false);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.code).toBe("request_blocked");
+    expect(err.message).toContain("PATCH /v1/projects/p");
+    expect(err.message).toContain("Nothing was saved");
+    // The client is not poisoned: the next request is attempted, not refused locally.
+    const again = await c.projectUpdate("p", { "verify.mode": "build" }).catch((e) => e);
+    expect(again.code).toBe("request_blocked");
+  });
+
+  it("still reports a restart when the binding changed under the window", async () => {
+    let stale: string | false = false;
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      onStale: (reason) => { stale = reason; },
+      reconnect: async () => ({ baseUrl: "http://engine-2", token: "t2" }),
+      fetchFn: (async () => { throw new TypeError("Load failed"); }) as unknown as typeof fetch,
+    });
+    const err = await c.projectUpdate("p", { "verify.mode": "build" }).catch((e) => e);
+    expect(err).toBeInstanceOf(TypeError);
+    expect(stale).toBe("restarted");
+  });
+
   it("passes the engine's own words through untouched", async () => {
     const c = clientAnswering(400, JSON.stringify({ error: { message: 'duckling "lunna": not found' } }), "application/json");
     const err = await c.benchStart({ ducklings: ["lunna"], modes: ["solo"] }).catch((e) => e);
