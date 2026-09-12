@@ -2448,6 +2448,12 @@ func (s *Service) failRun(rs *runState, err error) {
 		// had already failed dozens of times straight, and fed 5.7M more
 		// tokens to a loop the number would have named.
 		detail := err.Error()
+		if cap := budgetCapFromFailure(detail); cap != "" {
+			if rs.run.PendingData == nil {
+				rs.run.PendingData = map[string]interface{}{}
+			}
+			rs.run.PendingData["binding_cap"] = cap
+		}
 		if rs.execCtx != nil && rs.execCtx.ConsecGateFails >= 3 {
 			detail += fmt.Sprintf(" — CAUTION: the gate has failed %d times in a row in this run; "+
 				"lifting the cap may feed a loop, not finish the work", rs.execCtx.ConsecGateFails)
@@ -3542,6 +3548,9 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if rs.run.Status != "paused" {
 		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, rs.run.Status)
 	}
+	if cap, binding := bindingBudgetCap(rs.run); binding {
+		return nil, fmt.Errorf("run %q cannot resume: %s budget cap is still in effect — lift it first", id, cap)
+	}
 
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -3742,14 +3751,27 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 		if err := w.WriteState(); err != nil {
 			return nil, err
 		}
-		return rs.snapshotRun(), nil
+		out := rs.snapshotRun()
+		out.Next = runNext(out)
+		return out, nil
 	}
 	rs.wmu.Lock()
 	tracker := rs.tracker
-	rs.wmu.Unlock()
 	if tracker == nil {
-		return nil, fmt.Errorf("not lifted — %s has no live budget yet", id)
+		limits := budget.Budget{
+			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
+			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
+		}
+		tracker = budget.NewTracker(&limits)
+		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
+		tracker.Spend.AddUSD(rs.run.Budget.USD)
+		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
+		for i := 0; i < rs.run.Budget.Turns; i++ {
+			tracker.Spend.AddTurn()
+		}
+		rs.tracker = tracker
 	}
+	rs.wmu.Unlock()
 	was, err := tracker.Lift(kind)
 	if err != nil {
 		return nil, err
@@ -3778,7 +3800,9 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 	}
 	// The meters everywhere update now, not at the next model call.
 	s.publishSpend(rs, tracker)
-	return rs.snapshotRun(), nil
+	out := rs.snapshotRun()
+	out.Next = runNext(out)
+	return out, nil
 }
 
 func (s *Service) smallSeatPairLiftWarning(run *runlog.Run) string {
