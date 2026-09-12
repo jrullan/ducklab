@@ -20,4 +20,8 @@ func TestAStageRunStreamsRegardlessOfItsLauncher(t *testing.T) {
 	if !run.Stream {
 		t.Fatal("a stage run launched without the stream flag does not stream")
 	}
+	// Intake settles at a human gate. The error reports that expected pending
+	// decision; waiting still joins the execution goroutine before TempDir
+	// cleanup can race its final state writes (B-396).
+	_, _ = s.waitForRun(context.Background(), run.ID)
 }
