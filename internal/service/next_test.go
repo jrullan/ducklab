@@ -43,6 +43,8 @@ func TestWhatARunOffersMatchesItsState(t *testing.T) {
 		{"paused by a restart", runlog.Run{Status: "paused", PendingKind: "engine_restart"}, []string{"resume", "abort"}},
 		{"paused by a shutdown", runlog.Run{Status: "paused", PendingKind: "engine_shutdown"}, []string{"resume", "abort"}},
 		{"paused by history duration", runlog.Run{Status: "paused", PendingKind: "history_duration", Stage: "build"}, []string{"resume", "abort"}},
+		{"budget cap still standing", runlog.Run{Status: "paused", PendingKind: "budget", Stage: "build", PendingData: map[string]interface{}{"binding_cap": "wallclock"}, Budget: runlog.BudgetState{Limit: runlog.BudgetLimits{WallclockS: 1800}}}, []string{"abort"}},
+		{"budget cap lifted", runlog.Run{Status: "paused", PendingKind: "budget", Stage: "build", PendingData: map[string]interface{}{"binding_cap": "wallclock"}, Budget: runlog.BudgetState{Limit: runlog.BudgetLimits{WallclockS: 0}}}, []string{"resume", "abort"}},
 		// Endings offer nothing: relaunch is an action on the task.
 		{"done", runlog.Run{Status: "done", Accepted: true}, nil},
 		{"failed", runlog.Run{Status: "failed"}, nil},

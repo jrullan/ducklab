@@ -44,6 +44,7 @@ func TestABudgetDeathPausesWithTheWorkInPlace(t *testing.T) {
 		ID: "r-bp", ProjectID: p.ID, TaskID: "T-001", Stage: "build",
 		Status: "running", StartedAt: "2026-08-06T15:30:00Z", TreeSnapshot: snap,
 	}
+	run.Budget.Limit.Tokens = 20
 	w, err := runlog.NewWriter(dir, run)
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +63,18 @@ func TestABudgetDeathPausesWithTheWorkInPlace(t *testing.T) {
 	if _, err := os.Stat(work); err != nil {
 		t.Error("the pause restored the tree — the work the pause exists to save is gone")
 	}
-	if got := runNext(run); len(got) == 0 || got[0] != "resume" {
-		t.Errorf("next = %v, want resume first", got)
+	if got := runNext(run); len(got) != 1 || got[0] != "abort" {
+		t.Errorf("next = %v, want only abort until the token cap is lifted", got)
+	}
+	if _, err := s.RunResume(context.Background(), run.ID); err == nil || !strings.Contains(err.Error(), "tokens budget cap is still in effect") {
+		t.Fatalf("resume with the binding cap = %v, want a refusal naming tokens", err)
+	}
+	lifted, err := s.RunBudgetLift(context.Background(), run.ID, "tokens")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lifted.Next) == 0 || lifted.Next[0] != "resume" {
+		t.Errorf("next after lift = %v, want resume first", lifted.Next)
 	}
 	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "paused for budget") {
 		t.Fatalf("budget-paused run was accepted instead of requiring resume: %v", err)
@@ -291,6 +302,16 @@ func TestResumeClearsThePausesReason(t *testing.T) {
 	w.Close()
 	s.RecoverRuns(context.Background())
 
+	if _, err := s.RunResume(context.Background(), "r-bres"); err == nil || !strings.Contains(err.Error(), "usd budget cap is still in effect") {
+		t.Fatalf("resume before lift = %v, want a refusal naming usd", err)
+	}
+	lifted, err := s.RunBudgetLift(context.Background(), "r-bres", "usd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lifted.Next) == 0 || lifted.Next[0] != "resume" {
+		t.Fatalf("next after recovered-run lift = %v, want resume", lifted.Next)
+	}
 	got, err := s.RunResume(context.Background(), "r-bres")
 	if err != nil {
 		t.Fatal(err)

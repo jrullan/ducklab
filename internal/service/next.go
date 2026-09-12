@@ -56,7 +56,15 @@ func runNext(r *runlog.Run) []string {
 			// The conversation waits for the person's next message — or its
 			// proper ending, which is "we are done here", not an abort.
 			return []string{"reply", "end", "abort"}
-		case "budget", "provider", "error", "history_duration":
+		case "budget":
+			// A budget pause is not recoverable until the cap that caused it
+			// has actually been removed. Advertising Resume before then made
+			// every click re-enter the strategy and hit the same ceiling again.
+			if _, binding := bindingBudgetCap(r); binding {
+				return []string{"abort"}
+			}
+			fallthrough
+		case "provider", "error", "history_duration":
 			// Stopped by its own ceiling, a provider that went away, or any
 			// error at all — work intact either way, because no error may
 			// discard work automatically. Fix what needs fixing and resume;
@@ -99,6 +107,47 @@ func runNext(r *runlog.Run) []string {
 		// Done and failed are endings for task runs. Relaunching travels on
 		// the task's own list; accepted stage transitions were handled above.
 		return nil
+	}
+}
+
+// bindingBudgetCap returns the cap named by a budget pause while that cap is
+// still standing. New records carry the machine-readable name; the failure
+// fallback keeps runs written by older engines recoverable after upgrade.
+func bindingBudgetCap(r *runlog.Run) (string, bool) {
+	if r == nil || r.PendingKind != "budget" {
+		return "", false
+	}
+	cap := stringValueAny(r.PendingData["binding_cap"])
+	if cap == "" {
+		cap = budgetCapFromFailure(r.Failure)
+	}
+	switch cap {
+	case "tokens":
+		return cap, r.Budget.Limit.Tokens > 0
+	case "usd":
+		return cap, r.Budget.Limit.USD > 0
+	case "turns":
+		return cap, r.Budget.Limit.Turns > 0
+	case "wallclock":
+		return cap, r.Budget.Limit.WallclockS > 0
+	default:
+		return "", false
+	}
+}
+
+func budgetCapFromFailure(failure string) string {
+	lower := strings.ToLower(failure)
+	switch {
+	case strings.Contains(lower, "wallclock"):
+		return "wallclock"
+	case strings.Contains(lower, "token budget"):
+		return "tokens"
+	case strings.Contains(lower, "turn budget"):
+		return "turns"
+	case strings.Contains(lower, "budget") && strings.Contains(lower, "$"):
+		return "usd"
+	default:
+		return ""
 	}
 }
 

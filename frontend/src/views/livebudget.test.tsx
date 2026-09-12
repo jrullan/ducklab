@@ -330,3 +330,48 @@ describe("the calls/reply cap on a live run", () => {
     await waitFor(() => expect(screen.getByTestId("calls-cap").textContent).toContain("no cap"));
   });
 });
+
+describe("a run paused on its wallclock cap", () => {
+  it("offers the missing wallclock lift and reveals Resume after it lands", async () => {
+    const paused = {
+      ...run,
+      id: "r-wall",
+      status: "paused",
+      pending_kind: "budget",
+      failure: "wallclock budget exceeded: 1800s >= 1800s",
+      next: ["abort"],
+      budget: {
+        usd: 0.1, tokens: 1000, turns: 2, wallclock_s: 1800,
+        limit: { usd: 2, tokens: 400000, turns: 24, wallclock_s: 1800 },
+      },
+    } as unknown as Run;
+    const posted: string[] = [];
+    const liftClient = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string, init?: RequestInit) => {
+        const path = String(url).replace("http://engine", "");
+        if (init?.method === "POST" && path.includes("/budget/lift")) {
+          posted.push(String(init.body));
+          return new Response(JSON.stringify({
+            ...paused,
+            next: ["resume", "abort"],
+            budget: { ...paused.budget, limit: { ...paused.budget!.limit, wallclock_s: 0 } },
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+    useRuns.setState({ runs: { "r-wall": paused }, spend: {}, events: {}, deltas: {}, reasoning: {} });
+
+    render(<RunView runId="r-wall" client={liftClient} />);
+    expect(await screen.findByTestId("lift-wallclock")).toBeTruthy();
+    expect(screen.queryByTestId("resume-button")).toBeNull();
+    expect(screen.getByTestId("decision-consequence")).toHaveTextContent("before Resume becomes available");
+
+    fireEvent.click(screen.getByTestId("lift-wallclock"));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toContain("wallclock");
+    await waitFor(() => expect(screen.getByTestId("resume-button")).toBeTruthy());
+  });
+});

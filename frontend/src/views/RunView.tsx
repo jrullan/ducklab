@@ -823,7 +823,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const rolledBackRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_aborted === true && Array.isArray(run.pending_data?.conflicting_files);
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
-  const consequence = next.includes("resume")
+  const consequence = run.pending_kind === "budget" && !next.includes("resume")
+    ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below before Resume becomes available, or Abort to close the attempt."
+    : next.includes("resume")
     ? run.pending_kind === "budget"
       ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
       : run.pending_kind === "provider"
@@ -2475,6 +2477,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   limit={limit.turns}
                   format={(n) => String(Math.round(n))}
                   lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
+                />
+                <BudgetMeter
+                  label="wallclock"
+                  used={budget.wallclock_s}
+                  limit={limit.wallclock_s}
+                  format={(seconds) => duration(seconds * 1000)}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "wallclock").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
                 {/* Not a meter — the per-reply call cap inside the agent
                     loop, the ceiling a reviewer once died on at exactly call
