@@ -28,7 +28,7 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 	if kind == artifact.KindPlan {
 		mechanical = planCompositionFindings(p.ProjectRoot, base, proposed)
 	}
-	contractFindings := artifactContractFindings(kind, proposed)
+	contractFindings := artifactContractFindings(kind, base, proposed)
 	contractFindings = append(contractFindings, referenceContractFindings(kind, proposed, p.ReferenceContracts)...)
 	mechanical = append(mechanical, contractFindings...)
 	baseBody := artifact.RenderBody(base)
@@ -81,15 +81,14 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 // artifactContractFindings applies the same public preflight contract to the
 // exact composed candidate. A graph check cannot see malformed commands or
 // artifact values, and semantic review cannot override deterministic grammar.
-func artifactContractFindings(kind artifact.Kind, proposed *artifact.Document) []string {
+func artifactContractFindings(kind artifact.Kind, base, proposed *artifact.Document) []string {
 	if proposed == nil {
 		return nil
 	}
 	// Legacy plans remain operable while projects migrate to grammar 2. Their
-	// historical task vocabulary is not a contract violation in an amendment:
-	// applying the current whole-document lint here would make one new task
-	// responsible for rewriting every older task before semantic review could
-	// run. Grammar-2 plans have explicitly opted into the strict contract.
+	// historical vocabulary cannot make an amendment responsible for migrating
+	// the full document before review. Grammar-2 plans use baseline subtraction
+	// below so inherited debt remains non-blocking too.
 	if kind == artifact.KindPlan && proposed.Front.Grammar < artifact.CurrentGrammar {
 		return nil
 	}
@@ -97,12 +96,24 @@ func artifactContractFindings(kind artifact.Kind, proposed *artifact.Document) [
 	if err != nil {
 		return []string{"artifact contract could not parse the composed candidate: " + err.Error()}
 	}
+	baseline := map[string]bool{}
+	if kind == artifact.KindPlan && base != nil {
+		if baseDiagnostics, baseErr := artifact.ContractLint(artifact.Render(base), kind); baseErr == nil {
+			for _, diagnostic := range baseDiagnostics {
+				baseline[diagnostic.Error()] = true
+			}
+		}
+	}
 	var findings []string
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == "legacy_grammar" {
 			continue
 		}
-		findings = append(findings, diagnostic.Error())
+		finding := diagnostic.Error()
+		if baseline[finding] {
+			continue
+		}
+		findings = append(findings, finding)
 	}
 	return findings
 }

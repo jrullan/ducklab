@@ -539,6 +539,35 @@ func TestPlanRejectsSingleOutputCompileWithMultipleInputs(t *testing.T) {
 	}
 }
 
+func TestPlanAmendmentStructureTreatsInheritedDefectsAsNotices(t *testing.T) {
+	legacyTask := artifact.Section{
+		ID: "T-001", Title: "Legacy build", Body: "**Deliverables:** file:legacy.go",
+		FieldErrors: []artifact.FieldError{{ID: "T-001", Key: "Deliverables", Token: "Deliverables"}},
+	}
+	base := &artifact.Document{
+		Front:       artifact.Frontmatter{Kind: artifact.KindPlan, Grammar: artifact.CurrentGrammar},
+		Sections:    []artifact.Section{{ID: "M-001", Title: "Core", Children: []artifact.Section{legacyTask}}},
+		FieldErrors: append([]artifact.FieldError(nil), legacyTask.FieldErrors...),
+	}
+	added := artifact.Section{
+		ID: "T-002", Title: "New work",
+		Body: "**Acceptance slices:**\n- one\n  - hidden two\n",
+	}
+	proposed := &artifact.Document{
+		Front:       base.Front,
+		Sections:    []artifact.Section{{ID: "M-001", Title: "Core", Children: []artifact.Section{legacyTask, added}}},
+		FieldErrors: append([]artifact.FieldError(nil), legacyTask.FieldErrors...),
+	}
+
+	blockers, notices := ProposalStructureFindingsForAmendment(base, proposed)
+	if joined := strings.Join(blockers, "\n"); strings.Contains(joined, "Deliverables") || !strings.Contains(joined, "T-002") {
+		t.Fatalf("amendment blockers = %v, want only newly introduced defects", blockers)
+	}
+	if joined := strings.Join(notices, "\n"); !strings.Contains(joined, "T-001") || !strings.Contains(joined, "Deliverables") {
+		t.Fatalf("amendment notices lost inherited legacy defect: %v", notices)
+	}
+}
+
 func TestManifestRendersDistinctAuthoredProbesWithoutCloningVerification(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{ID: "M-01", Title: "Core", Tasks: []agent.ManifestTask{{
 		ID: "T-001", Title: "Compose", Implements: []string{"SPEC-001"}, WorkUnit: "Compose results",

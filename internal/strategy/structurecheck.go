@@ -624,6 +624,27 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 	return append(findings, out...)
 }
 
+// ProposalStructureFindingsForAmendment separates debt already present in the
+// approved document from defects introduced by the candidate. An amendment is
+// responsible for its delta, not for migrating every untouched section before
+// the person may approve new work. Inherited findings remain visible as
+// notices; an identical string is deliberate because the public checker is the
+// authority for both sides of the comparison.
+func ProposalStructureFindingsForAmendment(base, proposed *artifact.Document) (blockers, notices []string) {
+	baseline := map[string]bool{}
+	for _, finding := range ProposalStructureFindings(base) {
+		baseline[finding] = true
+	}
+	for _, finding := range ProposalStructureFindings(proposed) {
+		if baseline[finding] {
+			notices = append(notices, finding)
+			continue
+		}
+		blockers = append(blockers, finding)
+	}
+	return blockers, notices
+}
+
 func priorityMarkerCount(body string) int {
 	return len(regexp.MustCompile(`(?i)\*\*priority:\*\*`).FindAllStringIndex(body, -1))
 }

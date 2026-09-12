@@ -378,19 +378,25 @@ as-built spec is refused outright ("nothing to plan"), because the plan of an
 adopted project grows from feature briefs and bug promotions, which create it
 on their own.
 
-A light plan extension normally emits only new task fragments; Ducklab assigns
-their real sequential IDs and preserves every existing task by code. Two
-bounded amendment deltas are also legal. A dependency-only stub may add new
-IDs to an existing task's `Depends on` set, but may contain no other field or
-prose. The engine places each added dependency before the earliest amended
-consumer. When that task depends on another task still behind the consumer, it
-moves that dependency recursively in graph order, whether the task is new or
-already existed, and changes milestone placement when necessary. IDs and task
-bodies stay stable; the ordinary forward-dependency invariant is not relaxed.
-An exact `##` heading listed as a named plan section may replace that
-section's complete body. Unknown or ambiguous headings are refused, and `###`
-is reserved for task IDs. The final composition review receives the exact set
-of existing tasks and named sections the engine allowed to change.
+A light plan extension emits its complete provisional task fragment each
+round; Ducklab uses the latest round, assigns real sequential IDs, and
+preserves approved tasks by code. Omitting a provisional task removes it from
+the amendment; a `Superseded by` tombstone is consumed rather than persisted.
+Two bounded deltas to existing content are also legal. A stub may add IDs to
+an existing task's `Depends on` set. When the task is todo or blocked and has
+no accepted or active run, the same stub may replace its `Produces`,
+`Consumes`, `Exercises`, and `Verification` fields. This permits a failed
+task's producer/consumer lane to be rewired around a new prerequisite without
+opening its Work unit or acceptance contract to revision. Accepted and active
+tasks remain immutable. The engine places each added dependency before the
+earliest amended consumer and recursively moves any dependency still behind
+it; the ordinary forward-dependency invariant is not relaxed. An exact `##`
+heading listed as a named plan section may replace that section's complete
+body. Unknown or ambiguous headings are refused, and `###` is reserved for
+task IDs. The final composition review receives the exact fields and named
+sections the engine allowed to change. Structure debt already present in the
+approved plan remains visible as a notice but does not block an otherwise
+valid amendment; only new deterministic defects are blockers.
 
 ### 4.5 `split` — decompose to raise the ceiling
 

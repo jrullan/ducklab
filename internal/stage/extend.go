@@ -82,8 +82,15 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if err != nil {
 		return nil, err
 	}
-	tasks, real := parsePlanItems(taskFragment)
-	if real == 0 && len(namedReplacements) == 0 {
+	tasks, _ := parsePlanItems(taskFragment)
+	var superseded []string
+	tasks, superseded = dropSupersededPlanTasks(tasks)
+	if len(superseded) > 0 && p.OnEvent != nil {
+		p.OnEvent("superseded_tasks_consumed", map[string]interface{}{
+			"tasks": superseded, "detail": "superseded amendment tombstones were removed before composition",
+		})
+	}
+	if len(tasks) == 0 && len(namedReplacements) == 0 {
 		// A council revise that stood pat replies in prose; the draft it
 		// stood on is still the amendment. Fall back before refusing.
 		for _, draft := range drafts(p) {
@@ -92,19 +99,20 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 				return nil, extractErr
 			}
 			if t2, r2 := parsePlanItems(fragment); r2 > 0 || len(replacements) > 0 {
-				tasks, real, namedReplacements = t2, r2, replacements
+				t2, _ = dropSupersededPlanTasks(t2)
+				tasks, namedReplacements = t2, replacements
 				break
 			}
 		}
 	}
-	if real == 0 && len(namedReplacements) == 0 {
+	if len(tasks) == 0 && len(namedReplacements) == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
 		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
 
 	var proposed *artifact.Document
-	var dependencyAmendments []planDependencyAmendment
+	var taskAmendments []planTaskAmendment
 	if p.SplitTask != "" {
 		if len(namedReplacements) > 0 {
 			return nil, fmt.Errorf("a task split cannot also replace named plan sections")
@@ -115,12 +123,12 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		}
 	} else {
 		var additions []artifact.Section
-		additions, dependencyAmendments, err = partitionExtensionTasks(current, tasks)
+		additions, taskAmendments, err = partitionExtensionTasks(current, tasks, p.MutablePlanTasks)
 		if err != nil {
 			return nil, err
 		}
 		proposed = mergeExtension(current, additions)
-		if err = applyDependencyAmendments(current, proposed, additions, dependencyAmendments); err != nil {
+		if err = applyPlanTaskAmendments(current, proposed, additions, taskAmendments); err != nil {
 			return nil, err
 		}
 		if proposed, err = applyNamedPlanReplacements(proposed, namedReplacements); err != nil {
@@ -132,7 +140,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
 		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 	}
-	reviewAsk := extensionReviewAsk(effectiveChange, dependencyAmendments, namedReplacements)
+	reviewAsk := extensionReviewAsk(effectiveChange, taskAmendments, namedReplacements)
 	mechanical, semantic, err := reviewComposition(ctx, p, kind, reviewAsk, current, proposed)
 	if err != nil {
 		return nil, err
@@ -144,16 +152,16 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
-type planDependencyAmendment struct {
-	TaskID    string
-	DependsOn []string
+type planTaskAmendment struct {
+	TaskID       string
+	DependsOn    []string
+	Replacements map[string]string
 }
 
-// partitionExtensionTasks admits one deliberately narrow mutation of an
-// existing task: a dependency-only stub. Everything else keeps the historical
-// refusal, so an extension cannot smuggle a Work unit or task-body rewrite in
-// beside new work.
-func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Section) ([]artifact.Section, []planDependencyAmendment, error) {
+// partitionExtensionTasks admits a narrow existing-task stub. Dependencies are
+// always additive; dormant tasks may also replace the artifact/proof fields
+// that define their writable lane. Prose and accepted work remain immutable.
+func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Section, mutable map[string]bool) ([]artifact.Section, []planTaskAmendment, error) {
 	existing := map[string]*artifact.Section{}
 	for mi := range current.Sections {
 		for ti := range current.Sections[mi].Children {
@@ -162,7 +170,7 @@ func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Sectio
 		}
 	}
 	var additions []artifact.Section
-	var amendments []planDependencyAmendment
+	var amendments []planTaskAmendment
 	for _, task := range tasks {
 		old := existing[strings.ToUpper(strings.TrimSpace(task.ID))]
 		if old == nil || looksLikeMilestoneDecl(task) {
@@ -172,23 +180,31 @@ func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Sectio
 		if strings.TrimSpace(task.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(old.Title)) {
 			return nil, nil, existingTaskRewriteError(task.ID)
 		}
-		depends := task.Field("depends on")
-		if strings.TrimSpace(depends) == "" || !dependencyOnlyStub(task.Body) {
+		amendment, ok := planTaskAmendmentFromStub(task)
+		if !ok {
 			return nil, nil, existingTaskRewriteError(task.ID)
 		}
-		amendments = append(amendments, planDependencyAmendment{TaskID: old.ID, DependsOn: splitPlanItems(depends)})
+		amendment.TaskID = old.ID
+		if len(amendment.Replacements) > 0 && (mutable == nil || !mutable[strings.ToUpper(old.ID)]) {
+			return nil, nil, existingTaskRewriteError(task.ID)
+		}
+		amendments = append(amendments, amendment)
 	}
 	return additions, amendments, nil
 }
 
 func existingTaskRewriteError(id string) error {
-	return fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks and dependency-only stubs but must not silently rewrite existing work", id)
+	return fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks, add dependencies, and replace proof fields only on dormant tasks, but must not silently rewrite accepted or active work", id)
 }
 
-func dependencyOnlyStub(body string) bool {
+func planTaskAmendmentFromStub(task artifact.Section) (planTaskAmendment, bool) {
+	amendment := planTaskAmendment{Replacements: map[string]string{}}
 	seenDepends := false
 	seenMilestone := false
-	for _, line := range strings.Split(body, "\n") {
+	authorized := map[string]bool{
+		"produces": true, "consumes": true, "exercises": true, "verification": true,
+	}
+	for _, line := range strings.Split(task.Body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -196,6 +212,7 @@ func dependencyOnlyStub(body string) bool {
 		lower := strings.ToLower(trimmed)
 		if strings.HasPrefix(lower, "**depends on:**") && !seenDepends {
 			seenDepends = true
+			amendment.DependsOn = splitPlanItems(task.Field("depends on"))
 			continue
 		}
 		// The fragment contract asks every emitted task for Milestone. It is
@@ -205,9 +222,22 @@ func dependencyOnlyStub(body string) bool {
 			seenMilestone = true
 			continue
 		}
-		return false
+		matched := false
+		for field := range authorized {
+			if strings.HasPrefix(lower, "**"+field+":**") {
+				if _, duplicate := amendment.Replacements[field]; duplicate {
+					return planTaskAmendment{}, false
+				}
+				amendment.Replacements[field] = task.Field(field)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return planTaskAmendment{}, false
+		}
 	}
-	return seenDepends
+	return amendment, seenDepends || len(amendment.Replacements) > 0
 }
 
 func splitPlanItems(value string) []string {
@@ -220,7 +250,7 @@ func splitPlanItems(value string) []string {
 	return out
 }
 
-func applyDependencyAmendments(current, proposed *artifact.Document, additions []artifact.Section, amendments []planDependencyAmendment) error {
+func applyPlanTaskAmendments(current, proposed *artifact.Document, additions []artifact.Section, amendments []planTaskAmendment) error {
 	if len(amendments) == 0 {
 		return nil
 	}
@@ -260,6 +290,9 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 		if old == nil || target == nil {
 			return fmt.Errorf("dependency amendment target %s does not exist", amendment.TaskID)
 		}
+		for field, value := range amendment.Replacements {
+			setTaskScalarField(target, canonicalPlanAmendmentField(field), value)
+		}
 		deps := splitPlanItems(old.Field("depends on"))
 		seen := map[string]bool{}
 		for _, dep := range deps {
@@ -281,12 +314,46 @@ func applyDependencyAmendments(current, proposed *artifact.Document, additions [
 				added++
 			}
 		}
-		if added == 0 {
+		if len(amendment.DependsOn) > 0 && added == 0 && len(amendment.Replacements) == 0 {
 			return fmt.Errorf("dependency amendment for %s adds no dependency", target.ID)
 		}
-		setTaskScalarField(target, "Depends on", strings.Join(deps, ", "))
+		if len(amendment.DependsOn) > 0 {
+			setTaskScalarField(target, "Depends on", strings.Join(deps, ", "))
+		}
 	}
 	return placeDependenciesBeforeConsumers(proposed, addedDependencies)
+}
+
+func canonicalPlanAmendmentField(field string) string {
+	switch field {
+	case "depends on":
+		return "Depends on"
+	case "produces":
+		return "Produces"
+	case "consumes":
+		return "Consumes"
+	case "exercises":
+		return "Exercises"
+	case "verification":
+		return "Verification"
+	default:
+		return field
+	}
+}
+
+func dropSupersededPlanTasks(tasks []artifact.Section) ([]artifact.Section, []string) {
+	kept := make([]artifact.Section, 0, len(tasks))
+	var dropped []string
+	for _, task := range tasks {
+		title := strings.ToLower(strings.TrimSpace(task.Title))
+		body := strings.ToLower(task.Body)
+		if strings.HasPrefix(title, "superseded ") || strings.Contains(body, "**superseded by:**") {
+			dropped = append(dropped, task.ID)
+			continue
+		}
+		kept = append(kept, task)
+	}
+	return kept, dropped
 }
 
 // placeDependenciesBeforeConsumers makes a dependency-only amendment a
@@ -436,10 +503,19 @@ type namedPlanReplacement struct {
 	Markdown string
 }
 
-func extensionReviewAsk(change string, dependencies []planDependencyAmendment, replacements []namedPlanReplacement) string {
+func extensionReviewAsk(change string, amendments []planTaskAmendment, replacements []namedPlanReplacement) string {
 	var scope []string
-	for _, amendment := range dependencies {
-		scope = append(scope, amendment.TaskID+" Depends on only")
+	for _, amendment := range amendments {
+		var fields []string
+		if len(amendment.DependsOn) > 0 {
+			fields = append(fields, "Depends on")
+		}
+		for _, field := range []string{"produces", "consumes", "exercises", "verification"} {
+			if _, ok := amendment.Replacements[field]; ok {
+				fields = append(fields, canonicalPlanAmendmentField(field))
+			}
+		}
+		scope = append(scope, amendment.TaskID+" "+strings.Join(fields, ", ")+" only")
 	}
 	for _, replacement := range replacements {
 		scope = append(scope, "## "+replacement.Heading)
@@ -656,6 +732,7 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 	b.WriteString("## The effective change\n\n" + strings.TrimSpace(change) + "\n\n")
 	if strings.TrimSpace(priorFragment) != "" {
 		b.WriteString("## Your previous amendment fragment to revise\n\n" + strings.TrimSpace(priorFragment) + "\n\n")
+		b.WriteString("Your response replaces that amendment fragment in full. Re-emit every provisional task that should survive; omit a provisional task to remove it. Never emit a `Superseded by` tombstone.\n\n")
 	}
 
 	b.WriteString("## The plan today (outline)\n\n")
@@ -694,10 +771,10 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		"real ids are assigned by the engine. When one of these tasks consumes what another delivers, say so " +
 		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
 		"the real id. Never depend on a task that comes later in your own list.\n" +
-		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and additions. The engine orders added dependencies before that consumer. Other changes are refused.\n" +
+		"- Existing task: heading + `Depends on` with old/new ids. If todo/blocked with no active/accepted run, it may replace `Produces`, `Consumes`, `Exercises`, `Verification` (`none` clears). Otherwise fields are immutable.\n" +
 		"- To replace a listed named section, emit its exact `## <heading>` and complete body. H3 is reserved for task ids.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
-		"- This amendment cannot remove tasks. Retire superseded tasks separately with task_remove.\n" +
+		"- This amendment cannot remove tasks from the approved plan; retire a superseded one with task_remove. Omit a provisional task to drop it.\n" +
 		"- If the change alters what the product IS — its requirements — return NO sections: " +
 		"one sentence saying why, and the person will write a feature brief instead.\n")
 	return b.String(), nil
