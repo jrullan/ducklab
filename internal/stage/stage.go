@@ -107,6 +107,10 @@ type Params struct {
 	// amendment cost thirty thousand prompt tokens a call and bet the whole
 	// document on the model not truncating it.
 	Extend string
+	// MutablePlanTasks names existing tasks whose run history permits a
+	// field-level amendment. The service includes only todo/blocked tasks with
+	// no accepted or in-flight work; nil keeps direct callers conservative.
+	MutablePlanTasks map[string]bool
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)

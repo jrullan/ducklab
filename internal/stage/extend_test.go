@@ -235,6 +235,100 @@ func TestExtendAddsANewTaskAndAppendsItsRealIDToAnExistingDependency(t *testing.
 	}
 }
 
+func TestExtendReplacesProofFieldsOnAnUnacceptedExistingTask(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n"+
+			"### T-001 — Existing consumer\n\nConsumer body.\n\n"+
+			"**Produces:** file:shared.h, file:consumer.c\n"+
+			"**Consumes:** none\n**Exercises:** file:shared.h\n**Verification:** `old-check`\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-fields", Mode: "solo",
+		Extend: "move shared.h to a prerequisite", MutablePlanTasks: map[string]bool{"T-001": true},
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			return "## T-900 — Produce shared header\n\n**Milestone:** M-001\n**Implements:** SPEC-001\n" +
+				"**Work unit:** create the shared header\n**Acceptance slices:**\n- header exists\n" +
+				"**Acceptance probes:**\n1. `test -f shared.h`\n**Produces:** file:shared.h\n**Consumes:** none\n" +
+				"**Verification:** `test -f shared.h`\n**Exercises:** file:shared.h\n\nBuild it.\n\n" +
+				"## T-001 — Existing consumer\n\n**Milestone:** M-001\n**Depends on:** T-900\n" +
+				"**Produces:** file:consumer.c\n**Consumes:** file:shared.h\n" +
+				"**Exercises:** file:consumer.c\n**Verification:** `new-check`\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := res.Proposed.Section("T-001")
+	if consumer == nil {
+		t.Fatal("existing consumer disappeared")
+	}
+	for field, want := range map[string]string{
+		"depends on": "T-002", "produces": "file:consumer.c", "consumes": "file:shared.h",
+		"exercises": "file:consumer.c", "verification": "`new-check`",
+	} {
+		if got := consumer.Field(field); got != want {
+			t.Errorf("T-001 %s = %q, want %q", field, got, want)
+		}
+	}
+	if got := strings.Join(res.CompositionMechanical, "\n"); got != "" {
+		t.Fatalf("valid field replacement remained mechanically blocked: %s", got)
+	}
+}
+
+func TestExtendKeepsAcceptedExistingTaskProofFieldsImmutable(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Accepted task\n\n**Produces:** file:shared.h\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-immutable", Mode: "solo",
+		Extend: "move shared.h", MutablePlanTasks: map[string]bool{},
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			return "## T-001 — Accepted task\n\n**Produces:** none\n", nil
+		},
+	}, current)
+	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") {
+		t.Fatalf("accepted task proof fields were mutable: %v", err)
+	}
+}
+
+func TestExtendConsumesSupersededTaskTombstones(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan, "## M-001 — Core\n\n### T-001 — Existing\n\nDone.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-tombstone", Mode: "solo", Extend: "add one task",
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			return "## T-900 — Real task\n\nDo it.\n\n" +
+				"## T-901 — Superseded duplicate of T-900\n\n**Superseded by:** T-900\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := artifact.RenderBody(res.Proposed)
+	if strings.Contains(body, "Superseded") || strings.Count(body, "### T-") != 2 {
+		t.Fatalf("superseded tombstone reached the proposal:\n%s", body)
+	}
+}
+
 func TestDependencyPlacementMovesALaterExistingClosureBeforeTheEarliestConsumer(t *testing.T) {
 	plan := &artifact.Document{Sections: []artifact.Section{
 		{ID: "M-001", Title: "Core", Children: []artifact.Section{

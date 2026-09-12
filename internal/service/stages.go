@@ -863,6 +863,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			planSeed = acceptedPlanSeed(projectRoot)
 		}
 	}
+	var mutablePlanTasks map[string]bool
+	if req.Stage == "plan" && strings.TrimSpace(req.Extend) != "" {
+		if currentPlan, loadErr := artifact.Load(projectRoot, artifact.KindPlan); loadErr == nil {
+			mutablePlanTasks = s.mutablePlanTasksForAmendment(ctx, rs.run.ProjectID, currentPlan)
+		}
+	}
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot:         projectRoot,
 		Stage:               stage.Name(req.Stage),
@@ -923,6 +929,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			return rs.writer.AppendEvent("survey_inventory", detail)
 		},
 		Extend:             req.Extend,
+		MutablePlanTasks:   mutablePlanTasks,
 		SplitTask:          req.SplitTask,
 		Images:             images,
 		ReferenceContracts: referenceContracts,
@@ -1065,19 +1072,13 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			// stable identities and appended the same additions again (Neocapture
 			// corrida 13: 19 sections became 36). The materialized result is the
 			// exact candidate the final reviewer saw.
-			if script.FragmentPrefix != "" || res.CandidateDigest != "" {
-				return res.Text, nil
+			materialized, kept := stageResultText(req, res)
+			if len(kept) > 0 {
+				rs.writer.AppendEvent("sections_folded", map[string]interface{}{
+					"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
+				})
 			}
-			if texts := res.RoleTexts[string(config.RoleArchitect)]; len(texts) > 1 {
-				folded, kept := stage.FoldPasses(texts, stage.Name(req.Stage).Kind())
-				if len(kept) > 0 {
-					rs.writer.AppendEvent("sections_folded", map[string]interface{}{
-						"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
-					})
-					return folded, nil
-				}
-			}
-			return res.Text, nil
+			return materialized, nil
 		},
 	})
 
@@ -1215,7 +1216,23 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		})
 	}
 	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
-	proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	if req.Stage == "plan" && strings.TrimSpace(req.Extend) != "" {
+		if approved, loadErr := artifact.Load(projectRoot, artifact.KindPlan); loadErr == nil {
+			blockers, notices := strategy.ProposalStructureFindingsForAmendment(approved, result.Proposed)
+			proposalBlockers = append(proposalBlockers, blockers...)
+			if len(notices) > 0 {
+				rs.run.PendingData["proposal_structure_notices"] = notices
+				rs.writer.AppendEvent("proposal_structure_notices", map[string]interface{}{
+					"notices": notices,
+					"detail":  "inherited structure debt remains visible but does not block this amendment",
+				})
+			}
+		} else {
+			proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+		}
+	} else {
+		proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	}
 	if len(result.CompositionMechanical) > 0 {
 		proposalBlockers = append(proposalBlockers, result.CompositionMechanical...)
 		rs.run.PendingData["composition_mechanical_findings"] = result.CompositionMechanical
@@ -1294,6 +1311,24 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"kind": "gate", "verdict": rs.run.Verdict, "artifact": string(result.Kind),
 	})
 	rs.writer.WriteState()
+}
+
+// stageResultText applies the response contract at the service boundary. A
+// normal document revision may emit only changed sections, so earlier passes
+// are folded. A plan extension is different: every architect reply is the
+// complete amendment fragment for that round. Folding those replies made
+// omitted duplicates and tombstones immortal across council rounds (B-393).
+func stageResultText(req StageRequest, res *strategy.ExecuteResult) (string, []string) {
+	if res == nil {
+		return "", nil
+	}
+	if (req.Stage == "plan" && strings.TrimSpace(req.Extend) != "") || res.CandidateDigest != "" {
+		return res.Text, nil
+	}
+	if texts := res.RoleTexts[string(config.RoleArchitect)]; len(texts) > 1 {
+		return stage.FoldPasses(texts, stage.Name(req.Stage).Kind())
+	}
+	return res.Text, nil
 }
 
 // sectionsBodySize totals the text a document actually carries.
@@ -2411,6 +2446,28 @@ func acceptedHistoryRewriteCount(runs []*runlog.Run, current, proposed *artifact
 		}
 	}
 	return count
+}
+
+// mutablePlanTasksForAmendment grants the narrow field-replacement form only
+// to work that is safely dormant. A task with accepted history or an active /
+// review run keeps its accepted lane immutable; a never-run or failed task may
+// be rewired so a newly introduced prerequisite can become its producer.
+func (s *Service) mutablePlanTasksForAmendment(ctx context.Context, projectID string, plan *artifact.Document) map[string]bool {
+	mutable := map[string]bool{}
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
+	if err != nil {
+		return mutable
+	}
+	runs = runsForCurrentTaskBodies(runs, taskBodyHashes(plan))
+	status, _, _, _, _, pinned := deriveTaskRunStateWaiting(runs)
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if !pinned[task.ID] && (status[task.ID] == "" || status[task.ID] == "blocked") {
+				mutable[strings.ToUpper(task.ID)] = true
+			}
+		}
+	}
+	return mutable
 }
 
 // taskBodyHashes carries both accepted spellings per task: the normalized

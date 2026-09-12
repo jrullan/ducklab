@@ -15,6 +15,7 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/strategy"
 )
 
 func projectWithDocs(t *testing.T, s *Service, docs map[artifact.Kind]string) (string, string) {
@@ -25,6 +26,21 @@ func projectWithDocs(t *testing.T, s *Service, docs map[artifact.Kind]string) (s
 		os.WriteFile(artifact.Path(dir, kind), []byte(body), 0o644)
 	}
 	return id, dir
+}
+
+func TestPlanExtendUsesLatestArchitectFragmentAsWholeAmendment(t *testing.T) {
+	round1 := "## T-900 — Real task\n\nDo it.\n\n## T-901 — Superseded duplicate\n\nOld."
+	round2 := "## T-900 — Real task\n\nDo it correctly."
+	res := &strategy.ExecuteResult{
+		Text: round2,
+		RoleTexts: map[string][]string{
+			string(config.RoleArchitect): {round1, round2},
+		},
+	}
+	got, kept := stageResultText(StageRequest{Stage: "plan", Extend: "add one task"}, res)
+	if got != round2 || len(kept) != 0 || strings.Contains(got, "T-901") {
+		t.Fatalf("plan amendment rounds were accumulated: text=%q kept=%v", got, kept)
+	}
 }
 
 func TestSemanticDuplicateSpecSectionsAreDeterministicBlockers(t *testing.T) {
@@ -189,6 +205,34 @@ func TestTaskStatusComesFromRunsNotTheDocument(t *testing.T) {
 	}
 	if tasks[1].Status != "todo" {
 		t.Errorf("T-002 status = %q", tasks[1].Status)
+	}
+}
+
+func TestPlanAmendmentFieldAuthorityExcludesAcceptedAndActiveTasks(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-001", Children: []artifact.Section{
+		{ID: "T-001", Body: "never run"},
+		{ID: "T-002", Body: "failed before"},
+		{ID: "T-003", Body: "accepted"},
+		{ID: "T-004", Body: "active"},
+		{ID: "T-005", Body: "accepted red test"},
+	}}}}
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.runs["failed"] = &runState{run: &runlog.Run{ID: "failed", ProjectID: "p", TaskID: "T-002", Stage: "build", Status: "failed", StartedAt: now}}
+	s.runs["accepted"] = &runState{run: &runlog.Run{ID: "accepted", ProjectID: "p", TaskID: "T-003", Stage: "build", Status: "done", Accepted: true, StartedAt: now}}
+	s.runs["active"] = &runState{run: &runlog.Run{ID: "active", ProjectID: "p", TaskID: "T-004", Stage: "build", Status: "running", StartedAt: now}}
+	s.runs["red-test"] = &runState{run: &runlog.Run{ID: "red-test", ProjectID: "p", TaskID: "T-005", Stage: "test", Status: "done", Accepted: true, StartedAt: now}}
+
+	got := s.mutablePlanTasksForAmendment(context.Background(), "p", plan)
+	for _, id := range []string{"T-001", "T-002"} {
+		if !got[id] {
+			t.Errorf("%s should be mutable: %v", id, got)
+		}
+	}
+	for _, id := range []string{"T-003", "T-004", "T-005"} {
+		if got[id] {
+			t.Errorf("%s should remain immutable: %v", id, got)
+		}
 	}
 }
 
