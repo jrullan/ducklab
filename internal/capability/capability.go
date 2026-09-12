@@ -80,10 +80,25 @@ type GateObservation struct {
 	ProjectRoot string
 	Diff        string
 	Output      string
+	// Policies are the project-selected enforcement levels frozen into the
+	// run. A gate observer must not silently hard-code a required finding when
+	// every other capability check can be downgraded or disabled.
+	Policies map[string]string
 	// BuildGraphFiles are established source artifacts from the accepted
 	// dependency closure. A build adapter checks them in addition to new files
 	// from the candidate diff.
 	BuildGraphFiles []string
+}
+
+// AcceptanceProbeObservation lets a stack provider validate the executable
+// names embedded in human-approved probes without teaching the core about
+// Meson, Cargo, pytest, or any future runner. WritableFiles is the task's
+// Produces/Modifies lane, not the whole project.
+type AcceptanceProbeObservation struct {
+	ProjectRoot   string
+	Probes        []string
+	WritableFiles []string
+	Policies      map[string]string
 }
 
 type GateFinding struct {
@@ -162,6 +177,11 @@ type PlanInspector interface {
 type GateObserver interface {
 	Provider
 	ObserveGate(GateObservation) []GateFinding
+}
+
+type AcceptanceProbeInspector interface {
+	Provider
+	InspectAcceptanceProbes(AcceptanceProbeObservation) []Inspection
 }
 
 // ReviewFindingInspector rejects stack-invalid remedies before a reviewer
@@ -306,6 +326,27 @@ func (r *Registry) ObserveGate(observation GateObservation, capabilityIDs []stri
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Capability == findings[j].Capability {
 			return findings[i].Kind < findings[j].Kind
+		}
+		return findings[i].Capability < findings[j].Capability
+	})
+	return findings
+}
+
+// InspectAcceptanceProbes asks only capabilities frozen onto the run to
+// validate their own runner targets. It is deterministic and side-effect
+// free, so it can run both at plan composition and immediately before a gate.
+func (r *Registry) InspectAcceptanceProbes(observation AcceptanceProbeObservation, capabilityIDs []string) []Inspection {
+	var findings []Inspection
+	for _, id := range capabilityIDs {
+		inspector, ok := r.providers[id].(AcceptanceProbeInspector)
+		if !ok {
+			continue
+		}
+		findings = append(findings, inspector.InspectAcceptanceProbes(observation)...)
+	}
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].Capability == findings[j].Capability {
+			return findings[i].Name < findings[j].Name
 		}
 		return findings[i].Capability < findings[j].Capability
 	})

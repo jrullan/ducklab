@@ -194,16 +194,50 @@ func TestVerifyRunExecutesAcceptanceProbesInOrder(t *testing.T) {
 	ectx := &ExecContext{
 		ProjectRoot:          root,
 		TaskVerification:     "true",
-		TaskAcceptanceProbes: []string{"printf slice-one", "printf slice-two; exit 7", "printf must-not-run"},
-		Verify:               config.Verify{Mode: "custom", Custom: "printf project-must-not-run", TimeoutS: 30},
+		TaskAcceptanceProbes: []string{"test -f build/ready && printf slice-one", "printf slice-two; exit 7", "printf probe-three-marker > probe-three"},
+		Verify:               config.Verify{Mode: "custom", Custom: "mkdir -p build && touch build/ready", TimeoutS: 30},
 	}
 	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.IsError || !strings.Contains(res.Content, "acceptance probe 2") ||
-		!strings.Contains(res.Content, "slice-two") || strings.Contains(res.Content, "must-not-run") {
+		!strings.Contains(res.Content, "slice-two") {
 		t.Fatalf("acceptance probes did not block at the first red slice:\n%s", res.Content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "build", "ready")); err != nil {
+		t.Fatalf("project gate did not prepare the build before probes: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "probe-three")); !os.IsNotExist(err) {
+		t.Fatalf("acceptance probe after first red slice ran: %v", err)
+	}
+}
+
+func TestVerifyRunRejectsImpossibleMesonAcceptanceProbeBeforeCommands(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "meson.build"), []byte("project('fixture', 'c')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx := &ExecContext{
+		ProjectRoot:          root,
+		TaskVerification:     "printf task-ran > task-ran",
+		TaskAcceptanceProbes: []string{"meson test -C build nonexistent_target"},
+		TaskWritableFiles:    []string{"file:src/widget.c"},
+		ActiveCapabilities:   []string{"meson"},
+		Verify:               config.Verify{Mode: "custom", Custom: "printf project-ran > project-ran", TimeoutS: 30},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "acceptance probe contract") ||
+		!strings.Contains(res.Content, "nonexistent_target") || !strings.Contains(res.Content, "meson.build") {
+		t.Fatalf("impossible Meson probe did not report its actual contract defect:\n%s", res.Content)
+	}
+	for _, marker := range []string{"task-ran", "project-ran"} {
+		if _, err := os.Stat(filepath.Join(root, marker)); !os.IsNotExist(err) {
+			t.Fatalf("%s command ran despite impossible acceptance probe: %v", marker, err)
+		}
 	}
 }
 
