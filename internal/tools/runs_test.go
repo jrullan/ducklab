@@ -111,3 +111,44 @@ func TestRunSummaryPromptCutKeepsAVerdictWithItsFindings(t *testing.T) {
 		t.Fatalf("timeline entries = %#v, want verdict and findings as one entry", got)
 	}
 }
+
+func TestRunTimelineSummarizesToolProtocolInsteadOfQuotingItAsSpeech(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		tool    string
+	}{
+		{
+			name:    "dsml",
+			content: `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="fs_read"><｜｜DSML｜｜ parameter name="path">src/main.go</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`,
+			tool:    "fs_read",
+		},
+		{
+			name:    "xml",
+			content: `<tool_call>{"name":"verify_run","arguments":{}}</tool_call>`,
+			tool:    "verify_run",
+		},
+		{
+			name:    "ducklab dialect",
+			content: "```ducklab\n{\"tool\":\"git_diff\",\"args\":{}}\n```",
+			tool:    "git_diff",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := runTimelineEntry("message", map[string]interface{}{
+				"round":   1,
+				"role":    "reviewer",
+				"content": tc.content,
+			})
+			if strings.Contains(got, "said:") || strings.Contains(got, tc.content) {
+				t.Fatalf("tool protocol was quoted as speech: %q", got)
+			}
+			for _, want := range []string{"reviewer emitted tool protocol instead of prose", tc.tool} {
+				if !strings.Contains(got, want) {
+					t.Errorf("summary lost %q: %q", want, got)
+				}
+			}
+		})
+	}
+}

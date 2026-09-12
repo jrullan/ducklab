@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -271,7 +272,14 @@ func runTimelineEntry(eventType string, d map[string]interface{}) string {
 				}
 			}
 		} else if c, ok := d["content"].(string); ok {
-			fmt.Fprintf(&b, "- R%v %v said: %s", d["round"], d["role"], truncate(compactLine(c), 300))
+			if protocol, tools := summarizeToolProtocol(c); protocol {
+				fmt.Fprintf(&b, "- R%v %v emitted tool protocol instead of prose", d["round"], d["role"])
+				if len(tools) > 0 {
+					fmt.Fprintf(&b, " (tools: %s)", strings.Join(tools, ", "))
+				}
+			} else {
+				fmt.Fprintf(&b, "- R%v %v said: %s", d["round"], d["role"], truncate(compactLine(c), 300))
+			}
 		}
 	case "round_gate":
 		fmt.Fprintf(&b, "- R%v gate: %v", d["round"], d["result"])
@@ -303,6 +311,34 @@ func runTimelineEntry(eventType string, d map[string]interface{}) string {
 		fmt.Fprintf(&b, "- ended: %v", d["verdict"])
 	}
 	return b.String()
+}
+
+var toolProtocolName = regexp.MustCompile(`(?i)(?:invoke\s+name=|"(?:tool|name)"\s*:)\s*["']([^"']+)["']`)
+
+func summarizeToolProtocol(content string) (bool, []string) {
+	trimmed := strings.TrimSpace(content)
+	lower := strings.ToLower(trimmed)
+	protocol := strings.HasPrefix(trimmed, "<｜｜DSML｜｜") ||
+		strings.HasPrefix(lower, "<tool_call") ||
+		strings.HasPrefix(lower, "<function_calls") ||
+		strings.HasPrefix(lower, "```ducklab")
+	if !protocol {
+		return false, nil
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, match := range toolProtocolName.FindAllStringSubmatch(trimmed, -1) {
+		name := strings.TrimSpace(match[1])
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+		if len(names) == 4 {
+			break
+		}
+	}
+	return true, names
 }
 
 func compactLine(s string) string { return strings.Join(strings.Fields(s), " ") }
