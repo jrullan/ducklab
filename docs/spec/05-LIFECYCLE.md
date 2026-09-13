@@ -169,7 +169,11 @@ is refused without starting another turn. Each live meter, including
 wallclock, exposes its own one-way `no cap` control. Lifting one cap leaves all
 other caps in force, records the action, and makes `resume` available in the
 returned run state. This applies after an engine restart as well as within the
-process that created the run.
+process that created the run. A wallclock lift also removes the live deadline
+from provider calls already in flight: contexts derived from the run budget
+observe the lift as a broadcast, including concurrent split/tournament turns.
+If the cap actually fires first, the context retains the ordinary
+`context deadline exceeded` identity and the run pauses on the wallclock cap.
 
 ---
 

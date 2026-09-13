@@ -179,13 +179,18 @@ type Tracker struct {
 	// call, and a human may lift one WHILE the run is going — the whole
 	// point of lifting is that the run is alive to save.
 	mu sync.Mutex
+	// wallclockChanged is a broadcast generation. Closing it wakes every
+	// in-flight Context; replacing it arms future contexts. A single value on a
+	// channel would wake only one turn in split/tournament mode.
+	wallclockChanged chan struct{}
 }
 
 // NewTracker creates a new budget tracker.
 func NewTracker(b *Budget) *Tracker {
 	return &Tracker{
-		Budget: b,
-		Spend:  NewSpend(),
+		Budget:           b,
+		Spend:            NewSpend(),
+		wallclockChanged: make(chan struct{}),
 	}
 }
 
@@ -229,18 +234,121 @@ func (t *Tracker) CheckWallclock() (string, bool) {
 // generation cross the cap and continue until an unrelated validator failed.
 func (t *Tracker) Context(parent context.Context) (context.Context, context.CancelFunc) {
 	t.Spend.UpdateWallclock()
-	t.mu.Lock()
-	maxWallclock := t.Budget.MaxWallclockS
-	t.mu.Unlock()
+	maxWallclock, _ := t.wallclockState()
 	if maxWallclock <= 0 {
 		return context.WithCancel(parent)
 	}
-	remainingSeconds := float64(maxWallclock) - t.Spend.Snapshot().WallclockS
-	remaining := time.Duration(remainingSeconds * float64(time.Second))
-	if remaining <= 0 {
-		remaining = time.Nanosecond
+	ctx := &wallclockContext{parent: parent, tracker: t, done: make(chan struct{})}
+	go ctx.watch()
+	return ctx, func() { ctx.finish(context.Canceled) }
+}
+
+func (t *Tracker) wallclockState() (int, <-chan struct{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.wallclockChanged == nil {
+		t.wallclockChanged = make(chan struct{})
 	}
-	return context.WithTimeout(parent, remaining)
+	return t.Budget.MaxWallclockS, t.wallclockChanged
+}
+
+// wallclockContext is a deadline whose budget boundary may disappear while a
+// provider call is in flight. context.WithTimeout cannot be extended; this
+// context re-arms from the tracker's current generation and retains the normal
+// DeadlineExceeded identity when the cap actually fires.
+type wallclockContext struct {
+	parent  context.Context
+	tracker *Tracker
+	done    chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	err     error
+}
+
+func (c *wallclockContext) Deadline() (time.Time, bool) {
+	maxWallclock, _ := c.tracker.wallclockState()
+	var deadline time.Time
+	hasDeadline := false
+	if maxWallclock > 0 {
+		spent := c.tracker.Spend.Snapshot().WallclockS
+		deadline = time.Now().Add(time.Duration((float64(maxWallclock) - spent) * float64(time.Second)))
+		hasDeadline = true
+	}
+	if parentDeadline, ok := c.parent.Deadline(); ok && (!hasDeadline || parentDeadline.Before(deadline)) {
+		return parentDeadline, true
+	}
+	return deadline, hasDeadline
+}
+
+func (c *wallclockContext) Done() <-chan struct{} { return c.done }
+
+func (c *wallclockContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *wallclockContext) Value(key interface{}) interface{} { return c.parent.Value(key) }
+
+func (c *wallclockContext) finish(err error) {
+	c.once.Do(func() {
+		c.mu.Lock()
+		c.err = err
+		c.mu.Unlock()
+		close(c.done)
+	})
+}
+
+func (c *wallclockContext) watch() {
+	for {
+		c.tracker.Spend.UpdateWallclock()
+		maxWallclock, changed := c.tracker.wallclockState()
+		if maxWallclock <= 0 {
+			select {
+			case <-c.parent.Done():
+				c.finish(c.parent.Err())
+			case <-c.done:
+			}
+			return
+		}
+		spent := c.tracker.Spend.Snapshot().WallclockS
+		remaining := time.Duration((float64(maxWallclock) - spent) * float64(time.Second))
+		if remaining <= 0 {
+			// A lift racing the timer wins if it reached the tracker first.
+			if latest, _ := c.tracker.wallclockState(); latest <= 0 {
+				continue
+			}
+			c.finish(context.DeadlineExceeded)
+			return
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-c.parent.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			c.finish(c.parent.Err())
+			return
+		case <-c.done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-changed:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			continue
+		case <-timer.C:
+			// Re-read after the timer: a simultaneous lift must not lose merely
+			// because select chose the ready timer branch.
+			if latest, _ := c.tracker.wallclockState(); latest <= 0 {
+				continue
+			}
+			c.finish(context.DeadlineExceeded)
+			return
+		}
+	}
 }
 
 // WouldExceed checks if a proposed call would exceed the budget.
@@ -259,7 +367,6 @@ func (t *Tracker) WouldExceed(estimatedPromptTokens, maxOutputTokens int, inputP
 // per-cap instead of a single kill switch.
 func (t *Tracker) Lift(kind string) (was float64, err error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	switch kind {
 	case "tokens":
 		was, t.Budget.MaxTokens = float64(t.Budget.MaxTokens), 0
@@ -269,9 +376,16 @@ func (t *Tracker) Lift(kind string) (was float64, err error) {
 		was, t.Budget.MaxTurns = float64(t.Budget.MaxTurns), 0
 	case "wallclock":
 		was, t.Budget.MaxWallclockS = float64(t.Budget.MaxWallclockS), 0
+		if t.wallclockChanged == nil {
+			t.wallclockChanged = make(chan struct{})
+		}
+		close(t.wallclockChanged)
+		t.wallclockChanged = make(chan struct{})
 	default:
+		t.mu.Unlock()
 		return 0, fmt.Errorf("invalid kind %q: no budget cap named %q — one of tokens, usd, turns, wallclock", kind, kind)
 	}
+	t.mu.Unlock()
 	return was, nil
 }
 
