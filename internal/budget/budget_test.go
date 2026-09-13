@@ -162,6 +162,42 @@ func TestWallclockContextCancelsAnInflightCall(t *testing.T) {
 	}
 }
 
+func TestWallclockContextSurvivesALiveLift(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 1})
+	tracker.Spend.RestoreWallclock(0.8)
+	ctx, cancel := tracker.Context(context.Background())
+	defer cancel()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := tracker.Lift("wallclock"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatalf("lifted wallclock still cancelled the in-flight context: %v", ctx.Err())
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestWallclockLiftBroadcastsToConcurrentContexts(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 1})
+	tracker.Spend.RestoreWallclock(0.8)
+	first, cancelFirst := tracker.Context(context.Background())
+	defer cancelFirst()
+	second, cancelSecond := tracker.Context(context.Background())
+	defer cancelSecond()
+	if _, err := tracker.Lift("wallclock"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	for name, ctx := range map[string]context.Context{"first": first, "second": second} {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("%s concurrent context was not reached by the lift: %v", name, ctx.Err())
+		default:
+		}
+	}
+}
+
 // Lifting is per-cap on purpose: the person removes the ceiling that is
 // binding, and the others keep guarding — lifting tokens leaves the dollar
 // cap standing. Zero already means "no cap" to Exceeded, so a lifted cap is
