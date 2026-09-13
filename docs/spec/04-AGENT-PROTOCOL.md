@@ -296,6 +296,14 @@ Handling of `finish_reason`:
 | `length` / `max_tokens` | **not** a valid answer. Retry once with a message instructing the model to be terse; then fail the turn with `ErrTruncated`. Never parse a truncated response. |
 | `content_filter` | fail the turn with a clear message |
 
+Before a native tool call is appended to conversation history, every
+`function.arguments` value must be valid JSON. An invalid call is never
+executed or replayed. If it consumed the configured output allowance (even
+when the endpoint reports `tool_calls` instead of `length`), Ducklab records a
+`tool_call_truncated` event and continues with a user-visible recovery message
+that asks for a smaller call or `fs_patch`. Other malformed argument objects
+receive the same non-replay treatment and a valid-JSON repair message.
+
 ### 5.4 Dialect B — fenced text protocol
 
 For local models that cannot emit function calls. The system prompt appends:
@@ -357,7 +365,13 @@ provider supports:
    span from the response content before parsing.
 
 Step 3 always runs regardless, as a safety net. A response that is *only* a
-thinking block is treated as empty and retried once.
+thinking block is treated as empty and retried with an explicit instruction to
+place the answer outside the thinking block. Before classifying it as empty,
+Ducklab checks whether the reasoning channel contains one complete, valid and
+authorized Dialect B tool call. A fenced call, or a bare JSON object containing
+only that call, is executed and recorded as
+`tool_call_salvaged_from_reasoning`; ordinary reasoning prose is never made
+executable or replayed as conversation content.
 
 ---
 

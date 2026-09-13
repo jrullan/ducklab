@@ -194,6 +194,10 @@ type Loop struct {
 	// which a person watching an idle run had every reason to abort healthy
 	// work, and did, three times (T-075).
 	OnRetry func(turn *Turn, attempt int, err error)
+	// OnRecovery records a malformed-but-recoverable model response. These are
+	// neither provider failures nor completed tool calls; their own events keep
+	// salvaged actions and rejected arguments visible without replaying them.
+	OnRecovery func(turn *Turn, kind string, data map[string]interface{})
 	// CapLift, if set, is consulted before every call: true removes this
 	// turn's call cap for the rest of the reply. It exists so the person
 	// watching a run circle toward its cap can lift it IN FLIGHT — a
@@ -400,6 +404,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		var start time.Time
 		var calc provider.CostCalculator
 		var cost float64
+		var salvagedReasoningCall *TextToolCall
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
@@ -486,13 +491,27 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				c.Message.Content = answer
 			}
 
+			// A local reasoning parser can swallow a complete action when the
+			// model omits </think>. Recover an unambiguous, valid call before the
+			// thought-only guard throws it away (B-403).
+			salvagedReasoningCall = nil
+			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 {
+				salvagedReasoningCall = parseReasoningToolCall(c.Message.Reasoning)
+				if salvagedReasoningCall != nil && loop.OnRecovery != nil {
+					loop.OnRecovery(turn, "tool_call_salvaged_from_reasoning", map[string]interface{}{
+						"tool":           salvagedReasoningCall.Name,
+						"reasoning_head": firstChars(c.Message.Reasoning, 240),
+					})
+				}
+			}
+
 			// A response with tokens spent and nothing to show. Two different
 			// faults share this shape: a reply budget genuinely consumed by
 			// thinking (thousands of tokens — retrying buys nothing), and a
 			// stochastic empty reply (a handful of tokens — retrying is the
 			// whole fix). Each gets its own advice, and neither escapes the
 			// record.
-			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 &&
+			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 && salvagedReasoningCall == nil &&
 				resp.Usage.CompletionTokens > 0 {
 				if loop.RunWriter != nil {
 					loop.RunWriter.AppendLLM(&LLMCallRecord{
@@ -527,11 +546,16 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 						ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens)
 				}
 				if attempt < thoughtOnlyAttempts {
+					req.Messages = append(append([]provider.Message{}, req.Messages...), provider.Message{
+						Role: "user",
+						Content: fmt.Sprintf("Attempt %d had no visible answer or tool call. ", attempt) +
+							"Put the tool call or final message outside the thinking block.",
+					})
 					continue
 				}
 				return outcome, fmt.Errorf("%w: %s returned an empty answer with only %d hidden reasoning tokens, "+
-					"%d times in a row — the endpoint is misbehaving; relaunch the run, or disable thinking for this duckling",
-					ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens, attempt)
+					"%d times in a row; the last reasoning began %q. Relaunch the run, or disable thinking for this duckling",
+					ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens, attempt, firstChars(strings.TrimSpace(c.Message.Reasoning), 160))
 			}
 			break
 		}
@@ -541,6 +565,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			outcome.Reasoning = joinReasoning(outcome.Reasoning, choice.Message.Reasoning)
 		}
 		finishReason := choice.FinishReason
+		invalidNativeCall, invalidTool := invalidNativeToolCall(choice.Message.ToolCalls)
 
 		// Log the LLM call
 		if loop.RunWriter != nil {
@@ -582,6 +607,34 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			return outcome, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
 		}
 
+		// Never replay malformed native arguments. vLLM validates every prior
+		// tool call in the next request; one unterminated JSON string otherwise
+		// poisons the whole conversation permanently. A malformed call that used
+		// the full output allowance is classified as truncation and steered
+		// toward a smaller patch (B-405).
+		if invalidNativeCall {
+			cap := 0
+			if req.MaxTokens != nil {
+				cap = *req.MaxTokens
+			}
+			truncated := provider.IsLength(finishReason) || cap > 0 && resp.Usage.CompletionTokens >= cap
+			kind := "malformed_tool_call_recovered"
+			nudge := fmt.Sprintf("Your %s tool call had invalid JSON arguments and was not executed or added to history. Resend one valid, smaller tool call.", invalidTool)
+			if truncated {
+				kind = "tool_call_truncated"
+				nudge = fmt.Sprintf("Your %s tool call was cut at max_tokens=%d and was not executed or added to history. Use fs_patch or split the edit into smaller calls; do not resend the full file.", invalidTool, cap)
+			}
+			if loop.OnRecovery != nil {
+				loop.OnRecovery(turn, kind, map[string]interface{}{
+					"tool":              invalidTool,
+					"max_tokens":        cap,
+					"completion_tokens": resp.Usage.CompletionTokens,
+				})
+			}
+			conversation = append(conversation, provider.Message{Role: "user", Content: nudge})
+			continue
+		}
+
 		// Handle truncation
 		//
 		// The nudge used to be appended to `conversation` and then the *same*
@@ -594,7 +647,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// implement this now… actually, I just realized…" a dozen times over —
 		// filled its output budget, got a retry that said nothing, filled it
 		// again, and the run was marked FAILED.
-		if provider.IsLength(finishReason) {
+		if salvagedReasoningCall == nil && provider.IsLength(finishReason) {
 			// A document turn that hit the cap is not deliberating — the
 			// document does not fit. "Be brief" cannot shrink a 36-section
 			// spec into the same budget; the retry burned a full duplicate
@@ -637,6 +690,29 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			// The retried answer is what the turn continues from, so the
 			// conversation must carry the nudge that produced it.
 			conversation = retry.Messages
+		}
+
+		if salvagedReasoningCall != nil {
+			result, terr := executeTextToolCall(ctx, loop, ectx, salvagedReasoningCall, turn)
+			if errors.Is(terr, tools.ErrHumanNeeded) {
+				outcome.Pending = ectx.Pending
+				return outcome, terr
+			}
+			conversation = append(conversation, provider.Message{
+				Role: "assistant", Content: fmt.Sprintf("[Ducklab recovered a %s tool call from the reasoning channel.]", salvagedReasoningCall.Name),
+			})
+			conversation = append(conversation, provider.Message{
+				Role: "user", Content: fmt.Sprintf("Tool result for %s:\n%s", salvagedReasoningCall.Name, result.Content),
+			})
+			rec := ToolCallRecord{
+				Name: salvagedReasoningCall.Name, Args: salvagedReasoningCall.Args,
+				Result: result, Digest: tools.Digest(salvagedReasoningCall.Args),
+			}
+			outcome.ToolCalls = append(outcome.ToolCalls, rec)
+			if loop.OnToolCall != nil {
+				loop.OnToolCall(turn, string(loop.Duckling.ID), &rec)
+			}
+			continue
 		}
 
 		// Handle content filter
@@ -1895,6 +1971,33 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 	remaining = strings.TrimSpace(remaining)
 
 	return &TextToolCall{Name: call.Tool, Args: newArgs}, remaining
+}
+
+// parseReasoningToolCall accepts the normal fenced dialect and the one
+// unambiguous bare-object shape emitted by reasoning parsers that swallowed
+// the closing think marker. Ordinary reasoning prose remains non-executable.
+func parseReasoningToolCall(reasoning string) *TextToolCall {
+	if call, _ := parseTextToolCall(reasoning); call != nil && call.ParseError == "" {
+		return call
+	}
+	raw, err := extractJSONObject(reasoning)
+	if err != nil || strings.TrimSpace(raw) != strings.TrimSpace(reasoning) {
+		return nil
+	}
+	call, _ := parseTextToolCall("```ducklab\n" + raw + "\n```")
+	if call == nil || call.ParseError != "" {
+		return nil
+	}
+	return call
+}
+
+func invalidNativeToolCall(calls []provider.ToolCall) (bool, string) {
+	for _, call := range calls {
+		if !json.Valid([]byte(call.Function.Arguments)) {
+			return true, call.Function.Name
+		}
+	}
+	return false, ""
 }
 
 // executeToolCall executes a native tool call.
