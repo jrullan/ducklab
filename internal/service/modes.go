@@ -74,6 +74,19 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnToolStart = c.onToolStart
 	l.OnRepetitionLoop = c.onRepetitionLoop
 	l.OnRetry = c.onRetry
+	if writer, ok := c.writer.(*runLogAdapter); ok && writer != nil && writer.w != nil {
+		l.OnRecovery = func(turn *agent.Turn, kind string, data map[string]interface{}) {
+			event := make(map[string]interface{}, len(data)+4)
+			for key, value := range data {
+				event[key] = value
+			}
+			event["round"] = turn.Round
+			event["turn"] = turn.Index
+			event["role"] = string(turn.Role)
+			event["duckling"] = string(id)
+			writer.w.AppendEvent(kind, event)
+		}
+	}
 	l.CapLift = c.capLift
 	l.OnCapNear = c.onCapNear
 	l.OnCall = c.onCall
