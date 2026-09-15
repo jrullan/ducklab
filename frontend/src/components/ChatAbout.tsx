@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Duckling, EngineClient } from "../api/client";
+import type { DiagnosticDefaultsView, Duckling, EngineClient } from "../api/client";
 import { useRuns } from "../store/runs";
 
 /** A conversation that ended, however it ended, is a record, not a door. */
@@ -68,7 +68,21 @@ export function ChatAbout({
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<{ name: string; data: string }[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticDefaultsView | null>(null);
+  const [inspectHarness, setInspectHarness] = useState(false);
+  const [bugTarget, setBugTarget] = useState<"subject" | "harness">("subject");
   const imageInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open || typeof client.diagnosticDefaults !== "function") return;
+    let cancelled = false;
+    void client.diagnosticDefaults().then((value) => {
+      if (!cancelled) setDiagnostics(value);
+    }).catch(() => {
+      if (!cancelled) setDiagnostics(null);
+    });
+    return () => { cancelled = true; };
+  }, [client, open]);
+  const harnessAvailable = !!diagnostics?.available && !!diagnostics.harness_project_id && diagnostics.harness_project_id !== projectId;
   // The roster arrives after the rail. Fill an untouched picker when it does,
   // but never replace a person's free choice.
   useEffect(() => {
@@ -132,6 +146,45 @@ export function ChatAbout({
         rows={2}
         className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
       />
+      {harnessAvailable ? (
+        <div className="rounded border border-hairline bg-surface2 p-2 text-xs" data-testid="chat-diagnostic-scope">
+          <label className="flex items-center gap-2 text-ink-secondary">
+            <input
+              type="checkbox"
+              data-testid="chat-inspect-harness"
+              checked={inspectHarness}
+              onChange={(e) => {
+                setInspectHarness(e.target.checked);
+                if (!e.target.checked) setBugTarget("subject");
+              }}
+            />
+            Also inspect {diagnostics?.harness_project_name || diagnostics?.harness_project_id}
+          </label>
+          <p className="mt-1 text-ink-muted">Adds its source, runs and bug board as a named read-only scope.</p>
+          {inspectHarness && (
+            <label className="mt-2 flex items-center gap-2 text-ink-muted">
+              File bugs requested in this chat in
+              <select
+                data-testid="chat-bug-target"
+                value={bugTarget}
+                onChange={(e) => setBugTarget(e.target.value as "subject" | "harness")}
+                className="rounded border border-hairline bg-surface px-1 py-0.5 text-ink-secondary"
+              >
+                <option value="subject">this project</option>
+                <option value="harness">{diagnostics?.harness_project_name || "Ducklab"}</option>
+              </select>
+            </label>
+          )}
+        </div>
+      ) : diagnostics?.harness_project_id && diagnostics.harness_project_id !== projectId ? (
+        <p className="text-xs text-warning" data-testid="chat-diagnostic-unavailable">
+          Configured harness project {diagnostics.harness_project_name || diagnostics.harness_project_id} is unavailable. Repair its registered path or choose another project in Settings → Engine.
+        </p>
+      ) : diagnostics && diagnostics.harness_project_id !== projectId ? (
+        <p className="text-xs text-ink-muted" data-testid="chat-diagnostic-unavailable">
+          Cross-project diagnosis is not configured. Choose a harness project in Settings → Engine.
+        </p>
+      ) : null}
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1" data-testid="chat-image-chips">
           {images.map((image, index) => (
@@ -163,7 +216,15 @@ export function ChatAbout({
             setBusy(true);
             setError(null);
             void client
-              .chatStart(projectId, { duckling, aboutKind, aboutId, message: message.trim(), images: images.map((image) => image.data) })
+              .chatStart(projectId, {
+                duckling,
+                aboutKind,
+                aboutId,
+                message: message.trim(),
+                images: images.map((image) => image.data),
+                diagnosticScope: inspectHarness ? "subject+harness" : "subject",
+                bugTarget: inspectHarness ? bugTarget : "subject",
+              })
               .then((r) => {
                 setImages([]);
                 location.hash = `#/runs/${r.id}`;

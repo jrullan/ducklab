@@ -24,18 +24,20 @@ func (t *FSList) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSList) Description() string {
-	return "List files and directories. Respects .gitignore."
+	return "List files and directories. Respects .gitignore. Use scope=harness only when the consultant dossier says that scope is available."
 }
 
 // Schema returns the argument schema.
 func (t *FSList) Schema() interface{} {
 	return NewSchema().
 		AddString("path", "Directory path (default: project root)", false).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddInt("depth", "Maximum depth (default: 2)", false)
 }
 
 type fsListArgs struct {
 	Path  string `json:"path"`
+	Scope string `json:"scope"`
 	Depth int    `json:"depth"`
 }
 
@@ -51,11 +53,15 @@ func (t *FSList) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 	if a.Depth <= 0 {
 		a.Depth = 2
 	}
-	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	absPath, err := PathJail(scope.ProjectRoot, a.Path)
 	if err != nil {
 		return ErrorResult("jail: %v", err), nil
 	}
-	entries, err := listDir(absPath, a.Depth, ectx.ProjectRoot)
+	entries, err := listDir(absPath, a.Depth, scope.ProjectRoot)
 	if err != nil {
 		return ErrorResult("list: %v", err), nil
 	}
@@ -142,19 +148,21 @@ func (t *FSRead) Mutating() bool { return false }
 func (t *FSRead) Description() string {
 	return "Read a file with optional line range. Each output line is prefixed with its " +
 		"line number and a tab; the numbers are NOT part of the file — never copy them " +
-		"into fs_patch searches or file content."
+		"into fs_patch searches or file content. Use scope=harness only when offered."
 }
 
 // Schema returns the argument schema.
 func (t *FSRead) Schema() interface{} {
 	return NewSchema().
 		AddString("path", "File path to read", true).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddInt("start", "Start line (1-indexed, inclusive)", false).
 		AddInt("end", "End line (1-indexed, inclusive)", false)
 }
 
 type fsReadArgs struct {
 	Path  string `json:"path"`
+	Scope string `json:"scope"`
 	Start int    `json:"start"`
 	End   int    `json:"end"`
 }
@@ -165,7 +173,11 @@ func (t *FSRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	absPath, err := PathJail(scope.ProjectRoot, a.Path)
 	if err != nil {
 		return ErrorResult("jail: %v", err), nil
 	}
@@ -201,9 +213,12 @@ func (t *FSRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 	body, shown, truncated := numberedWithin(content, from, MaxToolResultBytes-512)
 	if truncated {
 		next := from + shown
-		body += fmt.Sprintf("\n[showing lines %d-%d of %d. Read the rest with "+
-			`{"path":%q,"start":%d,"end":%d}]`+"\n",
-			from, from+shown-1, total, a.Path, next, next+shown-1)
+		nextArgs := fmt.Sprintf(`{"path":%q,"start":%d,"end":%d}`, a.Path, next, next+shown-1)
+		if strings.TrimSpace(a.Scope) != "" {
+			nextArgs = fmt.Sprintf(`{"scope":%q,"path":%q,"start":%d,"end":%d}`, a.Scope, a.Path, next, next+shown-1)
+		}
+		body += fmt.Sprintf("\n[showing lines %d-%d of %d. Read the rest with %s]\n",
+			from, from+shown-1, total, nextArgs)
 	}
 	return SuccessResult("%s", body), nil
 }
@@ -243,19 +258,21 @@ func (t *FSSearch) Mutating() bool { return false }
 func (t *FSSearch) Description() string {
 	return "Search file CONTENTS line by line with a regex pattern; it does not search file names. " +
 		"Use fs_list to discover files, or glob to limit which files' contents are searched. " +
-		"Results are path:line: text — the path:line prefix is not file content."
+		"Results are path:line: text — the path:line prefix is not file content. Use scope=harness only when offered."
 }
 
 // Schema returns the argument schema.
 func (t *FSSearch) Schema() interface{} {
 	return NewSchema().
 		AddString("pattern", "Regular expression (not literal text: escape ( ) [ ] . * + ? with a backslash)", true).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddString("glob", "Glob to limit the search, matched against the file name or the project-relative path (e.g. '*.go' or 'internal/*.go')", false).
 		AddInt("max", "Maximum results (default: 100)", false)
 }
 
 type fsSearchArgs struct {
 	Pattern string `json:"pattern"`
+	Scope   string `json:"scope"`
 	Glob    string `json:"glob"`
 	Max     int    `json:"max"`
 }
@@ -277,6 +294,10 @@ func executeFSSearch(ctx context.Context, ectx *ExecContext, args json.RawMessag
 	if a.Max <= 0 {
 		a.Max = 100
 	}
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
 	// Validated once, before the walk. This used to be compiled per file inside
 	// SearchInContent, whose "invalid regex" report came back as a RESULT line —
 	// one per file, as a success. A model that sent `count(` read a hundred
@@ -290,14 +311,14 @@ func executeFSSearch(ctx context.Context, ectx *ExecContext, args json.RawMessag
 	searchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var results []string
-	err = filepath.Walk(ectx.ProjectRoot, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(scope.ProjectRoot, func(path string, info os.FileInfo, err error) error {
 		if ctxErr := searchCtx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if err != nil {
 			return err
 		}
-		rel, relErr := filepath.Rel(ectx.ProjectRoot, path)
+		rel, relErr := filepath.Rel(scope.ProjectRoot, path)
 		if relErr != nil {
 			return relErr
 		}

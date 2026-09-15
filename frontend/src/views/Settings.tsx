@@ -8,7 +8,7 @@ import { quack } from "../lib/attention";
 import { money2 } from "../lib/format";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
-import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
+import type { BudgetView, ConfigDiagnostics, DiagnosticDefaultsView, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Project, Run } from "../api/client";
 import { routeHref, type SettingsSection } from "../app/routes";
 import { PageHeader } from "../components/PageShell";
 
@@ -383,6 +383,9 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
   const [engine, setEngine] = useState<EngineDefaultsView | null>(null);
   const [engineDraft, setEngineDraft] = useState("");
+  const [diagnostics, setDiagnostics] = useState<DiagnosticDefaultsView | null>(null);
+  const [diagnosticProjectDraft, setDiagnosticProjectDraft] = useState("");
+  const [diagnosticProjects, setDiagnosticProjects] = useState<Project[]>([]);
   // Drafts, so nothing is sent until Save and a half-typed number is never a
   // ceiling of zero.
   const [b, setB] = useState<Record<string, string>>({});
@@ -449,6 +452,10 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     setEngine(v);
     setEngineDraft(String(v.max_concurrent_runs));
   };
+  const applyDiagnostics = (v: DiagnosticDefaultsView) => {
+    setDiagnostics(v);
+    setDiagnosticProjectDraft(v.harness_project_id);
+  };
   const applyModes = (v: ModeDefaultsView) => {
     setModes(v);
     const r: Record<string, string> = {};
@@ -475,6 +482,8 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     client.budgetDefaults().then(applyBudget).catch((e) => setState({ kind: "error", message: e }));
     client.modeDefaults().then(applyModes).catch((e) => setState({ kind: "error", message: e }));
     if (typeof client.engineDefaults === "function") client.engineDefaults().then(applyEngine).catch(() => {});
+    if (typeof client.diagnosticDefaults === "function") client.diagnosticDefaults().then(applyDiagnostics).catch(() => {});
+    if (typeof client.projects === "function") client.projects().then(setDiagnosticProjects).catch(() => {});
   };
 
   useEffect(load, [client]);
@@ -557,14 +566,18 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         role_turns: numbersOnly(roleTurns),
         phase_turns: numbersOnly(phaseTurns),
       }),
+      diagnostics && diagnosticProjectDraft !== diagnostics.harness_project_id && typeof client.diagnosticDefaultsSet === "function"
+        ? client.diagnosticDefaultsSet({ harness_project_id: diagnosticProjectDraft })
+        : Promise.resolve(null),
     ])
-      .then(([savedAp, savedBudget, savedEngine, savedModes]) => {
+      .then(([savedAp, savedBudget, savedEngine, savedModes, savedDiagnostics]) => {
         if (savedAp) {
           setAp({ max_tasks: String(savedAp.max_tasks), max_fails: String(savedAp.max_fails), autonomy: savedAp.autonomy });
         }
         applyBudget(savedBudget);
         if (savedEngine) applyEngine(savedEngine);
         applyModes(savedModes);
+        if (savedDiagnostics) applyDiagnostics(savedDiagnostics);
         setState({ kind: "saved" });
       })
       .catch((e) => setState({ kind: "error", message: e }));
@@ -600,6 +613,34 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         {engine && <SettingsCard title="concurrency" desc="Live queue admission limits; changes take effect without restarting the engine." testid="engine-concurrency">
           {num(engineDraft, setEngineDraft, "maximum concurrent runs", "engine-max-concurrent", String(engine.cpu_ceiling))}
           <p className="mt-1 text-xs text-ink-muted">The host CPU ceiling is {engine.cpu_ceiling}; this is context, not a hard limit.</p>
+        </SettingsCard>}
+        {diagnostics && <SettingsCard
+          title="consultant diagnostics"
+          desc="Let a consultant compare an active project with the Ducklab harness without changing either project."
+          testid="diagnostic-defaults"
+        >
+          <label className="flex flex-col gap-1 text-xs text-ink-muted">
+            harness project
+            <select
+              data-testid="diagnostic-harness-project"
+              value={diagnosticProjectDraft}
+              onChange={(e) => { setDiagnosticProjectDraft(e.target.value); touched(); }}
+              className="max-w-md rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+            >
+              <option value="">not configured</option>
+              {diagnostics.harness_project_id && !diagnosticProjects.some((project) => project.id === diagnostics.harness_project_id && !project.missing) && (
+                <option value={diagnostics.harness_project_id} disabled>
+                  {diagnostics.harness_project_name || diagnostics.harness_project_id} (unavailable)
+                </option>
+              )}
+              {diagnosticProjects.filter((project) => !project.missing).map((project) => (
+                <option key={project.id} value={project.id}>{project.name} ({project.id})</option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-2 text-xs text-ink-muted">
+            The project is offered as a named, read-only scope only when you enable it for a chat. You separately choose which project receives any bug you explicitly ask the consultant to file.
+          </p>
         </SettingsCard>}
       </div>
       <div>

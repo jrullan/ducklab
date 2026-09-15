@@ -138,6 +138,8 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/providers/{id}/model-endpoints", f.auth(f.providerModelEndpoints))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
+	f.mux.HandleFunc("GET /v1/defaults/diagnostics", f.auth(f.diagnosticDefaults))
+	f.mux.HandleFunc("PUT /v1/defaults/diagnostics", f.auth(f.diagnosticDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/autopilot", f.auth(f.autopilotDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/modes", f.auth(f.modeDefaults))
 	f.mux.HandleFunc("GET /v1/projects/{id}/roster", f.auth(f.roster))
@@ -400,6 +402,10 @@ func (f *fakeEngine) budgetDefaults(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeEngine) engineDefaults(w http.ResponseWriter, r *http.Request) {
 	f.write(w, http.StatusOK, map[string]interface{}{"max_concurrent_runs": 1, "cpu_ceiling": 100})
+}
+
+func (f *fakeEngine) diagnosticDefaults(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"harness_project_id": "", "available": false})
 }
 
 func (f *fakeEngine) autopilotDefaults(w http.ResponseWriter, r *http.Request) {

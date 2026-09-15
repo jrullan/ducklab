@@ -33,12 +33,14 @@ func (t *RunListTool) Description() string {
 
 func (t *RunListTool) Schema() interface{} {
 	return NewSchema().
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddString("task", "Only runs for this task id (optional)", false).
 		AddInt("limit", "Max runs to return (default 20)", false)
 }
 
 func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var a struct {
+		Scope string `json:"scope"`
 		Task  string `json:"task"`
 		Limit int    `json:"limit"`
 	}
@@ -48,7 +50,11 @@ func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 	if a.Limit <= 0 || a.Limit > 100 {
 		a.Limit = 20
 	}
-	dir := filepath.Join(ectx.Docs(), ".ducklab", "runs")
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	dir := filepath.Join(scope.DocsRoot, ".ducklab", "runs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ErrorResult("no runs recorded yet"), nil
@@ -114,17 +120,24 @@ func (t *RunReadTool) Description() string {
 }
 
 func (t *RunReadTool) Schema() interface{} {
-	return NewSchema().AddString("id", "Run id, e.g. r-20260811-224844-ebl7", true)
+	return NewSchema().
+		AddString("id", "Run id, e.g. r-20260811-224844-ebl7", true).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false)
 }
 
 func (t *RunReadTool) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var a struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		Scope string `json:"scope"`
 	}
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	summary, err := ReadRunSummary(ectx.Docs(), a.ID)
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	summary, err := ReadRunSummary(scope.DocsRoot, a.ID)
 	if err != nil {
 		return ErrorResult("%v", err), nil
 	}

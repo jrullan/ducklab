@@ -151,6 +151,62 @@ func TestRunChatRefusesARunFromAnotherProject(t *testing.T) {
 	}
 }
 
+func TestChatRecordsAnExplicitHarnessScopeAndBugDestination(t *testing.T) {
+	s := serviceWithDucklings(t, "consultant")
+	subject, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "Fledge", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "Ducklab", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfgMu.Lock()
+	s.cfg.Diagnostics.HarnessProjectID = harness.ID
+	s.cfgMu.Unlock()
+
+	run, err := s.ChatStart(context.Background(), subject.ID, ChatStartRequest{
+		Duckling: "consultant", Message: "determine whether this is a harness bug",
+		DiagnosticScope: chatScopeSubjectHarness, BugTarget: "harness",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.BugTargetProjectID != harness.ID || len(run.ContextScopes) != 2 {
+		t.Fatalf("chat provenance = scopes %+v, bug target %q", run.ContextScopes, run.BugTargetProjectID)
+	}
+	if run.ContextScopes[0].Name != "subject" || run.ContextScopes[0].ProjectID != subject.ID ||
+		run.ContextScopes[1].Name != "harness" || run.ContextScopes[1].ProjectID != harness.ID {
+		t.Fatalf("context scopes = %+v", run.ContextScopes)
+	}
+	prompt := s.chatPromptFor(context.Background(), &runState{run: run}, subject.Path, "ducklab", "")
+	for _, want := range []string{"Diagnostic boundary", "scope: harness", "Fledge", "Ducklab", "Bug filing destination fixed by the human"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("joint diagnostic prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestHarnessBugDestinationRequiresTheMountedHarnessScope(t *testing.T) {
+	s := serviceWithDucklings(t, "consultant")
+	subject, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "Fledge", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.ChatStart(context.Background(), subject.ID, ChatStartRequest{
+		Duckling: "consultant", Message: "inspect", BugTarget: "harness",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires diagnostic_scope=subject+harness") {
+		t.Fatalf("unmounted harness bug target error = %v", err)
+	}
+	_, err = s.ChatStart(context.Background(), subject.ID, ChatStartRequest{
+		Duckling: "consultant", Message: "inspect", DiagnosticScope: chatScopeSubjectHarness,
+	})
+	if err == nil || !strings.Contains(err.Error(), "require a harness project") {
+		t.Fatalf("unconfigured harness scope error = %v", err)
+	}
+}
+
 // A chat is a run: the person picks a duckling, asks about a subject, the
 // consultant answers with the dossier in hand and read-only tools, and the
 // conversation pauses for the next message — memory in the event log, so

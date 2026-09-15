@@ -306,6 +306,17 @@ consultant's context capacity; the user should not have to copy technical
 details or make the consultant rediscover the run before asking what happened
 and what action is safe next.
 
+When Settings → Engine names a registered **harness project**, a consultant
+door in any other project offers **Also inspect Ducklab**. It is off by default.
+Turning it on mounts Ducklab source, artifacts, runs and bugs as a named,
+read-only scope and reveals a separate destination picker for bugs the user may
+explicitly ask the consultant to file. Starting the chat records both choices;
+Run details shows the subject and harness project ids, their launch revisions,
+and the fixed bug destination. A consultant may therefore conclude that the
+evidence points to project code, project configuration, model/provider,
+Ducklab itself, or remains inconclusive without silently changing diagnostic
+scope or filing into the wrong project.
+
 The original sketch, for what still applies:
 
 - **Left**: the artifact rendered as a document, sections addressable by id

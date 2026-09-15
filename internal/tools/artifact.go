@@ -28,12 +28,14 @@ func (t *ArtifactRead) Description() string {
 func (t *ArtifactRead) Schema() interface{} {
 	return NewSchema().
 		AddString("kind", "requirements | spec | plan | project", true).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddString("id", "Optional section id, e.g. REQ-001", false)
 }
 
 type artifactReadArgs struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind  string `json:"kind"`
+	Scope string `json:"scope"`
+	ID    string `json:"id"`
 }
 
 func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
@@ -53,8 +55,12 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 		return ErrorResult("the %q FIELD must be one of requirements | spec | plan | project "+
 			"— e.g. {%q:%q}. You sent kind=%q id=%q", "kind", "kind", "plan", a.Kind, a.ID), nil
 	}
+	scope, scopeErr := ectx.Scope(a.Scope)
+	if scopeErr != nil {
+		return ErrorResult("scope: %v", scopeErr), nil
+	}
 
-	doc, err := artifact.Load(ectx.Docs(), artifact.Kind(a.Kind))
+	doc, err := artifact.Load(scope.DocsRoot, artifact.Kind(a.Kind))
 	if err != nil {
 		return ErrorResult("read %s: %v", a.Kind, err), nil
 	}
@@ -78,7 +84,7 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 		// "spec does not exist" ten times across both seats while the text
 		// sat in their prompt (Neocapture, 2026-08-29). Serve the proposal,
 		// labelled as what it is.
-		if proposed, perr := artifact.LoadProposed(ectx.Docs(), artifact.Kind(a.Kind)); perr == nil && proposed != nil && strings.TrimSpace(proposed.Raw) != "" {
+		if proposed, perr := artifact.LoadProposed(scope.DocsRoot, artifact.Kind(a.Kind)); perr == nil && proposed != nil && strings.TrimSpace(proposed.Raw) != "" {
 			if a.ID != "" {
 				sec := proposed.Section(a.ID)
 				if sec == nil {
@@ -131,17 +137,24 @@ func (t *TaskRead) Description() string {
 }
 
 func (t *TaskRead) Schema() interface{} {
-	return NewSchema().AddString("id", "Task id, e.g. T-001", true)
+	return NewSchema().
+		AddString("id", "Task id, e.g. T-001", true).
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false)
 }
 
 func (t *TaskRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var a struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		Scope string `json:"scope"`
 	}
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	plan, err := artifact.Load(ectx.Docs(), artifact.KindPlan)
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	plan, err := artifact.Load(scope.DocsRoot, artifact.KindPlan)
 	if err != nil {
 		return ErrorResult("read plan: %v", err), nil
 	}
