@@ -69,6 +69,33 @@ describe("Settings roster removal", () => {
   });
 });
 
+describe("consultant diagnostic project", () => {
+  it("selects a registered project and persists it with engine settings", async () => {
+    const diagnosticDefaultsSet = vi.fn().mockResolvedValue({
+      harness_project_id: "ducklab",
+      harness_project_name: "Ducklab",
+      available: true,
+    });
+    const client = clientWith({
+      diagnosticDefaults: vi.fn().mockResolvedValue({ harness_project_id: "", available: false }),
+      diagnosticDefaultsSet,
+      projects: vi.fn().mockResolvedValue([
+        { id: "ducklab", name: "Ducklab", path: "/src/ducklab" },
+        { id: "gone", name: "Gone", path: "/gone", missing: true },
+      ]),
+    } as unknown as Partial<EngineClient>);
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="0.4.0" connection="open" client={client} section="engine" />);
+
+    const picker = await screen.findByTestId("diagnostic-harness-project");
+    expect(picker.textContent).toContain("Ducklab");
+    expect(picker.textContent).not.toContain("Gone");
+    fireEvent.change(picker, { target: { value: "ducklab" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => expect(diagnosticDefaultsSet).toHaveBeenCalledWith({ harness_project_id: "ducklab" }));
+  });
+});
+
 // The ceiling came from the engine's config and no client could read it, so a run
 // that hit it failed with a number nobody had chosen and nobody could raise.
 describe("the run budget in Settings", () => {

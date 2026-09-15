@@ -23,6 +23,11 @@ type Run struct {
 	ProjectID string `json:"project_id"`
 	Stage     string `json:"stage"`
 	Mode      string `json:"mode"`
+	// ContextScopes records every project a consultant was allowed to inspect.
+	// The subject is always first; optional support scopes are engine-resolved,
+	// read-only, and pinned to the revision observed when the chat opened.
+	ContextScopes      []ContextScope `json:"context_scopes,omitempty"`
+	BugTargetProjectID string         `json:"bug_target_project_id,omitempty"`
 	// SupportProfile is the capacity-sensitive harness treatment selected for
 	// this run. It is recorded separately from model tier so experiments can
 	// hold the roster constant while varying the treatment.
@@ -201,6 +206,14 @@ type Run struct {
 	// commit is live on the remote (and, if not, the push door as the retry)
 	// without re-reading the audit file (B-266).
 	RemoteReceipts []map[string]interface{} `json:"remote_receipts,omitempty"`
+}
+
+// ContextScope is durable provenance for one named consultant evidence root.
+type ContextScope struct {
+	Name      string `json:"name"`
+	ProjectID string `json:"project_id"`
+	Project   string `json:"project"`
+	Revision  string `json:"revision,omitempty"`
 }
 
 // HarnessProfile is the project-specific composition produced by capability

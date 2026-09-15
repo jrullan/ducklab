@@ -107,9 +107,9 @@ All tools live in `internal/tools`. Names are stable API; do not rename.
 
 | Tool | Args | Notes |
 |------|------|-------|
-| `fs_list` | `{path?: string, depth?: int}` | Default `.`, depth 2. Respects `.gitignore`. |
-| `fs_read` | `{path: string, start?: int, end?: int}` | 1-indexed inclusive lines. Returns content with line numbers prefixed as `NNNN\t`. |
-| `fs_search` | `{pattern: string, glob?: string, max?: int}` | Go `regexp` syntax. Returns `path:line: text`, max 100. |
+| `fs_list` | `{path?: string, depth?: int, scope?: string}` | Default `.`, depth 2. Respects `.gitignore`. |
+| `fs_read` | `{path: string, start?: int, end?: int, scope?: string}` | 1-indexed inclusive lines. Returns content with line numbers prefixed as `NNNN\t`. |
+| `fs_search` | `{pattern: string, glob?: string, max?: int, scope?: string}` | Go `regexp` syntax. Returns `path:line: text`, max 100. |
 | `fs_write` | `{path: string, content: string, executable?: boolean}` | Creates parent dirs. `executable: true` adds the executable bit through the jailed filesystem tool so a script can run by path and git records mode `100755`; omitted/false preserves an existing mode and creates an ordinary `0644` file. Mutating. |
 | `fs_write_lines` | `{path: string, start: int, end: int, first_line: string, content: string}` | Replaces lines `start..end` (1-based, inclusive — **the numbers `fs_read` shows**) of an existing file. `first_line` must equal the current content of line `start`; a mismatch refuses the write and **teaches the actual line**. Empty `content` deletes the range. The success message warns that numbers below the edit shifted. Mutating. |
 | `fs_patch` | `{path: string, edits: [{search, replace}]}` | Each `search` must match **exactly once**; otherwise the whole call fails with a diagnostic naming the match count. Mutating. |
@@ -136,9 +136,9 @@ it first.
 
 | Tool | Args |
 |------|------|
-| `git_status` | `{}` |
-| `git_diff` | `{ref?: string, path?: string}` |
-| `git_log` | `{n?: int, path?: string}` |
+| `git_status` | `{scope?: string}` |
+| `git_diff` | `{ref?: string, path?: string, scope?: string}` |
+| `git_log` | `{n?: int, path?: string, scope?: string}` |
 
 There is deliberately no `git_commit`, `git_checkout`, `git_branch`,
 `git_merge`, `git_push` or `git_worktree` tool. If a role's prompt implies one is
@@ -148,9 +148,9 @@ needed, the prompt is wrong.
 
 | Tool | Args | Phase |
 |------|------|-------|
-| `artifact_read` | `{kind: "requirements"\|"spec"\|"plan"\|"project", id?: string}` | v0.3 |
-| `task_read` | `{id: string}` | v0.3 |
-| `bug_read` | `{id: string}` | v0.4 |
+| `artifact_read` | `{kind: "requirements"\|"spec"\|"plan"\|"project", id?: string, scope?: string}` | v0.3 |
+| `task_read` | `{id: string, scope?: string}` | v0.3 |
+| `bug_read` | `{id?: string, scope?: string}` | v0.4 |
 | `skill_list` | `{}` | v0.5 |
 | `skill_read` | `{name: string}` | v0.5 |
 | `skill_run` | `{name: string, args?: object}` | v0.5 |
@@ -194,6 +194,24 @@ instead of pausing: the run was started with `--yes`, or with autonomy `auto`
 
 A `Turn.Toolbelt` may only *narrow* this set, never widen it. Widening is a spec
 violation and must be rejected at script-load time.
+
+### 2.6 Named diagnostic scopes
+
+A consultant chat normally has one scope, `subject`. When the user enables
+**Also inspect Ducklab**, the engine resolves `[diagnostics]
+harness_project_id` through the registered-project catalog and mounts it as
+`harness`. The request contains the semantic name `subject+harness`, never a
+filesystem path. Read-only file, git, artifact, task, run and bug tools accept
+`scope: "harness"`; omission continues to mean the subject project. An unknown
+scope fails closed and reports the names actually available.
+
+No mutating filesystem or shell tool accepts a scope. `bug_file` is the only
+cross-project write: before the chat starts, the user explicitly fixes its
+destination to either the subject or harness board. The destination is stored
+on the run and supplied by the engine, not accepted from model arguments. The
+run records project ids and revisions at chat start, and emits current revision
+evidence on every turn, so a diagnosis can be reproduced and a changing source
+tree is visible.
 
 ---
 

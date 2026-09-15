@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,6 +72,15 @@ type ExecContext struct {
 	NoHuman bool
 
 	ProjectRoot string
+	// ReadScopes are additional engine-authorized project roots available to
+	// read-only tools. Keys are short semantic names such as "harness"; model
+	// arguments select a name, never a filesystem path.
+	ReadScopes map[string]ReadScope
+	// BugReportRoot is the human-selected destination for bug_file in a
+	// consultant chat. Empty keeps the subject project's board.
+	BugReportRoot        string
+	BugReportProjectID   string
+	BugReportProjectName string
 	// DocsRoot is where the project's documents live when the run works in
 	// an isolated worktree: the worktree has the code, the project has
 	// .ducklab/docs. Left empty, ProjectRoot is used. A build implementer
@@ -229,6 +239,15 @@ type ExecContext struct {
 	// to protect them from.
 	AllowUnacceptedSkills bool
 	Registry              *Registry
+}
+
+// ReadScope is one trusted, named project mounted read-only for a turn.
+type ReadScope struct {
+	ProjectRoot string
+	DocsRoot    string
+	ProjectID   string
+	Name        string
+	Revision    string
 }
 
 // Result is the result of a tool execution.
@@ -537,6 +556,28 @@ func (e *ExecContext) Docs() string {
 		return e.DocsRoot
 	}
 	return e.ProjectRoot
+}
+
+// Scope resolves a model-visible scope name to roots chosen by the engine.
+// Empty and "subject" retain the ordinary project. Unknown names fail closed.
+func (e *ExecContext) Scope(name string) (ReadScope, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "subject" {
+		return ReadScope{ProjectRoot: e.ProjectRoot, DocsRoot: e.Docs()}, nil
+	}
+	scope, ok := e.ReadScopes[name]
+	if !ok || strings.TrimSpace(scope.ProjectRoot) == "" {
+		available := []string{"subject"}
+		for candidate := range e.ReadScopes {
+			available = append(available, candidate)
+		}
+		sort.Strings(available)
+		return ReadScope{}, fmt.Errorf("unknown read scope %q (available: %s)", name, strings.Join(available, ", "))
+	}
+	if scope.DocsRoot == "" {
+		scope.DocsRoot = scope.ProjectRoot
+	}
+	return scope, nil
 }
 
 // BeginTurn resets what is remembered per turn: the repeated-read brake. A

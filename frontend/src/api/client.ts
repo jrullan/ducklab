@@ -165,6 +165,10 @@ export async function runCaptureUrl(baseUrl: string, runId: string, name: string
 export interface Run {
   id: string;
   project_id: string;
+  /** Projects the consultant could inspect, pinned when the chat opened. */
+  context_scopes?: { name: string; project_id: string; project: string; revision?: string }[];
+  /** Human-fixed destination for bug_file during this chat. */
+  bug_target_project_id?: string;
   stage: string;
   mode: string;
   /** How the mode was resolved: request, settings, project, or fallback. */
@@ -270,6 +274,14 @@ export interface SamplingParams {
 export interface EngineDefaultsView {
   max_concurrent_runs: number;
   cpu_ceiling: number;
+}
+
+/** The registered project that can be mounted read-only beside another
+ * project's consultant chat. Paths never cross this API boundary. */
+export interface DiagnosticDefaultsView {
+  harness_project_id: string;
+  harness_project_name?: string;
+  available: boolean;
 }
 
 export interface BudgetView {
@@ -1051,10 +1063,20 @@ export class EngineClient {
   /** Start a conversation with a chosen duckling about a bug or task — its
    * history rides as context, its tools are read-only, the run view is the
    * chat panel. */
-  chatStart(projectId: string, req: { duckling: string; aboutKind: string; aboutId: string; message: string; images?: string[] }) {
+  chatStart(projectId: string, req: {
+    duckling: string;
+    aboutKind: string;
+    aboutId: string;
+    message: string;
+    images?: string[];
+    diagnosticScope?: "subject" | "subject+harness";
+    bugTarget?: "subject" | "harness";
+  }) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/chats`, {
       duckling: req.duckling, about_kind: req.aboutKind, about_id: req.aboutId, message: req.message,
       ...(req.images?.length ? { images: req.images } : {}),
+      ...(req.diagnosticScope ? { diagnostic_scope: req.diagnosticScope } : {}),
+      ...(req.bugTarget ? { bug_target: req.bugTarget } : {}),
     });
   }
   /** Send the next message in a paused chat. */
@@ -1202,6 +1224,12 @@ export class EngineClient {
   }
   engineDefaultsSet(body: EngineDefaultsView) {
     return this.request<EngineDefaultsView>("PUT", "/v1/defaults/engine", body);
+  }
+  diagnosticDefaults() {
+    return this.request<DiagnosticDefaultsView>("GET", "/v1/defaults/diagnostics");
+  }
+  diagnosticDefaultsSet(body: Pick<DiagnosticDefaultsView, "harness_project_id">) {
+    return this.request<DiagnosticDefaultsView>("PUT", "/v1/defaults/diagnostics", body);
   }
   /** The budget every run starts with. It was invisible and immutable: a run
    * that hit the ceiling failed with a number nobody had chosen. */

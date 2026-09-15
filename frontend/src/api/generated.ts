@@ -429,6 +429,13 @@ export interface RunlogBudgetState {
   wallclock_s?: number;
 }
 
+export interface RunlogContextScope {
+  name?: string;
+  project?: string;
+  project_id?: string;
+  revision?: string;
+}
+
 export interface RunlogDucklingSpend {
   calls?: number;
   cost_usd?: number;
@@ -545,9 +552,11 @@ export interface RunlogRun {
   base_sha?: string;
   branch?: string;
   budget?: RunlogBudgetState;
+  bug_target_project_id?: string;
   captures?: string[];
   chain_build?: Record<string, unknown>;
   commit_sha?: string;
+  context_scopes?: RunlogContextScope[];
   desktop_stale?: boolean;
   dry_run?: boolean;
   ended_at?: string;
@@ -729,6 +738,8 @@ export interface ServiceCapsUpdate {
 export interface ServiceChatStartRequest {
   about_id?: string;
   about_kind?: string;
+  bug_target?: string;
+  diagnostic_scope?: string;
   duckling?: string;
   images?: string[];
   message?: string;
@@ -750,6 +761,12 @@ export interface ServiceCriterion {
   key?: string;
   label?: string;
   source?: string;
+}
+
+export interface ServiceDiagnosticDefaultsView {
+  available?: boolean;
+  harness_project_id?: string;
+  harness_project_name?: string;
 }
 
 export interface ServiceDucklingUpdate {
@@ -1081,6 +1098,8 @@ export const OPERATIONS = [
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
   { id: "CandidateCriteria", method: "GET", path: "/v1/defaults/candidates" },
   { id: "CandidateCriteriaSet", method: "PUT", path: "/v1/defaults/candidates" },
+  { id: "DiagnosticDefaults", method: "GET", path: "/v1/defaults/diagnostics" },
+  { id: "DiagnosticDefaultsSet", method: "PUT", path: "/v1/defaults/diagnostics" },
   { id: "EngineDefaults", method: "GET", path: "/v1/defaults/engine" },
   { id: "EngineDefaultsSet", method: "PUT", path: "/v1/defaults/engine" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },

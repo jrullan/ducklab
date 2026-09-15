@@ -399,12 +399,22 @@ func (t *GitStatus) Description() string {
 
 // Schema returns the argument schema.
 func (t *GitStatus) Schema() interface{} {
-	return NewSchema()
+	return NewSchema().AddString("scope", "Named read scope; omit for subject, or use harness when offered", false)
 }
 
 // Execute runs the tool.
 func (t *GitStatus) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
-	cmd := xplat.Shell(ectx.ProjectRoot, nil, "git status --porcelain")
+	var a struct {
+		Scope string `json:"scope"`
+	}
+	if err := ParseArgs(args, &a); err != nil {
+		return ErrorResult("invalid args: %v", err), nil
+	}
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	cmd := xplat.Shell(scope.ProjectRoot, nil, "git status --porcelain")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ErrorResult("git status: %v", err), nil
@@ -430,13 +440,15 @@ func (t *GitDiff) Description() string {
 // Schema returns the argument schema.
 func (t *GitDiff) Schema() interface{} {
 	return NewSchema().
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddString("ref", "Git ref to diff against", false).
 		AddString("path", "Path to limit diff to", false)
 }
 
 type gitDiffArgs struct {
-	Ref  string `json:"ref"`
-	Path string `json:"path"`
+	Scope string `json:"scope"`
+	Ref   string `json:"ref"`
+	Path  string `json:"path"`
 }
 
 // Execute runs the tool.
@@ -445,6 +457,10 @@ func (t *GitDiff) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
 	cmdStr := "git diff"
 	if a.Ref != "" {
 		cmdStr += " " + a.Ref
@@ -452,7 +468,7 @@ func (t *GitDiff) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if a.Path != "" {
 		cmdStr += " -- " + a.Path
 	}
-	cmd := xplat.Shell(ectx.ProjectRoot, nil, cmdStr)
+	cmd := xplat.Shell(scope.ProjectRoot, nil, cmdStr)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ErrorResult("git diff: %v", err), nil
@@ -475,13 +491,15 @@ func (t *GitLog) Description() string {
 // Schema returns the argument schema.
 func (t *GitLog) Schema() interface{} {
 	return NewSchema().
+		AddString("scope", "Named read scope; omit for subject, or use harness when offered", false).
 		AddInt("n", "Number of commits to show", false).
 		AddString("path", "Path to limit log to", false)
 }
 
 type gitLogArgs struct {
-	N    int    `json:"n"`
-	Path string `json:"path"`
+	Scope string `json:"scope"`
+	N     int    `json:"n"`
+	Path  string `json:"path"`
 }
 
 // Execute runs the tool.
@@ -489,6 +507,10 @@ func (t *GitLog) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 	var a gitLogArgs
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
+	}
+	scope, err := ectx.Scope(a.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
 	}
 	n := a.N
 	if n <= 0 {
@@ -498,7 +520,7 @@ func (t *GitLog) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 	if a.Path != "" {
 		cmdStr += " -- " + a.Path
 	}
-	cmd := xplat.Shell(ectx.ProjectRoot, nil, cmdStr)
+	cmd := xplat.Shell(scope.ProjectRoot, nil, cmdStr)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ErrorResult("git log: %v", err), nil

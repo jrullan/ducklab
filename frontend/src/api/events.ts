@@ -244,6 +244,7 @@ export const KNOWN_EVENT_TYPES = [
   "run_reconciled",
   "invariant_violation",
   "capabilities_resolved",
+  "diagnostic_scopes",
   "review_evidence",
   "gate_coverage_warning",
   "restart_request",

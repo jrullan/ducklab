@@ -203,9 +203,17 @@ plan | review | release | operate`.
 | GET | `/v1/config` | global config **with every secret value replaced by `"[set]"` or `"[unset]"`** |
 | PATCH | `/v1/config` | dotted-key patch; validated with the same strict rules as file load; rejects any attempt to write a key ending in `api_key` |
 | GET | `/v1/config/raw` | the TOML text, secrets still redacted |
+| GET | `/v1/defaults/diagnostics` | configured registered harness project, derived name and availability |
+| PUT | `/v1/defaults/diagnostics` | select or clear the harness project by registered id; paths are rejected by construction |
 
 The API can never read back a secret. Setting one is done by naming an
 environment variable (`api_key_env`), not by sending the value.
+
+`POST /v1/projects/{id}/chats` accepts `diagnostic_scope: "subject" |
+"subject+harness"` and `bug_target: "subject" | "harness"`. The second scope
+must be configured and available; a harness bug target is invalid unless that
+scope was explicitly mounted. Both choices and the resolved project revisions
+are durable fields of the run record.
 
 ## 5. HTTP status mapping
 

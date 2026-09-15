@@ -178,6 +178,7 @@ describe("ChatAbout image attachments", () => {
       token: "t",
       fetchFn: (async (url: string, init?: RequestInit) => {
         if (url.includes("/roster")) return new Response('{"entries":[]}', { status: 200, headers: { "Content-Type": "application/json" } });
+        if (url.includes("/defaults/diagnostics")) return new Response('{"harness_project_id":"","available":false}', { status: 200, headers: { "Content-Type": "application/json" } });
         requests.push({ body: init?.body ? JSON.parse(String(init.body)) : undefined });
         return new Response('{"id":"new-chat"}', { status: 200, headers: { "Content-Type": "application/json" } });
       }) as never,
@@ -230,9 +231,51 @@ describe("ChatAbout image attachments", () => {
   });
 });
 
+describe("ChatAbout cross-project diagnosis", () => {
+  it("requires an explicit scope and bug destination choice", async () => {
+    const chatStart = vi.fn().mockResolvedValue({ id: "joint-chat" });
+    const diagnosticDefaults = vi.fn().mockResolvedValue({
+      harness_project_id: "ducklab",
+      harness_project_name: "Ducklab",
+      available: true,
+    });
+    const client = {
+      roster: vi.fn().mockResolvedValue({ entries: [] }),
+      diagnosticDefaults,
+      chatStart,
+    } as unknown as EngineClient;
+    const ducklings = [{ id: "consultant", provider: "test", model: "test" }];
+    render(<ChatAbout client={client} projectId="fledge" aboutKind="run" aboutId="r-1" ducklings={ducklings} />);
+
+    fireEvent.click(screen.getByTestId("chat-about"));
+    await waitFor(() => expect(screen.getByTestId("chat-inspect-harness")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "consultant" } });
+    fireEvent.change(screen.getByTestId("chat-message"), { target: { value: "find the root cause" } });
+    fireEvent.click(screen.getByTestId("chat-inspect-harness"));
+    fireEvent.change(screen.getByTestId("chat-bug-target"), { target: { value: "harness" } });
+    fireEvent.click(screen.getByTestId("chat-start"));
+
+    await waitFor(() => expect(chatStart).toHaveBeenCalledWith("fledge", expect.objectContaining({
+      diagnosticScope: "subject+harness",
+      bugTarget: "harness",
+    })));
+  });
+});
+
 describe("chat terminal state", () => {
   it("speaks in conversation terms without an acceptance frame", async () => {
-    const ended = { ...chatRun, status: "done", pending_kind: undefined, verdict: "ABORTED", budget: { usd: 0.12, tokens: 10, turns: 1, wallclock_s: 1 } } as unknown as Run;
+    const ended = {
+      ...chatRun,
+      status: "done",
+      pending_kind: undefined,
+      verdict: "ABORTED",
+      budget: { usd: 0.12, tokens: 10, turns: 1, wallclock_s: 1 },
+      context_scopes: [
+        { name: "subject", project_id: "p", project: "Fledge", revision: "abc" },
+        { name: "harness", project_id: "ducklab", project: "Ducklab", revision: "def" },
+      ],
+      bug_target_project_id: "ducklab",
+    } as unknown as Run;
     useRuns.setState({
       runs: { "r-c": ended },
       events: { "r-c": [
@@ -246,6 +289,8 @@ describe("chat terminal state", () => {
     const outcome = await screen.findByTestId("run-outcome");
     expect(outcome).toHaveTextContent("conversation ended · 1 tool call · $0.1200");
     expect(outcome).not.toHaveTextContent(/accept/i);
+    expect(screen.getByTestId("run-diagnostic-scopes")).toHaveTextContent("harness: Ducklab");
+    expect(screen.getByTestId("run-diagnostic-scopes")).toHaveTextContent("bug destination: Ducklab");
   });
 });
 

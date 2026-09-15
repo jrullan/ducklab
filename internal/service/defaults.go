@@ -1,13 +1,73 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"runtime"
+	"strings"
 
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
+
+// DiagnosticDefaultsView identifies the registered project whose source,
+// history and bug board may accompany another project's consultant chat.
+// Name and availability are derived; only ProjectID is persisted.
+type DiagnosticDefaultsView struct {
+	HarnessProjectID   string `json:"harness_project_id"`
+	HarnessProjectName string `json:"harness_project_name,omitempty"`
+	Available          bool   `json:"available"`
+}
+
+func (s *Service) DiagnosticDefaults(ctx context.Context) DiagnosticDefaultsView {
+	s.cfgMu.RLock()
+	id := strings.TrimSpace(s.cfg.Diagnostics.HarnessProjectID)
+	s.cfgMu.RUnlock()
+	view := DiagnosticDefaultsView{HarnessProjectID: id}
+	if id == "" {
+		return view
+	}
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		return view
+	}
+	view.HarnessProjectName = entry.Name
+	view.Available = !entry.Missing
+	if _, err := s.ProjectGet(ctx, id); err != nil {
+		view.Available = false
+	}
+	return view
+}
+
+func (s *Service) DiagnosticDefaultsSet(ctx context.Context, v DiagnosticDefaultsView) error {
+	if err := s.canWriteConfig(); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(v.HarnessProjectID)
+	if id != "" {
+		entry, err := s.registry.Get(id)
+		if err != nil {
+			return fmt.Errorf("harness project %q is not registered", id)
+		}
+		if entry.Missing {
+			return fmt.Errorf("harness project %q is unavailable at its registered path", id)
+		}
+		if _, err := s.ProjectGet(ctx, id); err != nil {
+			return fmt.Errorf("harness project %q is unavailable: %w", id, err)
+		}
+	}
+	s.cfgMu.Lock()
+	previous := s.cfg.Diagnostics.HarnessProjectID
+	s.cfg.Diagnostics.HarnessProjectID = id
+	if err := s.saveConfig(); err != nil {
+		s.cfg.Diagnostics.HarnessProjectID = previous
+		s.cfgMu.Unlock()
+		return err
+	}
+	s.cfgMu.Unlock()
+	return nil
+}
 
 // The run budget was invisible and immutable.
 //

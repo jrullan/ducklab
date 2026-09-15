@@ -2361,6 +2361,23 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               })()}
             </section>
           )}
+          {(run.context_scopes?.length ?? 0) > 1 && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-diagnostic-scopes">
+              <h2 className="text-sm font-medium text-ink">diagnostic scope</h2>
+              <p className="mt-1 text-xs text-ink-muted">The consultant may compare these recorded project revisions; support scopes are read-only.</p>
+              <dl className="mt-2 space-y-2 text-xs">
+                {run.context_scopes!.map((scope) => (
+                  <div key={scope.name}>
+                    <dt className="font-medium text-ink">{scope.name}: {scope.project}</dt>
+                    <dd className="font-mono text-ink-muted">{scope.project_id} · {scope.revision || "unversioned"}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-2 text-xs text-ink-secondary">
+                bug destination: {run.context_scopes!.find((scope) => scope.project_id === run.bug_target_project_id)?.project || run.bug_target_project_id || run.project_id}
+              </p>
+            </section>
+          )}
           {run.harness_profile && (
             <section className="rounded-card border border-hairline p-3" data-testid="run-harness-profile">
               <h2 className="text-sm font-medium text-ink">project harness</h2>

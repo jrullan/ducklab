@@ -47,6 +47,9 @@ func (t *BugRead) Schema() interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
+			"scope": map[string]interface{}{
+				"type": "string", "description": "Named read scope; omit for subject, or use harness when offered",
+			},
 			"id": map[string]interface{}{
 				"type":        "string",
 				"description": "A bug id like B-003. Omit to list every bug.",
@@ -57,14 +60,19 @@ func (t *BugRead) Schema() interface{} {
 
 func (t *BugRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var req struct {
-		ID string `json:"id"`
+		Scope string `json:"scope"`
+		ID    string `json:"id"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &req); err != nil {
 			return &Result{IsError: true, Content: fmt.Sprintf("bad arguments: %v", err)}, nil
 		}
 	}
-	db, err := openBugDB(ectx.ProjectRoot)
+	scope, err := ectx.Scope(req.Scope)
+	if err != nil {
+		return ErrorResult("scope: %v", err), nil
+	}
+	db, err := openBugDB(scope.ProjectRoot)
 	if err != nil {
 		return &Result{IsError: true, Content: fmt.Sprintf("open bug board: %v", err)}, nil
 	}
@@ -92,7 +100,7 @@ func (t *BugRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		// The audit trail answers the question a bare status can't: WHO put
 		// it there. A triager deciding whether a reopened report is a person's
 		// deliberate call or a stale sweep reads it here.
-		if hist := readBugHistory(ectx.ProjectRoot, rec.ID); len(hist) > 0 {
+		if hist := readBugHistory(scope.ProjectRoot, rec.ID); len(hist) > 0 {
 			b.WriteString("\nhistory:\n")
 			for _, h := range hist {
 				b.WriteString("  " + h + "\n")
@@ -133,7 +141,7 @@ func (t *BugFile) Name() string   { return "bug_file" }
 func (t *BugFile) Mutating() bool { return true }
 
 func (t *BugFile) Description() string {
-	return "File a bug on the project's bug board. Use ONLY when the human has explicitly asked you to file it, never on your own initiative. Check bug_read first for an existing bug covering the same problem. Returns the new bug's id — report it back to the human."
+	return "File a bug on the human-selected destination board for this chat. Use ONLY when the human has explicitly asked you to file it, never on your own initiative. Check bug_read first for an existing bug covering the same problem. The destination is fixed by the engine; the model cannot change it. Returns the new bug's id — report it back to the human."
 }
 
 func (t *BugFile) Schema() interface{} {
@@ -177,7 +185,11 @@ func (t *BugFile) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		return &Result{IsError: true, Content: fmt.Sprintf("unknown severity %q, want critical, high, normal or low", req.Severity)}, nil
 	}
 
-	db, err := openBugDB(ectx.ProjectRoot)
+	root := ectx.ProjectRoot
+	if strings.TrimSpace(ectx.BugReportRoot) != "" {
+		root = ectx.BugReportRoot
+	}
+	db, err := openBugDB(root)
 	if err != nil {
 		return &Result{IsError: true, Content: fmt.Sprintf("open bug board: %v", err)}, nil
 	}
@@ -200,7 +212,14 @@ func (t *BugFile) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := db.CreateBug(rec); err != nil {
 		return &Result{IsError: true, Content: fmt.Sprintf("file bug: %v", err)}, nil
 	}
-	return &Result{Content: fmt.Sprintf("Filed %s [%s]: %s", rec.ID, rec.Severity, rec.Title)}, nil
+	target := strings.TrimSpace(ectx.BugReportProjectName)
+	if target == "" {
+		target = strings.TrimSpace(ectx.BugReportProjectID)
+	}
+	if target == "" {
+		target = "the subject project"
+	}
+	return &Result{Content: fmt.Sprintf("Filed %s [%s] in %s: %s", rec.ID, rec.Severity, target, rec.Title)}, nil
 }
 
 // readBugHistory renders one bug's audit lines, oldest first. Best-effort:

@@ -11,10 +11,13 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Chat: a conversation with a chosen duckling ABOUT something — a bug whose
@@ -114,7 +117,18 @@ type ChatStartRequest struct {
 	Message string `json:"message"`
 	// Images are screenshots shown only with the reply to this message.
 	Images []string `json:"images,omitempty"`
+	// DiagnosticScope is "subject" (default) or "subject+harness". Harness is
+	// resolved from global diagnostic settings; clients cannot send a path.
+	DiagnosticScope string `json:"diagnostic_scope,omitempty"`
+	// BugTarget is "subject" (default) or "harness". It fixes bug_file's
+	// destination before the model runs and is recorded on the chat.
+	BugTarget string `json:"bug_target,omitempty"`
 }
+
+const (
+	chatScopeSubject        = "subject"
+	chatScopeSubjectHarness = "subject+harness"
+)
 
 // ChatStart opens the conversation: one run, stage "chat", the subject's
 // dossier assembled deterministically into the first prompt.
@@ -149,17 +163,27 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 			return nil, fmt.Errorf("run %q does not belong to project %q", req.AboutID, projectID)
 		}
 	}
+	scopes, err := s.resolveChatScopes(entry, req.DiagnosticScope)
+	if err != nil {
+		return nil, err
+	}
+	bugTargetID, err := chatBugTarget(projectID, scopes, req.BugTarget)
+	if err != nil {
+		return nil, err
+	}
 
 	run := &runlog.Run{
-		ID:        runlog.GenerateRunID(),
-		ProjectID: projectID,
-		Stage:     "chat",
-		Mode:      "solo",
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		Stream:    true,
-		Gate:      "none",
-		Roster:    map[string]string{"consultant": req.Duckling},
+		ID:                 runlog.GenerateRunID(),
+		ProjectID:          projectID,
+		Stage:              "chat",
+		Mode:               "solo",
+		Status:             "running",
+		StartedAt:          time.Now().UTC().Format(time.RFC3339),
+		Stream:             true,
+		Gate:               "none",
+		Roster:             map[string]string{"consultant": req.Duckling},
+		ContextScopes:      scopes,
+		BugTargetProjectID: bugTargetID,
 		// The subject rides the record: the runs list should say what a chat
 		// was about without opening it.
 		Note: strings.TrimSpace(fmt.Sprintf("chat about %s %s", req.AboutKind, req.AboutID)),
@@ -184,6 +208,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"stage": "chat", "mode": "solo", "task_id": run.TaskID,
 		"about": req.AboutKind + " " + req.AboutID, "duckling": req.Duckling,
+		"context_scopes": scopes, "bug_target_project_id": bugTargetID,
 	})
 	// The person's opening message, on the record like every turn after it.
 	writer.AppendEvent("message", map[string]interface{}{
@@ -335,11 +360,25 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		recordLimits(rs, limits)
 		rs.setTracker(tracker)
 	}
+	readScopes, scopeEvidence, err := s.chatReadScopes(rs.run)
+	if err != nil {
+		s.failRun(rs, err)
+		return
+	}
+	bugRoot, bugName, err := s.chatBugTarget(rs.run)
+	if err != nil {
+		s.failRun(rs, err)
+		return
+	}
 	ectx := &tools.ExecContext{
-		ProjectRoot: projectRoot,
-		RunID:       rs.run.ID,
-		Autonomy:    config.AutonomyGuarded,
-		ShellPolicy: projCfg.Shell,
+		ProjectRoot:          projectRoot,
+		ReadScopes:           readScopes,
+		BugReportRoot:        bugRoot,
+		BugReportProjectID:   rs.run.BugTargetProjectID,
+		BugReportProjectName: bugName,
+		RunID:                rs.run.ID,
+		Autonomy:             config.AutonomyGuarded,
+		ShellPolicy:          projCfg.Shell,
 		// Without this, skill_list shows only the project's skills: the
 		// global directory lives outside every project root and the fs
 		// tools rightly cannot reach it — the consultant asked about the
@@ -347,6 +386,9 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		// the stage ectx had).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	rs.writer.AppendEvent("diagnostic_scopes", map[string]interface{}{
+		"scopes": scopeEvidence, "bug_target_project_id": rs.run.BugTargetProjectID,
+	})
 	// The consultant advises about the team; it reads the resolver, not
 	// project.toml guesses.
 	ectx.OnRosterRead = func(ctx context.Context) (string, error) {
@@ -421,6 +463,108 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "chat"})
 	rs.writer.WriteState()
+}
+
+func (s *Service) resolveChatScopes(subject *registry.ProjectEntry, requested string) ([]runlog.ContextScope, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		requested = chatScopeSubject
+	}
+	if requested != chatScopeSubject && requested != chatScopeSubjectHarness {
+		return nil, fmt.Errorf("unknown diagnostic_scope %q (available: subject, subject+harness)", requested)
+	}
+	scopes := []runlog.ContextScope{{
+		Name: chatScopeSubject, ProjectID: subject.ID, Project: subject.Name, Revision: projectRevision(subject.Path),
+	}}
+	if requested == chatScopeSubject {
+		return scopes, nil
+	}
+	s.cfgMu.RLock()
+	harnessID := strings.TrimSpace(s.cfg.Diagnostics.HarnessProjectID)
+	s.cfgMu.RUnlock()
+	if harnessID == "" {
+		return nil, fmt.Errorf("subject+harness diagnostics require a harness project in Settings → Engine")
+	}
+	harness, err := s.registry.Get(harnessID)
+	if err != nil || harness.Missing {
+		return nil, fmt.Errorf("configured harness project %q is unavailable; select a registered project in Settings → Engine", harnessID)
+	}
+	if harness.ID == subject.ID {
+		return nil, fmt.Errorf("the subject is already the configured harness project; use diagnostic_scope=subject")
+	}
+	scopes = append(scopes, runlog.ContextScope{
+		Name: "harness", ProjectID: harness.ID, Project: harness.Name, Revision: projectRevision(harness.Path),
+	})
+	return scopes, nil
+}
+
+func chatBugTarget(subjectID string, scopes []runlog.ContextScope, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == chatScopeSubject {
+		return subjectID, nil
+	}
+	if requested != "harness" {
+		return "", fmt.Errorf("unknown bug_target %q (available: subject, harness)", requested)
+	}
+	for _, scope := range scopes {
+		if scope.Name == "harness" {
+			return scope.ProjectID, nil
+		}
+	}
+	return "", fmt.Errorf("bug_target=harness requires diagnostic_scope=subject+harness")
+}
+
+func projectRevision(root string) string {
+	sha, err := vcs.New(root).HeadSHA()
+	if err != nil {
+		return "unversioned"
+	}
+	return strings.TrimSpace(sha)
+}
+
+func (s *Service) chatReadScopes(run *runlog.Run) (map[string]tools.ReadScope, []map[string]string, error) {
+	scopes := map[string]tools.ReadScope{}
+	evidence := make([]map[string]string, 0, len(run.ContextScopes))
+	for _, recorded := range run.ContextScopes {
+		entry, err := s.registry.Get(recorded.ProjectID)
+		if err != nil || entry.Missing {
+			return nil, nil, fmt.Errorf("diagnostic scope %q project %q is no longer available", recorded.Name, recorded.ProjectID)
+		}
+		current := projectRevision(entry.Path)
+		evidence = append(evidence, map[string]string{
+			"name": recorded.Name, "project_id": entry.ID, "project": entry.Name,
+			"revision_at_start": recorded.Revision, "revision_now": current,
+		})
+		if recorded.Name != chatScopeSubject {
+			scopes[recorded.Name] = tools.ReadScope{
+				ProjectRoot: entry.Path, DocsRoot: entry.Path, ProjectID: entry.ID,
+				Name: entry.Name, Revision: current,
+			}
+		}
+	}
+	return scopes, evidence, nil
+}
+
+func (s *Service) chatBugTarget(run *runlog.Run) (string, string, error) {
+	id := strings.TrimSpace(run.BugTargetProjectID)
+	if id == "" || id == run.ProjectID {
+		return "", "", nil
+	}
+	entry, err := s.registry.Get(id)
+	if err != nil || entry.Missing {
+		return "", "", fmt.Errorf("bug destination project %q is no longer available", id)
+	}
+	allowed := false
+	for _, scope := range run.ContextScopes {
+		if scope.ProjectID == id {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", "", fmt.Errorf("bug destination %q is outside this chat's recorded scopes", id)
+	}
+	return entry.Path, entry.Name, nil
 }
 
 // chatTurnCount numbers the consultant's replies so each lands in its own
@@ -576,6 +720,26 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 		} else {
 			fmt.Fprintf(&b, "Document section %s could not be loaded: %v\n", aboutID, walkErr)
 		}
+	}
+
+	if len(rs.run.ContextScopes) > 1 {
+		fmt.Fprintf(&b, "\n## Diagnostic boundary\n\nThis consultation may compare the subject project with the Ducklab harness that executed it. Engine binary: `%s`.\n", build.Provenance())
+		for _, scope := range rs.run.ContextScopes {
+			fmt.Fprintf(&b, "- `%s`: %s (%s), revision at chat start `%s`\n", scope.Name, scope.Project, scope.ProjectID, scope.Revision)
+		}
+		b.WriteString("Use `scope: harness` with read-only file, search, git, artifact, task, run, or bug tools to inspect Ducklab. Omit scope to inspect the subject. Never infer a Ducklab defect merely because project code failed: classify the cause as project code, project configuration, model/provider, Ducklab harness, or inconclusive, and cite evidence from the relevant scope.\n")
+	}
+	if rs.run.BugTargetProjectID != "" {
+		target := rs.run.BugTargetProjectID
+		targetScope := chatScopeSubject
+		for _, scope := range rs.run.ContextScopes {
+			if scope.ProjectID == target {
+				target = scope.Project + " (" + scope.ProjectID + ")"
+				targetScope = scope.Name
+				break
+			}
+		}
+		fmt.Fprintf(&b, "\nBug filing destination fixed by the human for this chat: %s. `bug_file` cannot redirect it. Before filing, check duplicates with `bug_read` in `%s` scope.\n", target, targetScope)
 	}
 
 	// Configuration is a first-class consultant dossier: doctor findings are

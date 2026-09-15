@@ -1477,6 +1477,28 @@
         ],
         "type": "object"
       },
+      "RunlogContextScope": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "project",
+          "project_id"
+        ],
+        "type": "object"
+      },
       "RunlogDucklingSpend": {
         "properties": {
           "calls": {
@@ -1865,6 +1887,9 @@
           "budget": {
             "$ref": "#/components/schemas/RunlogBudgetState"
           },
+          "bug_target_project_id": {
+            "type": "string"
+          },
           "captures": {
             "items": {
               "type": "string"
@@ -1877,6 +1902,12 @@
           },
           "commit_sha": {
             "type": "string"
+          },
+          "context_scopes": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogContextScope"
+            },
+            "type": "array"
           },
           "desktop_stale": {
             "type": "boolean"
@@ -2504,6 +2535,12 @@
           "about_kind": {
             "type": "string"
           },
+          "bug_target": {
+            "type": "string"
+          },
+          "diagnostic_scope": {
+            "type": "string"
+          },
           "duckling": {
             "type": "string"
           },
@@ -2575,6 +2612,24 @@
           "key",
           "label",
           "source"
+        ],
+        "type": "object"
+      },
+      "ServiceDiagnosticDefaultsView": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "harness_project_id": {
+            "type": "string"
+          },
+          "harness_project_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "harness_project_id"
         ],
         "type": "object"
       },
@@ -4023,6 +4078,66 @@
           }
         ],
         "summary": "Replace the configured seat-suggestion criteria (a role omitted keeps the default; an empty list turns its suggestions off)"
+      }
+    },
+    "/v1/defaults/diagnostics": {
+      "get": {
+        "operationId": "DiagnosticDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceDiagnosticDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Registered harness project available to cross-project consultant diagnostics"
+      },
+      "put": {
+        "operationId": "DiagnosticDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceDiagnosticDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceDiagnosticDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Select the registered harness project used by consultant diagnostics"
       }
     },
     "/v1/defaults/engine": {

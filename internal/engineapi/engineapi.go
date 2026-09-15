@@ -380,6 +380,23 @@ func (s *Server) handleEngineDefaultsSet(w http.ResponseWriter, r *http.Request)
 	s.json(w, http.StatusOK, s.svc.EngineDefaults())
 }
 
+func (s *Server) handleDiagnosticDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.DiagnosticDefaults(r.Context()))
+}
+
+func (s *Server) handleDiagnosticDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var view service.DiagnosticDefaultsView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.DiagnosticDefaultsSet(r.Context(), view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.DiagnosticDefaults(r.Context()))
+}
+
 func (s *Server) handleBudgetDefaults(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.BudgetDefaults())
 }

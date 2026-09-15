@@ -124,6 +124,13 @@ max_concurrent_runs = 2
 shutdown_grace_s    = 30
 project_memory_max_bytes = 8192
 
+# ---------- cross-project diagnostics ----------
+
+[diagnostics]
+# A registered project id, selected in Settings. Consultant chats may mount
+# it by name as a second, read-only evidence root; models never receive a path.
+harness_project_id = "ducklab"
+
 # ---------- providers ----------
 
 [provider.beelink]

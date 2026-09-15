@@ -188,6 +188,13 @@ type Engine struct {
 	ProjectMemoryMaxBytes int    `toml:"project_memory_max_bytes" json:"project_memory_max_bytes"`
 }
 
+// Diagnostics names trusted, registered projects that may be mounted as
+// additional read-only evidence during a consultation. The model never
+// supplies a path: the engine resolves this id through its project registry.
+type Diagnostics struct {
+	HarnessProjectID string `toml:"harness_project_id" json:"harness_project_id"`
+}
+
 // ProviderKind is the provider kind.
 type ProviderKind string
 
@@ -340,13 +347,14 @@ type MCP struct {
 
 // Global is the global configuration.
 type Global struct {
-	Schema    int                     `toml:"schema" json:"schema"`
-	Defaults  Defaults                `toml:"defaults" json:"defaults"`
-	Engine    Engine                  `toml:"engine" json:"engine"`
-	Providers map[ProviderID]Provider `toml:"provider" json:"provider"`
-	Ducklings map[DucklingID]Duckling `toml:"duckling" json:"duckling"`
-	MCPs      map[string]MCP          `toml:"mcp" json:"mcp"`
-	Notify    Notify                  `toml:"notify" json:"notify"`
+	Schema      int                     `toml:"schema" json:"schema"`
+	Defaults    Defaults                `toml:"defaults" json:"defaults"`
+	Engine      Engine                  `toml:"engine" json:"engine"`
+	Diagnostics Diagnostics             `toml:"diagnostics,omitempty" json:"diagnostics,omitempty"`
+	Providers   map[ProviderID]Provider `toml:"provider" json:"provider"`
+	Ducklings   map[DucklingID]Duckling `toml:"duckling" json:"duckling"`
+	MCPs        map[string]MCP          `toml:"mcp" json:"mcp"`
+	Notify      Notify                  `toml:"notify" json:"notify"`
 	// Remote lets the global config name a publication policy that projects may
 	// inherit or override. Name and FetchOnOpen stay project-owned; only the
 	// policy matters here.
