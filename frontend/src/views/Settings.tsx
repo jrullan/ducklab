@@ -566,7 +566,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         role_turns: numbersOnly(roleTurns),
         phase_turns: numbersOnly(phaseTurns),
       }),
-      diagnostics && typeof client.diagnosticDefaultsSet === "function"
+      diagnostics && diagnosticProjectDraft !== diagnostics.harness_project_id && typeof client.diagnosticDefaultsSet === "function"
         ? client.diagnosticDefaultsSet({ harness_project_id: diagnosticProjectDraft })
         : Promise.resolve(null),
     ])
@@ -628,6 +628,11 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
               className="max-w-md rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
             >
               <option value="">not configured</option>
+              {diagnostics.harness_project_id && !diagnosticProjects.some((project) => project.id === diagnostics.harness_project_id && !project.missing) && (
+                <option value={diagnostics.harness_project_id} disabled>
+                  {diagnostics.harness_project_name || diagnostics.harness_project_id} (unavailable)
+                </option>
+              )}
               {diagnosticProjects.filter((project) => !project.missing).map((project) => (
                 <option key={project.id} value={project.id}>{project.name} ({project.id})</option>
               ))}

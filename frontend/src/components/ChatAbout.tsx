@@ -176,6 +176,10 @@ export function ChatAbout({
             </label>
           )}
         </div>
+      ) : diagnostics?.harness_project_id && diagnostics.harness_project_id !== projectId ? (
+        <p className="text-xs text-warning" data-testid="chat-diagnostic-unavailable">
+          Configured harness project {diagnostics.harness_project_name || diagnostics.harness_project_id} is unavailable. Repair its registered path or choose another project in Settings → Engine.
+        </p>
       ) : diagnostics && diagnostics.harness_project_id !== projectId ? (
         <p className="text-xs text-ink-muted" data-testid="chat-diagnostic-unavailable">
           Cross-project diagnosis is not configured. Choose a harness project in Settings → Engine.

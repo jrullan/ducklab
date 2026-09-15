@@ -94,6 +94,28 @@ describe("consultant diagnostic project", () => {
 
     await waitFor(() => expect(diagnosticDefaultsSet).toHaveBeenCalledWith({ harness_project_id: "ducklab" }));
   });
+
+  it("does not resubmit an untouched diagnostic setting with unrelated edits", async () => {
+    const diagnosticDefaultsSet = vi.fn();
+    const client = clientWith({
+      diagnosticDefaults: vi.fn().mockResolvedValue({
+        harness_project_id: "ducklab",
+        harness_project_name: "Ducklab",
+        available: false,
+      }),
+      diagnosticDefaultsSet,
+      projects: vi.fn().mockResolvedValue([]),
+    } as unknown as Partial<EngineClient>);
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="0.4.0" connection="open" client={client} section="budgets" />);
+
+    await screen.findByTestId("budget-max_tokens");
+    expect(screen.getByTestId("diagnostic-harness-project")).toHaveTextContent("Ducklab (unavailable)");
+    fireEvent.change(screen.getByTestId("budget-max_tokens"), { target: { value: "500000" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => expect(client.budgetDefaultsSet).toHaveBeenCalled());
+    expect(diagnosticDefaultsSet).not.toHaveBeenCalled();
+  });
 });
 
 // The ceiling came from the engine's config and no client could read it, so a run

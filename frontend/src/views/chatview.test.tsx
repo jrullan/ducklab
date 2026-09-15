@@ -260,6 +260,24 @@ describe("ChatAbout cross-project diagnosis", () => {
       bugTarget: "harness",
     })));
   });
+
+  it("distinguishes an unavailable configured harness from no configuration", async () => {
+    const ducklings = [{ id: "consultant", provider: "test", model: "test" }];
+    const client = {
+      roster: vi.fn().mockResolvedValue({ entries: [] }),
+      diagnosticDefaults: vi.fn().mockResolvedValue({
+        harness_project_id: "ducklab",
+        harness_project_name: "Ducklab",
+        available: false,
+      }),
+    } as unknown as EngineClient;
+    render(<ChatAbout client={client} projectId="fledge" aboutKind="run" aboutId="r-1" ducklings={ducklings} />);
+
+    fireEvent.click(screen.getByTestId("chat-about"));
+    const hint = await screen.findByTestId("chat-diagnostic-unavailable");
+    expect(hint).toHaveTextContent("Configured harness project Ducklab is unavailable");
+    expect(hint).not.toHaveTextContent("not configured");
+  });
 });
 
 describe("chat terminal state", () => {
