@@ -52,47 +52,60 @@ accepts it). No preamble, no "I recommend".`
 // a model call. The recommendation lands on the record as an `advice` event
 // and on the pending data, where the question card renders it.
 func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	call, err := s.prepareAdvice(ctx, rs, advisorSystemPrompt, "## The question the human was asked", q)
+	if err != nil {
+		cancel()
+		s.recordAdviceFailure(rs, q, "", adviceError(err))
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		answer, advisor, err := s.advise(ctx, rs, q)
+		answer, advisor, err := s.executeAdvice(ctx, rs, q, call)
 		if err != nil || strings.TrimSpace(answer) == "" {
 			s.recordAdviceFailure(rs, q, advisor, adviceError(err))
 			// No advice is a degraded question card, not a failure:
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		// The run may have moved on while the advisor thought; a
-		// recommendation for a question already answered is noise.
-		if rs.run.Status != "paused" || rs.run.PendingKind != "question" {
-			return
-		}
 		w, werr := s.ensureWriter(rs)
 		if werr != nil {
 			return
 		}
+		// The person can answer while the advisor is still assembling context or
+		// waiting on its model. Check and publish under the same lock used by run
+		// snapshots and resume: otherwise the old question's advisor races the
+		// resumed run and can file advice on the next attempt (B-411).
 		rs.wmu.Lock()
+		questionID, _ := rs.run.PendingData["question_id"].(string)
+		_, answered := rs.givenAnswers[q.ID]
+		if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
+			rs.wmu.Unlock()
+			return
+		}
 		if rs.run.PendingData == nil {
 			rs.run.PendingData = map[string]interface{}{}
 		}
 		rs.run.PendingData["advice"] = answer
 		rs.run.PendingData["advisor"] = advisor
-		rs.wmu.Unlock()
+		autonomy := rs.run.Autonomy
+		runID := rs.run.ID
 		w.AppendEvent("advice", map[string]interface{}{
 			"question_id": q.ID, "advisor": advisor, "answer": answer,
 		})
 		_ = w.WriteState()
+		rs.wmu.Unlock()
 
 		// Under yolo the draft IS the answer: the run asked, an advisor
 		// reasoned from the same documents, and nobody is watching the
 		// inbox. Submitted through the same RunAnswer a person would use,
 		// with the decider on the record — a failed submit degrades back to
 		// an ordinary question card.
-		if rs.run.Autonomy == "yolo" {
+		if autonomy == "yolo" {
 			w.AppendEvent("advice_taken", map[string]interface{}{
 				"question_id": q.ID, "advisor": advisor,
 			})
-			if err := s.runAnswer(context.Background(), rs.run.ID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
+			if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
 				w.AppendEvent("warning", map[string]interface{}{
 					"detail": "advisor auto-answer failed: " + err.Error(),
 				})
@@ -176,17 +189,38 @@ func inlineAdviceViolation(answer string) string {
 }
 
 func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, header string, q *tools.PendingQuestion) (string, string, error) {
+	call, err := s.prepareAdvice(ctx, rs, systemPrompt, header, q)
+	if err != nil {
+		return "", "", err
+	}
+	return s.executeAdvice(ctx, rs, q, call)
+}
+
+type preparedAdvice struct {
+	advisor  config.DucklingID
+	duckling *duckling.Duckling
+	provider provider.Provider
+	system   string
+	user     string
+	maxTok   int
+}
+
+// prepareAdvice resolves the seat and assembles the bounded project context.
+// A paused run calls this before its worker returns: only the provider wait is
+// asynchronous, so the old advisor is no longer walking the live run list when
+// a human answer starts the next attempt (B-411).
+func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt, header string, q *tools.PendingQuestion) (*preparedAdvice, error) {
 	advisorID := s.pickAdvisor(rs)
 	if advisorID == "" {
-		return "", "", fmt.Errorf("no advisor available")
+		return nil, fmt.Errorf("no advisor available")
 	}
 	d, err := s.ducklings.Get(advisorID)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	p, err := s.ducklings.Provider(advisorID)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	if w, werr := s.ensureWriter(rs); werr == nil {
@@ -234,10 +268,14 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	// before the answer even with suppression applied, and an advisor cut
 	// off mid-answer fails its contract as surely as an empty one.
 	maxTok := oneShotCap(d, 2000)
-	resp, err := oneShotChat(ctx, p, d, systemPrompt, b.String(), maxTok)
+	return &preparedAdvice{advisor: advisorID, duckling: d, provider: p, system: systemPrompt, user: b.String(), maxTok: maxTok}, nil
+}
+
+func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.PendingQuestion, call *preparedAdvice) (string, string, error) {
+	resp, err := oneShotChat(ctx, call.provider, call.duckling, call.system, call.user, call.maxTok)
 	if err != nil {
-		s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, err)
-		return "", string(advisorID), err
+		s.logFailedOneShot(rs, call.advisor, call.duckling, "advisor", q.Question, err)
+		return "", string(call.advisor), err
 	}
 
 	// The raw text is the evidence. A rejected answer used to be logged
@@ -247,35 +285,38 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	raw := answerText(resp)
 	answer := truncateAdvisorAnswer(stripAdvisorThinking(raw))
 	if violation := advisorViolation(answer); violation != "" {
-		repairPrompt := b.String() + "\n\nYour previous answer was:\n" + answer +
+		repairPrompt := call.user + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
-		repair, repairErr := oneShotChat(ctx, p, d, systemPrompt, repairPrompt, maxTok)
+		repair, repairErr := oneShotChat(ctx, call.provider, call.duckling, call.system, repairPrompt, call.maxTok)
 		if repairErr != nil {
-			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, raw, repairErr)
-			return "", string(advisorID), repairErr
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, repairErr)
+			return "", string(call.advisor), repairErr
 		}
 		raw = answerText(repair)
 		answer = truncateAdvisorAnswer(stripAdvisorThinking(raw))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
-			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, raw, err)
-			return "", string(advisorID), err
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, err)
+			return "", string(call.advisor), err
 		}
 	}
 
 	// The consultation is real spend: on the tracker and in llm.jsonl like
 	// every other call this run caused.
 	calc := provider.CostCalculator{
-		InputPerMTok: d.Cost.InputPerMTok, OutputPerMTok: d.Cost.OutputPerMTok,
+		InputPerMTok: call.duckling.Cost.InputPerMTok, OutputPerMTok: call.duckling.Cost.OutputPerMTok,
 	}
 	cost := calc.Cost(resp.Usage)
-	if rs.tracker != nil {
-		rs.tracker.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+	rs.wmu.Lock()
+	tracker := rs.tracker
+	rs.wmu.Unlock()
+	if tracker != nil {
+		tracker.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
 	}
-	if w := s.llmWriter(rs, rs.tracker); w != nil {
+	if w := s.llmWriter(rs, tracker); w != nil {
 		w.AppendLLM(&agent.LLMCallRecord{
-			Duckling: string(advisorID), Provider: string(d.Provider), Model: d.Model,
+			Duckling: string(call.advisor), Provider: string(call.duckling.Provider), Model: call.duckling.Model,
 			Role:    "advisor",
 			Request: map[string]interface{}{"question": q.Question},
 			Response: map[string]interface{}{
@@ -289,7 +330,7 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 			FinishReason: resp.FinishReason,
 		})
 	}
-	return strings.TrimSpace(answer), string(advisorID), nil
+	return strings.TrimSpace(answer), string(call.advisor), nil
 }
 
 // oneShotChat is the single way a service-side one-shot call reaches a
@@ -464,17 +505,23 @@ func (s *Service) recordAdviceFailure(rs *runState, q *tools.PendingQuestion, ad
 		return
 	}
 	rs.wmu.Lock()
+	questionID, _ := rs.run.PendingData["question_id"].(string)
+	_, answered := rs.givenAnswers[q.ID]
+	if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
+		rs.wmu.Unlock()
+		return
+	}
 	if rs.run.PendingData == nil {
 		rs.run.PendingData = map[string]interface{}{}
 	}
 	rs.run.PendingData["advice_failed"] = cause
-	rs.wmu.Unlock()
 	w.AppendEvent("advice_failed", map[string]interface{}{
 		"question_id": q.ID,
 		"advisor":     advisor,
 		"error":       cause,
 	})
 	_ = w.WriteState()
+	rs.wmu.Unlock()
 }
 
 // stripAdvisorThinking removes provider-specific deliberation wrappers before

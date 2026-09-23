@@ -121,6 +121,7 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	}
 	q.mu.Unlock()
 
+	item.rs.wmu.Lock()
 	settleActiveWallclock(item.rs.run, time.Now())
 	item.rs.run.Status = "queued"
 	item.rs.run.QueuedReason = reason
@@ -128,6 +129,7 @@ func (q *runQueue) submit(s *Service, item *queued) {
 		"reason": reason,
 	})
 	item.rs.writer.WriteState()
+	item.rs.wmu.Unlock()
 }
 
 // acquireProvider reserves one provider slot for one role turn.
@@ -203,13 +205,21 @@ func (q *runQueue) reserve(item *queued) {
 }
 
 func (q *runQueue) start(s *Service, item *queued) {
+	item.rs.wmu.Lock()
 	item.rs.run.Status = "running"
 	startActiveWallclock(item.rs.run, time.Now())
 	item.rs.run.QueuedReason = ""
 	item.rs.writer.WriteState()
+	runID := item.rs.run.ID
+	projectID := item.rs.run.ProjectID
+	stage := item.rs.run.Stage
+	mode := item.rs.run.Mode
+	taskID := item.rs.run.TaskID
+	startedAt := item.rs.run.StartedAt
+	item.rs.wmu.Unlock()
 	if s.bus != nil {
 		s.bus.Publish(bus.Event{
-			Type: "run_started", RunID: item.rs.run.ID, ProjectID: item.rs.run.ProjectID,
+			Type: "run_started", RunID: runID, ProjectID: projectID,
 			// The desktop builds a provisional record from this event for runs
 			// it did not launch (CLI, autopilot). Without these fields it
 			// guessed: stage defaulted to "build" and started_at came from the
@@ -217,8 +227,8 @@ func (q *runQueue) start(s *Service, item *queued) {
 			// lexical sort against the API's UTC-Z strings buried a fresh run
 			// hours deep in the list.
 			Data: map[string]interface{}{
-				"stage": item.rs.run.Stage, "mode": item.rs.run.Mode,
-				"task_id": item.rs.run.TaskID, "started_at": item.rs.run.StartedAt,
+				"stage": stage, "mode": mode,
+				"task_id": taskID, "started_at": startedAt,
 			},
 		})
 	}

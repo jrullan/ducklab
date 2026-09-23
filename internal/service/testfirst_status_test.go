@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -521,7 +522,20 @@ func TestResumedTestFirstUsesItsLaunchBaseline(t *testing.T) {
 		return call
 	}
 	fake := s.providers["fake"].(*provider.Fake)
-	fake.ScriptFunc = func(_ provider.ChatRequest, call int) *provider.ChatResponse {
+	advisorStarted := make(chan struct{})
+	releaseAdvisor := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseAdvisor) }) }
+	t.Cleanup(release)
+	fake.ScriptFunc = func(req provider.ChatRequest, call int) *provider.ChatResponse {
+		if len(req.Messages) > 0 && strings.HasPrefix(req.Messages[0].Content, "You are the advisor duckling in ducklab.") {
+			close(advisorStarted)
+			<-releaseAdvisor
+			return &provider.ChatResponse{Choices: []provider.Choice{{
+				Message:      provider.Message{Content: "Use the legacy format too; it is the compatible choice."},
+				FinishReason: provider.FinishStop,
+			}}}
+		}
 		var message provider.Message
 		switch call {
 		case 1:
@@ -550,6 +564,11 @@ func TestResumedTestFirstUsesItsLaunchBaseline(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("test writer did not pause")
 	}
+	select {
+	case <-advisorStarted:
+	case <-time.After(15 * time.Second):
+		t.Fatal("advisor did not begin before the run was answered")
+	}
 	if rs.run.Status != "paused" || rs.run.PendingKind != "question" {
 		t.Fatalf("state = %s/%s, want paused/question", rs.run.Status, rs.run.PendingKind)
 	}
@@ -563,6 +582,7 @@ func TestResumedTestFirstUsesItsLaunchBaseline(t *testing.T) {
 	if err := s.RunAnswer(context.Background(), run.ID, questionID, "yes"); err != nil {
 		t.Fatal(err)
 	}
+	release()
 	s.runsMu.RLock()
 	rs = s.runs[run.ID]
 	s.runsMu.RUnlock()
@@ -581,6 +601,11 @@ func TestResumedTestFirstUsesItsLaunchBaseline(t *testing.T) {
 	events, err := runlog.ReadEvents(rs.runDir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == "advice" && event.Data["question_id"] == questionID {
+			t.Fatalf("late advice for an answered question landed on the resumed run: %#v", event.Data)
+		}
 	}
 	beforeGates := 0
 	for _, event := range events {
