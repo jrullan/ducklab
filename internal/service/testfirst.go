@@ -388,8 +388,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	defer rs.writer.Close()
 	// Record the custody root before the first (baseline) gate, so even a
 	// failure before the model turn has durable evidence of which checkout ran.
+	rs.wmu.Lock()
 	rs.run.ExecutionRoot = projectRoot
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 	// A worktree remains available at a human gate: acceptance must commit and
 	// prove its isolated red test. Accept and reject remove it after deciding.
 	defer close(rs.done)
@@ -401,15 +403,19 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// every later gate measured a file nobody had accepted.
 	if git := vcs.New(projectRoot); git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
+			head, herr := git.HeadSHA()
+			rs.wmu.Lock()
 			rs.run.TreeSnapshot = snap
-			if head, herr := git.HeadSHA(); herr == nil {
+			if herr == nil {
 				rs.run.TreeSnapshotHead = head
-			} else {
+			}
+			rs.writer.WriteState()
+			rs.wmu.Unlock()
+			if herr != nil {
 				rs.writer.AppendEvent("warning", map[string]interface{}{
 					"detail": "could not record HEAD with the tree snapshot; cleanup will refuse unless the snapshot matches HEAD: " + herr.Error(),
 				})
 			}
-			rs.writer.WriteState()
 		} else {
 			rs.writer.AppendEvent("warning", map[string]interface{}{
 				"detail": "could not snapshot the tree; a failure will leave its edits behind: " + serr.Error(),
@@ -449,14 +455,18 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		s.failRun(rs, fmt.Errorf("no implementer seated to write the test for %s — assign one on the Roster board (or pass ducklings on the launch)", rs.run.Mode))
 		return
 	}
+	rs.wmu.Lock()
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, req.Seats)
 	if req.Duckling != "" {
 		rs.run.RosterSources[string(config.RoleImplementer)] = "request"
 	}
-	s.emitLaunchEscalation(rs)
 	if warning != "" {
 		rs.run.Warning = warning
+	}
+	rs.wmu.Unlock()
+	s.emitLaunchEscalation(rs)
+	if warning != "" {
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
 
@@ -482,9 +492,11 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// the answer existed and never reached the tool.
 		Answers: rs.answers(),
 	}
+	rs.wmu.Lock()
 	rs.execCtx = ectx
 	rs.run.ExecutionRoot = projectRoot
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer:  s.llmWriter(rs, tracker),

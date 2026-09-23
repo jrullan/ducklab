@@ -3610,10 +3610,11 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	if rs.run.Status != "paused" {
-		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, rs.run.Status)
+	current := rs.snapshotRun()
+	if current.Status != "paused" {
+		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, current.Status)
 	}
-	if cap, binding := bindingBudgetCap(rs.run); binding {
+	if cap, binding := bindingBudgetCap(current); binding {
 		return nil, fmt.Errorf("run %q cannot resume: %s budget cap is still in effect — lift it first", id, cap)
 	}
 
@@ -3624,8 +3625,8 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 
 	// A human gate is not a resume point — it is answered with accept/reject,
 	// not continued.
-	if rs.run.PendingKind == "gate" {
-		return rs.run, nil
+	if current.PendingKind == "gate" {
+		return current, nil
 	}
 	entry, err := s.entryFor(rs)
 	if err != nil {
@@ -3637,21 +3638,23 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// the request persisted beside it — a spec whose architect asked the
 	// human used to die here as "cannot be resumed", so the question was a
 	// dead end even once the person had the answer.
-	if rs.run.Stage != "build" && rs.run.Stage != "test" {
+	if current.Stage != "build" && current.Stage != "test" {
 		sreq, ok := loadStageRequest(rs.runDir)
 		if !ok {
-			return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", rs.run.Stage)
+			return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", current.Stage)
 		}
 		sreq.resumed = true
 		runCtx, cancel := context.WithCancel(context.Background())
+		rs.wmu.Lock()
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
 		startActiveWallclock(rs.run, time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, entry.Path))
+		w.AppendEvent("checkpoint", resumeCheckpointData(current, entry.Path))
 		w.WriteState()
+		rs.wmu.Unlock()
 		go s.executeStage(runCtx, rs, entry.Path, sreq)
 		return rs.run, nil
 	}
@@ -3660,27 +3663,29 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// the record — RunAnswer lands here, and answering a test run's question
 	// used to re-enter the BUILD strategy on a run whose whole point was to
 	// not build anything.
-	if rs.run.Stage == "test" {
+	if current.Stage == "test" {
 		projCfg, cfgErr := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
 		if cfgErr != nil {
 			return nil, cfgErr
 		}
-		treq := TestFirstRequest{TaskID: rs.run.TaskID, Mode: rs.run.Mode}
-		if imp := rs.run.Roster["implementer"]; imp != "" {
+		treq := TestFirstRequest{TaskID: current.TaskID, Mode: current.Mode}
+		if imp := current.Roster["implementer"]; imp != "" {
 			treq.Ducklings = []string{imp}
-			if rev := rs.run.Roster["reviewer"]; rev != "" && rs.run.Mode == "pair" {
+			if rev := current.Roster["reviewer"]; rev != "" && current.Mode == "pair" {
 				treq.Ducklings = append(treq.Ducklings, rev)
 			}
 		}
 		// The chain promise stays ON the record (consumed at acceptance);
 		// the request only needs to know it is there.
-		if rs.run.ChainBuild != nil {
+		if current.ChainBuild != nil {
 			treq.ThenBuild = true
-			if raw, mErr := json.Marshal(rs.run.ChainBuild); mErr == nil {
+			if raw, mErr := json.Marshal(current.ChainBuild); mErr == nil {
 				_ = json.Unmarshal(raw, &treq.Build)
 			}
 		}
+		root := runRoot(current, entry.Path)
 		runCtx, cancel := context.WithCancel(context.Background())
+		rs.wmu.Lock()
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
@@ -3689,18 +3694,21 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, runRoot(rs.run, entry.Path)))
+		w.AppendEvent("checkpoint", resumeCheckpointData(current, root))
 		w.WriteState()
+		rs.wmu.Unlock()
 		s.queue.submit(s, &queued{
 			rs: rs, ctx: runCtx, chained: true,
-			exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(rs.run, entry.Path), projCfg, treq) },
+			exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(current, entry.Path), projCfg, treq) },
 		})
 		return rs.run, nil
 	}
 
-	req := resumeRequest(rs.run)
+	req := resumeRequest(current)
+	root := runRoot(current, entry.Path)
 
 	runCtx, cancel := context.WithCancel(context.Background())
+	rs.wmu.Lock()
 	rs.cancel = cancel
 	rs.done = make(chan struct{})
 	// Cleared BEFORE the queue looks: projectHeld counts paused build runs,
@@ -3713,8 +3721,9 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// resuming answers it. Left in place, a resumed, working run went on
 	// wearing "Why it failed" over a live conversation.
 	rs.run.Failure = ""
-	w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, runRoot(rs.run, entry.Path)))
+	w.AppendEvent("checkpoint", resumeCheckpointData(current, root))
 	w.WriteState()
+	rs.wmu.Unlock()
 
 	// Through the queue like everything else, at the FRONT: it was mid-flight
 	// already. Resuming used to spawn its goroutine directly, so a resumed run
@@ -4768,8 +4777,11 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
+	rs.wmu.Lock()
 	if rs.run.PendingKind != "question" {
-		return fmt.Errorf("run %q is not waiting for an answer (pending: %q)", id, rs.run.PendingKind)
+		pendingKind := rs.run.PendingKind
+		rs.wmu.Unlock()
+		return fmt.Errorf("run %q is not waiting for an answer (pending: %q)", id, pendingKind)
 	}
 	if questionID == "" {
 		// Answering "the pending question" without naming it is the common
@@ -4779,12 +4791,20 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 		}
 	}
 	if questionID == "" {
+		rs.wmu.Unlock()
 		return fmt.Errorf("run %q has no recorded question id", id)
 	}
 	// The question's text travels with the answer: the id survives only an
 	// exact re-ask, and the replayed prompt needs the words.
 	questionText, _ := rs.run.PendingData["question"].(string)
-	rs.recordAnswer(questionID, questionText, answer)
+	if rs.givenAnswers == nil {
+		rs.givenAnswers = map[string]string{}
+	}
+	rs.givenAnswers[questionID] = answer
+	if questionText != "" {
+		rs.qa = append(rs.qa, qaPair{q: questionText, a: answer})
+	}
+	rs.wmu.Unlock()
 
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -5389,8 +5409,12 @@ func (s *Service) pauseAtSafePoint(rs *runState) bool {
 }
 
 func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapter {
+	rs.wmu.Lock()
+	w := rs.writer
+	run := rs.run
+	rs.wmu.Unlock()
 	return &runLogAdapter{
-		w: rs.writer, run: rs.run, mu: &rs.wmu,
+		w: w, run: run, mu: &rs.wmu,
 		onSpend: func() {
 			s.publishSpend(rs, tracker)
 			s.checkWallclockEscalation(rs)
