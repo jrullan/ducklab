@@ -841,7 +841,9 @@ func checkTestGate(mode string) error {
 // have unchained — their accept then continues the chain, because the chain
 // lives on the record.
 func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstRequest) {
-	if _, err := s.RunAcceptAs(ctx, rs.run.ID, "chained: the test landed red", "auto:tdd"); err != nil {
+	runID := rs.snapshotRun().ID
+	if _, err := s.RunAcceptAs(ctx, runID, "chained: the test landed red", "auto:tdd"); err != nil {
+		rs.wmu.Lock()
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "gate"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -854,6 +856,7 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 		})
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "verdict": rs.run.Verdict})
 		rs.writer.WriteState()
+		rs.wmu.Unlock()
 	}
 }
 

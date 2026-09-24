@@ -5438,7 +5438,6 @@ func (s *Service) pauseAtSafePoint(rs *runState) bool {
 	rs.wmu.Lock()
 	data := rs.pausePending
 	rs.pausePending = nil
-	rs.wmu.Unlock()
 	detail, _ := data["detail"].(string)
 	settleActiveWallclock(rs.run, time.Now())
 	rs.run.Status = "paused"
@@ -5447,8 +5446,10 @@ func (s *Service) pauseAtSafePoint(rs *runState) bool {
 	rs.run.PendingData = data
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "history_duration", "detail": detail})
 	rs.writer.WriteState()
-	if rs.cancel != nil {
-		rs.cancel()
+	cancel := rs.cancel
+	rs.wmu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return true
 }

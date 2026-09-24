@@ -281,6 +281,63 @@ func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
 	}
 }
 
+// A failed automatic accept returns the red test to a human gate while run
+// readers remain live. That transition must use the same snapshot boundary as
+// every other run-state mutation; otherwise a concurrent RunGet or event
+// consumer races the chain's recovery writes.
+func TestAFailedTddChainPublishesItsGateThroughTheRunLock(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	run := &runlog.Run{
+		ID: "r-chain-accept-failure", Stage: "test", Status: "running", Verdict: "PASSED",
+		WorktreePath: "/tmp/retained-chain-worktree",
+	}
+	w, err := runlog.NewWriter(t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: run, writer: w}
+
+	started := make(chan struct{})
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		close(started)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = rs.snapshotRun()
+			}
+		}
+	}()
+	<-started
+
+	// The run is intentionally absent from s.runs, so every automatic accept
+	// fails before mutating git and exercises only chainBuild's recovery path.
+	for range 100 {
+		rs.wmu.Lock()
+		rs.run.Status = "running"
+		rs.run.PendingKind = ""
+		rs.run.PendingData = nil
+		rs.wmu.Unlock()
+		s.chainBuild(context.Background(), rs, TestFirstRequest{})
+	}
+	close(stop)
+	readers.Wait()
+
+	got := rs.snapshotRun()
+	if got.Status != "paused" || got.PendingKind != "gate" {
+		t.Fatalf("failed chain status = %s/%s, want paused/gate", got.Status, got.PendingKind)
+	}
+	if retained, _ := got.PendingData["retain_worktree"].(bool); !retained {
+		t.Fatalf("failed chain did not retain its worktree: %#v", got.PendingData)
+	}
+}
+
 // A chain's build mode has the same provenance contract as an ordinary
 // RunStart: absent means resolve settings; present means the person requested
 // it. Check the persisted record because it is what later explains the run.
