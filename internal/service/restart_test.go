@@ -133,9 +133,7 @@ func TestRestartRecoversAbandonedCheckpointsAfterDeadline(t *testing.T) {
 	}
 
 	// The run left the paused/engine_restart state — it was resumed, not parked.
-	s.runsMu.RLock()
-	resumed := s.runs["r-restart"].run
-	s.runsMu.RUnlock()
+	resumed := rs.snapshotRun()
 	if resumed.Status == "paused" && resumed.PendingKind == "engine_restart" {
 		t.Error("run stayed checkpointed after its deadline; work was left parked")
 	}

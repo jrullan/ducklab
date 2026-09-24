@@ -589,7 +589,11 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.writer.WriteVerify(after.Output)
 
 	verdict, detail := judgeTestFirstWithGate(before, after, diff, projCfg.Verify.TestGlobs, after.Command)
+	rs.wmu.Lock()
 	rs.run.Verdict = verdict
+	autonomy := rs.run.Autonomy
+	projectID := rs.run.ProjectID
+	rs.wmu.Unlock()
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict, "detail": detail})
 
 	// Under yolo with the autopilot driving, a FAILED verdict — green gate,
@@ -597,20 +601,24 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// nobody is watching the pause, and the loop's retry carries the reason
 	// as a note. PASSED and UNVERIFIED keep their human gate even here —
 	// installing a spec nobody read stays off the table (P3).
-	if verdict == "FAILED" && rs.run.Autonomy == "yolo" && s.autopilotOn(rs.run.ProjectID) {
+	if verdict == "FAILED" && autonomy == "yolo" && s.autopilotOn(projectID) {
+		rs.wmu.Lock()
 		rs.run.Status = "failed"
 		rs.run.Failure = detail
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
-		restoreAfterUnaccepted(rs)
 		rs.writer.WriteState()
-		s.autopilotOnFail(rs.run)
+		failed := *rs.run
+		rs.wmu.Unlock()
+		restoreAfterUnaccepted(rs)
+		s.autopilotOnFail(&failed)
 		return
 	}
 
 	// Always a human gate, whichever way it went. A failing test is the
 	// specification of the next run, and installing one nobody read would put
 	// a model's opinion where a person's belongs.
+	rs.wmu.Lock()
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -622,6 +630,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// The chain: commit the red test, start the build. No pause — the
 		// person authorized this path when they clicked it.
 		rs.writer.WriteState()
+		rs.wmu.Unlock()
 		s.chainBuild(ctx, rs, req)
 		return
 	}
@@ -629,6 +638,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"kind": "gate", "verdict": verdict, "detail": detail,
 	})
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 }
 
 // testFirstBaseline returns the durable launch-time gate measurement. A resume

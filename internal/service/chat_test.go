@@ -242,15 +242,17 @@ func TestAChatConversesAndPausesForTheNextMessage(t *testing.T) {
 	waitPaused := func() {
 		deadline := time.Now().Add(15 * time.Second)
 		for time.Now().Before(deadline) {
-			if rs.run.Status == "paused" && rs.run.PendingKind == "chat" {
+			current := rs.snapshotRun()
+			if current.Status == "paused" && current.PendingKind == "chat" {
 				return
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatalf("chat never paused for the next message: %s/%s (%s)", rs.run.Status, rs.run.PendingKind, rs.run.Failure)
+		current := rs.snapshotRun()
+		t.Fatalf("chat never paused for the next message: %s/%s (%s)", current.Status, current.PendingKind, current.Failure)
 	}
 	waitPaused()
-	if got := runNext(rs.run); len(got) == 0 || got[0] != "reply" {
+	if got := runNext(rs.snapshotRun()); len(got) == 0 || got[0] != "reply" {
 		t.Errorf("next = %v, want reply first", got)
 	}
 
@@ -349,11 +351,16 @@ func TestChatReleasesProviderSlotBetweenMessages(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !(rs.run.Status == "paused" && rs.run.PendingKind == "chat") {
+	for time.Now().Before(deadline) {
+		current := rs.snapshotRun()
+		if current.Status == "paused" && current.PendingKind == "chat" {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if rs.run.Status != "paused" || rs.run.PendingKind != "chat" {
-		t.Fatalf("chat did not become idle after releasing its provider: %s/%s", rs.run.Status, rs.run.PendingKind)
+	current := rs.snapshotRun()
+	if current.Status != "paused" || current.PendingKind != "chat" {
+		t.Fatalf("chat did not become idle after releasing its provider: %s/%s", current.Status, current.PendingKind)
 	}
 }
 
@@ -376,7 +383,11 @@ func TestEndingAChatIsNotAnAbort(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && !(rs.run.Status == "paused" && rs.run.PendingKind == "chat") {
+	for time.Now().Before(deadline) {
+		current := rs.snapshotRun()
+		if current.Status == "paused" && current.PendingKind == "chat" {
+			break
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	got, err := s.ChatEnd(context.Background(), run.ID)
@@ -512,11 +523,12 @@ func TestAChatProjectWallclockOverrideDoesNotCreateACeiling(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(5 * time.Second)
-	for rs.run.Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
+	for rs.snapshotRun().Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if rs.run.Budget.Limit.WallclockS != 0 {
-		t.Errorf("chat inherited project wallclock ceiling = %d, want none", rs.run.Budget.Limit.WallclockS)
+	current := rs.snapshotRun()
+	if current.Budget.Limit.WallclockS != 0 {
+		t.Errorf("chat inherited project wallclock ceiling = %d, want none", current.Budget.Limit.WallclockS)
 	}
 }
 
@@ -791,8 +803,11 @@ func waitForChatPause(t *testing.T, s *Service, runID string) {
 		s.runsMu.RLock()
 		rs := s.runs[runID]
 		s.runsMu.RUnlock()
-		if rs != nil && rs.run.Status == "paused" && rs.run.PendingKind == "chat" {
-			return
+		if rs != nil {
+			current := rs.snapshotRun()
+			if current.Status == "paused" && current.PendingKind == "chat" {
+				return
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -816,14 +831,15 @@ func TestAChatHasNoWallclockCeiling(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(5 * time.Second)
-	for rs.run.Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
+	for rs.snapshotRun().Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if rs.run.Budget.Limit.WallclockS != 0 {
+	current := rs.snapshotRun()
+	if current.Budget.Limit.WallclockS != 0 {
 		t.Errorf("chat wallclock ceiling = %d, want none — idle time is not spend",
-			rs.run.Budget.Limit.WallclockS)
+			current.Budget.Limit.WallclockS)
 	}
-	if rs.run.Budget.Limit.Tokens == 0 {
+	if current.Budget.Limit.Tokens == 0 {
 		t.Error("the real-spend caps must survive: tokens ceiling is gone too")
 	}
 }

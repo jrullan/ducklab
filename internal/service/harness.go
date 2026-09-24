@@ -182,8 +182,11 @@ func concreteAuditEvidence(value string) bool {
 // called. A resumed run reuses the record: stack probes are launch work, not a
 // tax paid by every turn or verify_run.
 func ensureHarnessProfile(rs *runState, root string, project *config.Project, taskVerification string, acceptanceProbes, buildGraphFiles []string) (string, error) {
-	if rs.run.HarnessProfile != nil {
-		return harnessCapsule(rs.run.HarnessProfile), nil
+	rs.wmu.Lock()
+	existing := rs.run.HarnessProfile
+	rs.wmu.Unlock()
+	if existing != nil {
+		return harnessCapsule(existing), nil
 	}
 	registry := capability.DefaultRegistry()
 	resolved, detectErr := registry.ResolveProject(capability.Context{
@@ -236,13 +239,16 @@ func ensureHarnessProfile(rs *runState, root string, project *config.Project, ta
 		})
 	}
 
-	rs.run.HarnessProfile = profile
 	if err := rs.writer.AppendEvent("capabilities_resolved", map[string]interface{}{"profile": profile}); err != nil {
 		return "", err
 	}
+	rs.wmu.Lock()
+	rs.run.HarnessProfile = profile
 	if err := rs.writer.WriteState(); err != nil {
+		rs.wmu.Unlock()
 		return "", err
 	}
+	rs.wmu.Unlock()
 	return harnessCapsule(profile), nil
 }
 

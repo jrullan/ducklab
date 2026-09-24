@@ -1573,8 +1573,9 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		s.failRun(rs, err)
 		return
 	}
-	activeCapabilities := make([]string, 0, len(rs.run.HarnessProfile.Capabilities))
-	for _, detected := range rs.run.HarnessProfile.Capabilities {
+	runAtLaunch := rs.snapshotRun()
+	activeCapabilities := make([]string, 0, len(runAtLaunch.HarnessProfile.Capabilities))
+	for _, detected := range runAtLaunch.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
 	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
@@ -1769,15 +1770,19 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// half-made edits it exists to remove.
 	if git := vcs.New(runRoot(rs.run, entry.Path)); rs.run.TreeSnapshot == "" && git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
+			head, herr := git.HeadSHA()
+			rs.wmu.Lock()
 			rs.run.TreeSnapshot = snap
-			if head, herr := git.HeadSHA(); herr == nil {
+			if herr == nil {
 				rs.run.TreeSnapshotHead = head
-			} else {
+			}
+			rs.writer.WriteState()
+			rs.wmu.Unlock()
+			if herr != nil {
 				rs.writer.AppendEvent("warning", map[string]interface{}{
 					"detail": "could not record HEAD with the tree snapshot; cleanup will refuse unless the snapshot matches HEAD: " + herr.Error(),
 				})
 			}
-			rs.writer.WriteState()
 		} else {
 			rs.writer.AppendEvent("warning", map[string]interface{}{
 				"detail": "could not snapshot the tree; a failure will leave its edits behind: " + serr.Error(),
@@ -1827,8 +1832,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.failRun(rs, err)
 		return
 	}
-	activeCapabilities := make([]string, 0, len(rs.run.HarnessProfile.Capabilities))
-	for _, detected := range rs.run.HarnessProfile.Capabilities {
+	runAtLaunch := rs.snapshotRun()
+	activeCapabilities := make([]string, 0, len(runAtLaunch.HarnessProfile.Capabilities))
+	for _, detected := range runAtLaunch.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
 	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
@@ -1836,20 +1842,20 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	ectx := &tools.ExecContext{
 		ProjectRoot:          root,
 		DocsRoot:             entry.Path,
-		RunID:                rs.run.ID,
-		ProjectID:            rs.run.ProjectID,
-		Autonomy:             config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites:         rs.run.UnsafeWrites,
+		RunID:                runAtLaunch.ID,
+		ProjectID:            runAtLaunch.ProjectID,
+		Autonomy:             config.Autonomy(runAtLaunch.Autonomy),
+		UnsafeWrites:         runAtLaunch.UnsafeWrites,
 		ShellPolicy:          projCfg.Shell,
 		Verify:               projCfg.Verify,
 		Capabilities:         projCfg.Capabilities,
 		HarnessContext:       harnessContext,
-		TaskVerification:     rs.run.HarnessProfile.TaskVerification,
+		TaskVerification:     runAtLaunch.HarnessProfile.TaskVerification,
 		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
 		TaskWritableFiles:    uniqueStrings(taskWritableFiles),
 		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
-		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
-		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
+		TaskAcceptanceProbes: append([]string(nil), runAtLaunch.HarnessProfile.AcceptanceProbes...),
+		BuildGraphFiles:      append([]string(nil), runAtLaunch.HarnessProfile.BuildGraphFiles...),
 		ActiveCapabilities:   activeCapabilities,
 		WorkspaceDiff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(runDiffExclusions(rs.run, root, entry.Path)...)
@@ -1859,9 +1865,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		GlobalSkillsDir: globalSkillsDir(),
 	}
 	attachReviewContractValidator(ectx)
+	rs.wmu.Lock()
 	rs.execCtx = ectx
 	rs.run.ExecutionRoot = root
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 	for _, finding := range tools.InspectAcceptanceProbeContract(ectx) {
 		if finding.Enforcement != capability.Required {
 			continue
@@ -1926,13 +1934,17 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.failRun(rs, err)
 		return
 	}
+	rs.wmu.Lock()
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, req.Seats)
-	s.emitLaunchEscalation(rs)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
 		// legitimate experiment, but reports must be able to segment it.
 		rs.run.Warning = rosterWarning
+	}
+	rs.wmu.Unlock()
+	s.emitLaunchEscalation(rs)
+	if rosterWarning != "" {
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rosterWarning})
 	}
 	cache := &loopCache{
@@ -2166,6 +2178,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.afterRunDiff(rs)
 	}
 	governanceCallouts := governanceCallouts(diff)
+	rs.wmu.Lock()
 	if len(governanceCallouts) > 0 {
 		rs.run.GovernanceModified = true
 	}
@@ -2180,6 +2193,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			"detail": "this run changed no files — the work was already in the tree",
 		})
 	}
+	rs.wmu.Unlock()
 
 	// A gate is only worth what the tests are worth. A change that edits both
 	// at once goes green either way, so the test hunks are pulled out and put
@@ -2451,33 +2465,41 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 // with four prior failures in the data (B-361), and the sentence is what an
 // operator relays.
 func (s *Service) emitLaunchEscalation(rs *runState) {
-	if rs == nil || rs.writer == nil || rs.run.TaskID == "" {
+	if rs == nil || rs.writer == nil {
+		return
+	}
+	current := rs.snapshotRun()
+	if current.TaskID == "" {
 		return
 	}
 	failures := 0
 	s.runsMu.RLock()
+	priors := make([]*runState, 0, len(s.runs))
 	for id, prior := range s.runs {
-		if id == rs.run.ID || prior == nil || prior.run == nil {
+		if id == current.ID || prior == nil || prior.run == nil {
 			continue
 		}
-		r := prior.run
-		if r.ProjectID == rs.run.ProjectID && r.TaskID == rs.run.TaskID && r.Stage == rs.run.Stage &&
+		priors = append(priors, prior)
+	}
+	s.runsMu.RUnlock()
+	for _, prior := range priors {
+		r := prior.snapshotRun()
+		if r.ProjectID == current.ProjectID && r.TaskID == current.TaskID && r.Stage == current.Stage &&
 			(r.Verdict == "FAILED" || r.Verdict == "ABORTED") {
 			failures++
 		}
 	}
-	s.runsMu.RUnlock()
 	if failures < 2 {
 		return
 	}
 	cards, _ := s.Scorecards(context.Background())
-	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), rs.run.Roster[string(config.RoleImplementer)], cards)
+	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), current.Roster[string(config.RoleImplementer)], cards)
 	data := map[string]interface{}{
 		"point": "launch", "thresholds_fired": []string{"repeated_task_stage_failure"},
 		"prior_failed_or_aborted_runs": failures, "current_wilson_floor": floor,
 		"diagnoses": map[string]interface{}{"task_brief_quality": fmt.Sprintf(
 			"launch-time reminder from history, not evidence from this run: this task's %s stage has failed or been aborted here %d times; improve the task body before reseating",
-			rs.run.Stage, failures)},
+			current.Stage, failures)},
 		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
 	// A stronger candidate is useful reseating evidence, but its absence must
@@ -2493,7 +2515,9 @@ func (s *Service) failRun(rs *runState, err error) {
 	// settle this interval only after failRun had written state, leaving the
 	// durable active clock at its pre-resume value while the budget showed a
 	// different, stale pre-call value (Neocapture plan, 2026-08-30).
+	rs.wmu.Lock()
 	settleActiveWallclock(rs.run, time.Now())
+	rs.wmu.Unlock()
 	// A budget running out is a decision point, not a defect. The run did
 	// nothing wrong — the person's own ceiling stopped it — and failing it
 	// RESTORED THE TREE, so two million tokens of work were rolled back when
@@ -2642,11 +2666,13 @@ func (s *Service) failRun(rs *runState, err error) {
 	}
 	recordSpend(rs, rs.tracker)
 	s.publishSpend(rs, rs.tracker)
+	rs.wmu.Lock()
 	rs.run.Status = "failed"
 	rs.run.Verdict = "FAILED"
 	rs.run.Failure = err.Error()
-	s.emitEscalationAtDecision(rs, "failed_run")
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	rs.wmu.Unlock()
+	s.emitEscalationAtDecision(rs, "failed_run")
 	// A configuration-shaped failure needs a door to the consultant, not just
 	// its raw error. The finding is recorded on this failed run so the desktop
 	// can seed that consultation without changing configuration on its own.
@@ -2662,8 +2688,11 @@ func (s *Service) failRun(rs *runState, err error) {
 	rs.writer.AppendEvent("error", map[string]interface{}{"error": err.Error()})
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
 	restoreAfterUnaccepted(rs)
+	rs.wmu.Lock()
 	rs.writer.WriteState()
-	s.autopilotOnFail(rs.run)
+	failed := *rs.run
+	rs.wmu.Unlock()
+	s.autopilotOnFail(&failed)
 }
 
 // configFindingForFailure connects a failure to a deterministic doctor finding
@@ -3656,7 +3685,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		w.WriteState()
 		rs.wmu.Unlock()
 		go s.executeStage(runCtx, rs, entry.Path, sreq)
-		return rs.run, nil
+		return rs.snapshotRun(), nil
 	}
 
 	// A test-first re-enters executeTestFirst with its request rebuilt from
@@ -3701,7 +3730,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 			rs: rs, ctx: runCtx, chained: true,
 			exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(current, entry.Path), projCfg, treq) },
 		})
-		return rs.run, nil
+		return rs.snapshotRun(), nil
 	}
 
 	req := resumeRequest(current)
@@ -3733,7 +3762,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs: rs, ctx: runCtx, chained: true,
 		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
 	})
-	return rs.run, nil
+	return rs.snapshotRun(), nil
 }
 
 // resumeCheckpointData makes the checkout chosen at re-entry part of the
@@ -3899,17 +3928,22 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	wasQueued := rs.run.Status == "queued"
-	wasActive := rs.run.Status == "running"
-	if rs.cancel != nil {
-		rs.cancel()
+	current := rs.snapshotRun()
+	wasQueued := current.Status == "queued"
+	wasActive := current.Status == "running"
+	rs.wmu.Lock()
+	cancel := rs.cancel
+	done := rs.done
+	rs.wmu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	// A terminal abort must not return while the isolated checkout is still
 	// being used: callers commonly tear down the project immediately afterward.
 	// Queued runs have no goroutine (and thus no done close) until promoted.
-	if !wasQueued && rs.done != nil && (rs.run.Stage == "build" || rs.run.Stage == "test") {
+	if !wasQueued && done != nil && (current.Stage == "build" || current.Stage == "test") {
 		select {
-		case <-rs.done:
+		case <-done:
 		case <-ctx.Done():
 		}
 	}
@@ -3917,11 +3951,14 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	rs.wmu.Lock()
 	rs.run.Status = "failed"
 	rs.run.Verdict = "ABORTED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
+	w.WriteState()
+	rs.wmu.Unlock()
 	// A paused or already-failed run has no goroutine left to unwind, so its
 	// cancellation cannot reach failRun. Restore those runs here. For an active
 	// run, leave restoration to failRun after its last write; restoring while it
@@ -3929,11 +3966,11 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if wasQueued {
 		s.cleanupRunWorktree(rs, rs.projectPath)
 	}
-	if rs.done == nil {
+	if done == nil {
 		restoreAfterUnaccepted(rs)
 	} else {
 		select {
-		case <-rs.done:
+		case <-done:
 			restoreAfterUnaccepted(rs)
 			if !wasActive {
 				s.cleanupRunWorktree(rs, rs.projectPath)
@@ -3943,7 +3980,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	}
 	// The run stays in the map: it is still inspectable through RunGet and
 	// still on disk. Deleting it made an aborted run vanish from run list.
+	rs.wmu.Lock()
 	werr := w.WriteState()
+	rs.wmu.Unlock()
 	// The abort changes the queue's answers twice over: a QUEUED run must
 	// leave the line (promoted later it would be resurrected), and whatever
 	// this run was holding — a slot about to free, a paused tree — may now
@@ -5280,8 +5319,14 @@ func startActiveWallclock(run *runlog.Run, now time.Time) {
 }
 
 func (s *Service) monitorWallclockEscalation(ctx context.Context, rs *runState) {
+	rs.wmu.Lock()
 	startActiveWallclock(rs.run, time.Now())
-	defer settleActiveWallclock(rs.run, time.Now())
+	rs.wmu.Unlock()
+	defer func() {
+		rs.wmu.Lock()
+		settleActiveWallclock(rs.run, time.Now())
+		rs.wmu.Unlock()
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {

@@ -988,6 +988,8 @@ func recordSpend(rs *runState, tracker *budget.Tracker) {
 		return
 	}
 	snap := tracker.Spend.Snapshot()
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
 	rs.run.Budget.USD = snap.USD
 	rs.run.Budget.Tokens = snap.Tokens
 	rs.run.Budget.Turns = snap.Turns

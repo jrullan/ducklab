@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -891,6 +892,7 @@ func (p *Anthropic) Models(ctx context.Context) ([]string, error) {
 
 // Fake is a fake provider for testing.
 type Fake struct {
+	mu          sync.Mutex
 	ModelInfoFn func(model string) *ModelInfo
 	id          string
 	responses   []ChatResponse
@@ -911,10 +913,13 @@ func NewFake(id string) *Fake {
 // ModelInfoFn, when set, makes the fake answer model lookups — the hook
 // enrichment tests use.
 func (p *Fake) ModelInfo(ctx context.Context, model string) (*ModelInfo, error) {
-	if p.ModelInfoFn == nil {
+	p.mu.Lock()
+	modelInfoFn := p.ModelInfoFn
+	p.mu.Unlock()
+	if modelInfoFn == nil {
 		return nil, fmt.Errorf("no model info scripted")
 	}
-	info := p.ModelInfoFn(model)
+	info := modelInfoFn(model)
 	if info == nil {
 		return nil, fmt.Errorf("model %q not in the provider's listing", model)
 	}
@@ -927,11 +932,15 @@ func (p *Fake) ID() string {
 
 // AddResponse adds a scripted response.
 func (p *Fake) AddResponse(resp ChatResponse) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.responses = append(p.responses, resp)
 }
 
 // AddTextResponse adds a simple text response.
 func (p *Fake) AddTextResponse(text string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.responses = append(p.responses, ChatResponse{
 		Choices: []Choice{{
 			Message:      Message{Role: "assistant", Content: text},
@@ -946,6 +955,8 @@ func (p *Fake) AddTextResponse(text string) {
 
 // AddToolCallResponse adds a response with tool calls.
 func (p *Fake) AddToolCallResponse(toolCalls []ToolCall) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.responses = append(p.responses, ChatResponse{
 		Choices: []Choice{{
 			Message:      Message{Role: "assistant", ToolCalls: toolCalls},
@@ -956,24 +967,34 @@ func (p *Fake) AddToolCallResponse(toolCalls []ToolCall) {
 
 // Requests returns all recorded requests.
 func (p *Fake) Requests() []ChatRequest {
-	return p.requests
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]ChatRequest(nil), p.requests...)
 }
 
 // CallCount returns the number of calls made.
 func (p *Fake) CallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.callCount
 }
 
 // Chat sends a chat request.
 func (p *Fake) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	p.mu.Lock()
 	p.requests = append(p.requests, req)
 	p.callCount++
+	callCount := p.callCount
+	scriptFunc := p.ScriptFunc
+	p.mu.Unlock()
 	// ScriptFunc takes priority over pre-scripted responses
-	if p.ScriptFunc != nil {
-		if resp := p.ScriptFunc(req, p.callCount); resp != nil {
+	if scriptFunc != nil {
+		if resp := scriptFunc(req, callCount); resp != nil {
 			return *resp, nil
 		}
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if len(p.responses) == 0 {
 		return ChatResponse{}, errors.New("no more scripted responses")
 	}
@@ -1022,15 +1043,19 @@ func (p *Fake) ChatStream(ctx context.Context, req ChatRequest, ch chan<- Delta)
 
 // Models returns available models.
 func (p *Fake) Models(ctx context.Context) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if len(p.models) > 0 {
-		return p.models, nil
+		return append([]string(nil), p.models...), nil
 	}
 	return []string{"fake-model"}, nil
 }
 
 // SetModels sets the available models.
 func (p *Fake) SetModels(models []string) {
-	p.models = models
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.models = append([]string(nil), models...)
 }
 
 // providerComplaint extracts why a response carried no choices.
