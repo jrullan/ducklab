@@ -1190,6 +1190,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 		}
 	}
+	unread := rs.unreadRefs()
+	rs.wmu.Lock()
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -1304,13 +1306,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// use, not about the prompt — so the gate names the documents no one
 	// opened, and the person weighs the draft knowing it. The same honesty
 	// contract as unverified_tasks on a release.
-	if unread := rs.unreadRefs(); len(unread) > 0 {
+	if len(unread) > 0 {
 		rs.run.PendingData["unread_refs"] = unread
 	}
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{
 		"kind": "gate", "verdict": rs.run.Verdict, "artifact": string(result.Kind),
 	})
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 }
 
 // stageResultText applies the response contract at the service boundary. A

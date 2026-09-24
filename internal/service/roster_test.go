@@ -379,11 +379,12 @@ func TestAStageRequestSeatsItsOwnDucklings(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(5 * time.Second)
-	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+	for len(rs.snapshotRun().Roster) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if rs.run.Roster["architect"] != "pato-dos" {
-		t.Errorf("architect = %q, want the request's own pick pato-dos", rs.run.Roster["architect"])
+	current := rs.snapshotRun()
+	if current.Roster["architect"] != "pato-dos" {
+		t.Errorf("architect = %q, want the request's own pick pato-dos", current.Roster["architect"])
 	}
 	s.RunAbort(context.Background(), run.ID)
 	s.waitForRun(context.Background(), run.ID)

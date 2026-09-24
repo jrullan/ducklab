@@ -255,11 +255,12 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", runID)
 	}
-	if rs.run.Stage != "chat" {
-		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, rs.run.Stage)
+	current := rs.snapshotRun()
+	if current.Stage != "chat" {
+		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, current.Stage)
 	}
-	if rs.run.Status != "paused" || rs.run.PendingKind != "chat" {
-		return nil, fmt.Errorf("the chat is not waiting for you (status %s)", rs.run.Status)
+	if current.Status != "paused" || current.PendingKind != "chat" {
+		return nil, fmt.Errorf("the chat is not waiting for you (status %s)", current.Status)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -270,9 +271,9 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 		return nil, err
 	}
 
-	about := strings.TrimPrefix(rs.run.Note, "chat about ")
+	about := strings.TrimPrefix(current.Note, "chat about ")
 	kind, id, _ := strings.Cut(about, " ")
-	duckling := rs.run.Roster["consultant"]
+	duckling := current.Roster["consultant"]
 	if err := s.validateChatImages(ctx, duckling, images); err != nil {
 		return nil, err
 	}
@@ -281,16 +282,19 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 		"role": "human", "content": message, "images": images,
 	})
 	runCtx, cancel := context.WithCancel(context.Background())
+	rs.wmu.Lock()
 	rs.cancel = cancel
 	rs.done = make(chan struct{})
 	rs.run.Status = "running"
 	clearPending(rs.run)
 	w.WriteState()
+	rs.wmu.Unlock()
+	out := rs.snapshotRun()
 	s.queue.submit(s, &queued{
 		rs: rs, ctx: runCtx, parallel: true,
 		exec: func(c context.Context) { s.executeChatTurn(c, rs, entry.Path, kind, id, duckling, images) },
 	})
-	return rs.run, nil
+	return out, nil
 }
 
 // ChatEnd closes a conversation as what it was: finished, not failed. Abort
@@ -303,16 +307,18 @@ func (s *Service) ChatEnd(ctx context.Context, runID string) (*runlog.Run, error
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", runID)
 	}
-	if rs.run.Stage != "chat" {
-		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, rs.run.Stage)
+	current := rs.snapshotRun()
+	if current.Stage != "chat" {
+		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, current.Stage)
 	}
-	if rs.run.Status != "paused" || rs.run.PendingKind != "chat" {
-		return nil, fmt.Errorf("the chat is not at rest (status %s); wait for the reply or abort", rs.run.Status)
+	if current.Status != "paused" || current.PendingKind != "chat" {
+		return nil, fmt.Errorf("the chat is not at rest (status %s); wait for the reply or abort", current.Status)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return nil, err
 	}
+	rs.wmu.Lock()
 	rs.run.Status = "done"
 	rs.run.Resolution = "ended by human"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
@@ -320,9 +326,11 @@ func (s *Service) ChatEnd(ctx context.Context, runID string) (*runlog.Run, error
 	w.AppendEvent("human", map[string]interface{}{"action": "end_chat"})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": ""})
 	if err := w.WriteState(); err != nil {
+		rs.wmu.Unlock()
 		return nil, err
 	}
-	return rs.run, nil
+	rs.wmu.Unlock()
+	return rs.snapshotRun(), nil
 }
 
 // executeChatTurn runs ONE consultant reply: dossier + conversation so far +
@@ -458,11 +466,13 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		"round": turnNo, "turn": 0, "role": "consultant",
 	})
 
+	rs.wmu.Lock()
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "chat"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "chat"})
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 }
 
 func (s *Service) resolveChatScopes(subject *registry.ProjectEntry, requested string) ([]runlog.ContextScope, error) {

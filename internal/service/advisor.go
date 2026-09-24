@@ -420,14 +420,24 @@ func (s *Service) logFailedAdvisorAnswer(rs *runState, seat config.DucklingID, d
 // recorded one, so fall back to the resolved roster's advisor seat rather than
 // silently borrowing the architect.
 func (s *Service) pickAdvisor(rs *runState) config.DucklingID {
-	if id := rs.run.Roster[string(config.RoleAdvisor)]; id != "" {
+	if rs == nil {
+		return ""
+	}
+	return s.pickAdvisorForRun(rs.snapshotRun())
+}
+
+func (s *Service) pickAdvisorForRun(run *runlog.Run) config.DucklingID {
+	if run == nil {
+		return ""
+	}
+	if id := run.Roster[string(config.RoleAdvisor)]; id != "" {
 		return config.DucklingID(id)
 	}
-	if id := rs.run.Roster[string(config.RoleArchitect)]; id != "" {
+	if id := run.Roster[string(config.RoleArchitect)]; id != "" {
 		// Compatibility for runs created before the advisor seat existed.
 		return config.DucklingID(id)
 	}
-	if proj, err := s.projectConfig(rs.run.ProjectID); err == nil {
+	if proj, err := s.projectConfig(run.ProjectID); err == nil {
 		if id := proj.Roster[config.RoleAdvisor]; id != "" {
 			return id
 		}
@@ -442,28 +452,32 @@ func (s *Service) pickAdvisor(rs *runState) config.DucklingID {
 // recorded for the run. It deliberately never changes run state or starts a
 // retry; the note is an advisor recommendation, not a decision.
 func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoNote {
-	if rs == nil || rs.run == nil || !redoNoteEligible(rs.run) {
+	if rs == nil || rs.run == nil {
+		return nil
+	}
+	run := rs.snapshotRun()
+	if !redoNoteEligible(run) {
 		return nil
 	}
 	parts := make([]string, 0, 4)
-	if rs.run.TaskID != "" {
-		if task := s.buildTaskPrompt(ctx, rs.run.ProjectID, rs.projectPath, rs.run.TaskID); strings.TrimSpace(task) != "" {
+	if run.TaskID != "" {
+		if task := s.buildTaskPrompt(ctx, run.ProjectID, rs.projectPath, run.TaskID); strings.TrimSpace(task) != "" {
 			parts = append(parts, "Task: "+firstN(strings.TrimSpace(task), 2400))
 		}
 	}
-	if strings.TrimSpace(rs.run.Failure) != "" {
-		parts = append(parts, "Failure: "+firstN(strings.TrimSpace(rs.run.Failure), 1600))
+	if strings.TrimSpace(run.Failure) != "" {
+		parts = append(parts, "Failure: "+firstN(strings.TrimSpace(run.Failure), 1600))
 	}
-	if gate, err := s.RunVerify(ctx, rs.run.ID, 20); err == nil && strings.TrimSpace(gate) != "" {
+	if gate, err := s.RunVerify(ctx, run.ID, 20); err == nil && strings.TrimSpace(gate) != "" {
 		parts = append(parts, "Gate tail:\n"+firstN(strings.TrimSpace(gate), 4000))
 	}
-	if diff, err := s.RunDiff(ctx, rs.run.ID); err == nil && strings.TrimSpace(diff) != "" {
+	if diff, err := s.RunDiff(ctx, run.ID); err == nil && strings.TrimSpace(diff) != "" {
 		parts = append(parts, "Diff summary:\n"+firstN(strings.TrimSpace(diff), 4000))
 	}
 	if len(parts) == 0 {
 		return nil
 	}
-	advisor := s.pickAdvisor(rs)
+	advisor := s.pickAdvisorForRun(run)
 	note := "Retry the task after addressing the failure.\n\n" + strings.Join(parts, "\n\n")
 	return &runlog.RedoNote{Draft: firstN(note, 12000), Advisor: string(advisor), Editable: true}
 }

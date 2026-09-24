@@ -1368,14 +1368,16 @@ func TestReseatSwapsTheSeatsAndResumes(t *testing.T) {
 	s.runsMu.RUnlock()
 	// Wait for the roster, then simulate the weather pause.
 	deadline := time.Now().Add(5 * time.Second)
-	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+	for len(rs.snapshotRun().Roster) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	s.RunAbort(context.Background(), run.ID)
 	s.waitForRun(context.Background(), run.ID)
+	rs.wmu.Lock()
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "provider"
 	rs.run.Failure = "provider unavailable: timeout"
+	rs.wmu.Unlock()
 
 	out, err := s.RunReseat(context.Background(), run.ID, "pato-uno", "pato-dos")
 	if err != nil {
@@ -1430,14 +1432,16 @@ func TestReseatAutoSelectsFromFlockCriteriaAndRecordsWhy(t *testing.T) {
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()
 	deadline := time.Now().Add(5 * time.Second)
-	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+	for len(rs.snapshotRun().Roster) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	s.RunAbort(context.Background(), run.ID)
 	s.waitForRun(context.Background(), run.ID)
+	rs.wmu.Lock()
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "provider"
 	rs.run.Failure = "provider unavailable: timeout"
+	rs.wmu.Unlock()
 
 	out, err := s.RunReseat(context.Background(), run.ID, "pato-uno", "auto")
 	if err != nil {

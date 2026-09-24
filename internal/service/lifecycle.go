@@ -649,6 +649,8 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	if err != nil {
 		return
 	}
+	advisor := s.pickAdvisor(rs)
+	rs.wmu.Lock()
 	settleActiveWallclock(rs.run, time.Now())
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "question"
@@ -662,7 +664,6 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	}
 	// Record the seat before launching the asynchronous consultation so clients
 	// can show who is preparing the recommendation immediately.
-	advisor := s.pickAdvisor(rs)
 	if advisor != "" {
 		rs.run.PendingData["advisor"] = string(advisor)
 	}
@@ -674,6 +675,7 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 		"advisor":     string(advisor),
 	})
 	w.WriteState()
+	rs.wmu.Unlock()
 	// The advisor drafts the answer while the question waits — a fleet of
 	// models must not stall on one model's question when the human's real
 	// role is to choose, not to research.

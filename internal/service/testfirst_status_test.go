@@ -479,7 +479,7 @@ func TestAnAnsweredTestRunResumesItsOwnStrategy(t *testing.T) {
 	s.runsMu.RUnlock()
 	// The answer reached the record, and the run re-entered SOME strategy —
 	// the refusal ("a test run cannot be resumed") was the bug.
-	if rs.run.PendingKind == "question" {
+	if rs.snapshotRun().PendingKind == "question" {
 		t.Error("the run is still waiting on the question it was answered")
 	}
 	select {
