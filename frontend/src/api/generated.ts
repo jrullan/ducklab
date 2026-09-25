@@ -118,6 +118,10 @@ export interface ConfigInstall {
   timeout_s?: number;
 }
 
+export interface ConfigLanes {
+  enforce?: string;
+}
+
 export interface ConfigProject {
   autonomy?: string;
   budget?: ConfigBudget;
@@ -128,6 +132,7 @@ export interface ConfigProject {
   github?: ConfigGitHub;
   id?: string;
   install?: ConfigInstall;
+  lanes?: ConfigLanes;
   mode_seats?: Record<string, Record<string, string[]>>;
   modes?: Record<string, string>;
   name?: string;

@@ -402,6 +402,17 @@
         ],
         "type": "object"
       },
+      "ConfigLanes": {
+        "properties": {
+          "enforce": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enforce"
+        ],
+        "type": "object"
+      },
       "ConfigProject": {
         "properties": {
           "autonomy": {
@@ -430,6 +441,9 @@
           },
           "install": {
             "$ref": "#/components/schemas/ConfigInstall"
+          },
+          "lanes": {
+            "$ref": "#/components/schemas/ConfigLanes"
           },
           "mode_seats": {
             "additionalProperties": {
@@ -499,6 +513,7 @@
           "github",
           "id",
           "install",
+          "lanes",
           "modes",
           "name",
           "references",

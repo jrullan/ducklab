@@ -356,6 +356,12 @@ timeout_s = 900
 # Python markers → .pytest_cache). Dependency trees use link_deps instead.
 build_products = []
 
+[lanes]
+# Refuse fs_write/fs_patch/fs_write_lines outside the accepted task lane.
+# "accept" keeps the invariant at the final gate only; --unsafe-writes is the
+# explicit per-run escape hatch for either mode.
+enforce = "write"                    # write | accept
+
 [roster]
 architect   = "pato-nube"
 implementer = "pato-local"
