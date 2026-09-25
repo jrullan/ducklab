@@ -152,6 +152,37 @@ func advisorLaneConflicts(projectRoot, taskID, note string) []string {
 	return conflicts
 }
 
+// taskWritableLane resolves the exact same accepted lane shape used by the
+// final invariant into exact files and tree roots for the filesystem guard.
+// Keeping this derivation beside taskLaneFindings prevents write-time and
+// accept-time policy from disagreeing about what the plan authorizes.
+func taskWritableLane(projectRoot, taskID string) (files, dirs []string) {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil || plan == nil || strings.TrimSpace(taskID) == "" {
+		return nil, nil
+	}
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if !strings.EqualFold(task.ID, taskID) {
+				continue
+			}
+			claims := sectionLaneClaims(task)
+			if len(claims) == 0 {
+				claims = ownsClaims(milestone.Owns)
+			}
+			for _, claim := range claims {
+				if claim.tree {
+					dirs = append(dirs, claim.path)
+				} else {
+					files = append(files, claim.path)
+				}
+			}
+			return uniqueStrings(files), uniqueStrings(dirs)
+		}
+	}
+	return nil, nil
+}
+
 // taskFixtureNarrowingFindings catches the cheap, high-confidence forms of a
 // test making a named corpus pass by changing the test inputs rather than the
 // implementation. It deliberately does not reject selecting the exact named

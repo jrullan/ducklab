@@ -246,6 +246,28 @@ commit_trailer = true
 	}
 }
 
+func TestProjectLaneEnforcementDefaultsAndValidates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.toml")
+	if err := os.WriteFile(path, []byte("schema = 1\nid = \"lanes\"\nname = \"Lanes\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Lanes.Enforce != "write" {
+		t.Fatalf("default lanes.enforce = %q, want write", cfg.Lanes.Enforce)
+	}
+	cfg.Lanes.Enforce = "accept"
+	if err := cfg.Validate(path); err != nil {
+		t.Fatalf("accept mode rejected: %v", err)
+	}
+	cfg.Lanes.Enforce = "later"
+	if err := cfg.Validate(path); err == nil || !strings.Contains(err.Error(), "lanes.enforce") {
+		t.Fatalf("invalid mode validation = %v", err)
+	}
+}
+
 func TestProviderAPIKey(t *testing.T) {
 	p := &Provider{APIKeyEnv: "TEST_API_KEY"}
 	os.Setenv("TEST_API_KEY", "secret123")

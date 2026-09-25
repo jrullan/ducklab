@@ -1578,8 +1578,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 	for _, detected := range runAtLaunch.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
-	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
-	taskWritableFiles = append(taskWritableFiles, taskArtifactFiles(entry.Path, req.TaskID, "modifies")...)
+	taskWritableFiles, taskWritableDirs := taskWritableLane(entry.Path, req.TaskID)
 	ectx := &tools.ExecContext{
 		ProjectRoot:          root,
 		DocsRoot:             entry.Path,
@@ -1594,6 +1593,8 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
 		TaskWriteLane:        taskDeclaredLanePaths(entry.Path, req.TaskID),
 		TaskWritableFiles:    uniqueStrings(taskWritableFiles),
+		TaskWritableDirs:     uniqueStrings(taskWritableDirs),
+		LaneEnforcement:      projCfg.Lanes.Enforce,
 		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
 		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
 		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
@@ -1838,8 +1839,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	for _, detected := range runAtLaunch.HarnessProfile.Capabilities {
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
-	taskWritableFiles := taskArtifactFiles(entry.Path, req.TaskID, "produces")
-	taskWritableFiles = append(taskWritableFiles, taskArtifactFiles(entry.Path, req.TaskID, "modifies")...)
+	taskWritableFiles, taskWritableDirs := taskWritableLane(entry.Path, req.TaskID)
 	ectx := &tools.ExecContext{
 		ProjectRoot:          root,
 		DocsRoot:             entry.Path,
@@ -1855,6 +1855,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
 		TaskWriteLane:        taskDeclaredLanePaths(entry.Path, req.TaskID),
 		TaskWritableFiles:    uniqueStrings(taskWritableFiles),
+		TaskWritableDirs:     uniqueStrings(taskWritableDirs),
+		LaneEnforcement:      projCfg.Lanes.Enforce,
 		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
 		TaskAcceptanceProbes: append([]string(nil), runAtLaunch.HarnessProfile.AcceptanceProbes...),
 		BuildGraphFiles:      append([]string(nil), runAtLaunch.HarnessProfile.BuildGraphFiles...),
@@ -1882,10 +1884,18 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 
 	// Tool-level brakes notify the operator. Governance refusals are also kept
 	// on the run: a rejected project-settings edit is itself gate-relevant.
+	var laneViolationOnce sync.Once
 	ectx.OnDistress = func(reason string, data map[string]interface{}) {
 		payload := map[string]interface{}{"reason": reason}
 		for key, value := range data {
 			payload[key] = value
+		}
+		if reason == "lane_violation" {
+			laneViolationOnce.Do(func() {
+				rs.writer.AppendEvent(reason, payload)
+				s.publishTransition(rs, "distress", payload)
+			})
+			return
 		}
 		if reason == "governance_write_refused" || reason == "review_finding_rejected" {
 			rs.writer.AppendEvent(reason, payload)

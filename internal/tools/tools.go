@@ -200,10 +200,16 @@ type ExecContext struct {
 	// contract consumed by capability providers; this field also preserves
 	// tree-shaped claims.
 	TaskWriteLane []string
-	// TaskWritableFiles is the complete Produces/Modifies lane. Capability
-	// providers use it to decide whether a missing runner target can be created
-	// by this task or makes an acceptance probe impossible by construction.
+	// TaskWritableFiles are exact file claims in the complete
+	// Produces/Modifies/Owns lane. Capability providers use them to decide
+	// whether a missing runner target can be created by this task or makes an
+	// acceptance probe impossible by construction.
 	TaskWritableFiles []string
+	// TaskWritableDirs are tree-shaped Owns/dir claims. LaneEnforcement is
+	// "write" (the default, including the empty value) or "accept". The latter
+	// leaves the final acceptance invariant as the only brake.
+	TaskWritableDirs  []string
+	LaneEnforcement   string
 	TaskConsumedFiles []string
 	// TaskAcceptanceProbes are human-approved, one-command-per-slice
 	// behavioural checks from the plan. BuildGraphFiles are concrete sources
@@ -855,7 +861,25 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		return ErrorResult("jail: %v", err)
 	}
 
-	// 2. A run may not alter project governance through filesystem tools.
+	// 2. A build task may mutate only its accepted plan lane. Refuse at the
+	// write boundary so a model can correct course immediately, rather than
+	// discovering the breach only after spending the rest of the run on it.
+	// An empty lane is legacy/unpartitioned and therefore remains unrestricted.
+	if !ectx.UnsafeWrites && ectx.Role == config.RoleImplementer &&
+		strings.ToLower(strings.TrimSpace(ectx.LaneEnforcement)) != "accept" &&
+		(len(ectx.TaskWritableFiles) > 0 || len(ectx.TaskWritableDirs) > 0) &&
+		!writeLaneContains(ectx, path) {
+		if ectx.OnDistress != nil {
+			ectx.OnDistress("lane_violation", map[string]interface{}{
+				"path": path, "files": append([]string(nil), ectx.TaskWritableFiles...),
+				"dirs": append([]string(nil), ectx.TaskWritableDirs...),
+			})
+		}
+		return ErrorResult("lane: edit to %s is outside this task's declared write lane; this task may write: %s. Revert the attempt or request an approved plan amendment if the fix needs more.",
+			path, writeLaneDescription(ectx))
+	}
+
+	// 3. A run may not alter project governance through filesystem tools.
 	// Project settings are changed only through the project API, where the
 	// change is recorded and surfaced at the human gate.
 	if ectx.Role == config.RoleImplementer && isProjectGovernancePath(ectx.ProjectRoot, absPath) {
@@ -865,13 +889,13 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", path)
 	}
 
-	// 3. Test-first runs write tests and nothing else.
+	// 4. Test-first runs write tests and nothing else.
 	if ectx.TestPathsOnly && !verify.IsTestPath(path, ectx.Verify.TestGlobs) {
 		return ErrorResult("this run writes tests only, and %s is not one. "+
 			"Write the failing test; the implementation is the next run's job.", path)
 	}
 
-	// 4. Denylist
+	// 5. Denylist
 	denylist := []string{
 		".git",
 		".ducklab/runs",
@@ -897,7 +921,7 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 5. Marker guard (can be disabled with --unsafe-writes)
+	// 6. Marker guard (can be disabled with --unsafe-writes)
 	if !ectx.UnsafeWrites {
 		contentStr := string(content)
 		lines := strings.Split(contentStr, "\n")
@@ -935,7 +959,7 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 6. Truncation guard (only for existing files, only for fs_write)
+	// 7. Truncation guard (only for existing files, only for fs_write)
 	if isWrite && !ectx.UnsafeWrites {
 		if existing, err := os.ReadFile(absPath); err == nil {
 			oldSize := len(existing)
@@ -948,19 +972,56 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 7. Binary guard
+	// 8. Binary guard
 	for _, b := range content {
 		if b == 0 {
 			return ErrorResult("binary guard: content contains NUL bytes")
 		}
 	}
 
-	// 8. Size guard
+	// 9. Size guard
 	if len(content) > 1024*1024 {
 		return ErrorResult("size guard: write over 1 MB refused")
 	}
 
 	return nil
+}
+
+func cleanWriteLanePath(raw string) string {
+	raw = strings.TrimSpace(strings.Trim(raw, "`"))
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "file:"), "dir:")
+	clean := filepath.ToSlash(filepath.Clean(raw))
+	if clean == "." || clean == ".." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "../") {
+		return ""
+	}
+	return clean
+}
+
+func writeLaneContains(ectx *ExecContext, raw string) bool {
+	path := cleanWriteLanePath(raw)
+	if path == "" {
+		return false
+	}
+	for _, file := range ectx.TaskWritableFiles {
+		if path == cleanWriteLanePath(file) {
+			return true
+		}
+	}
+	for _, dir := range ectx.TaskWritableDirs {
+		claim := strings.TrimSuffix(cleanWriteLanePath(dir), "/")
+		if claim != "" && (path == claim || strings.HasPrefix(path, claim+"/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeLaneDescription(ectx *ExecContext) string {
+	items := append([]string(nil), ectx.TaskWritableFiles...)
+	for _, dir := range ectx.TaskWritableDirs {
+		items = append(items, strings.TrimSuffix(dir, "/")+"/**")
+	}
+	return strings.Join(items, ", ")
 }
 
 // isProjectGovernancePath reports whether abs is the project's governance file.

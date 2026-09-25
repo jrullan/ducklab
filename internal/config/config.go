@@ -463,6 +463,14 @@ type GitHub struct {
 	PRBodyByScribe bool   `toml:"pr_body_by_scribe" json:"pr_body_by_scribe"`
 }
 
+// Lanes controls when the accepted plan's write-lane contract is enforced.
+// "write" is the safe default: filesystem mutations outside the task lane are
+// refused before they can contaminate the candidate. "accept" preserves the
+// older workflow where the same invariant is checked only at the final gate.
+type Lanes struct {
+	Enforce string `toml:"enforce" json:"enforce"`
+}
+
 // Project is the project configuration.
 type Project struct {
 	Schema       int          `toml:"schema" json:"schema"`
@@ -495,6 +503,7 @@ type Project struct {
 	Git       Git                            `toml:"git" json:"git"`
 	Remote    Remote                         `toml:"remote" json:"remote"`
 	GitHub    GitHub                         `toml:"github" json:"github"`
+	Lanes     Lanes                          `toml:"lanes" json:"lanes"`
 	Shell     ShellPolicy                    `toml:"shell" json:"shell"`
 	Run       RunApp                         `toml:"run" json:"run"`
 	Render    RenderContract                 `toml:"render,omitempty" json:"render,omitempty"`
@@ -870,6 +879,9 @@ func (p *Project) Validate(path string) error {
 	if p.Render.TimeoutS < 0 {
 		return &Error{File: path, Key: "render.timeout_s", Msg: "must be zero (default) or positive"}
 	}
+	if p.Lanes.Enforce != "write" && p.Lanes.Enforce != "accept" {
+		return &Error{File: path, Key: "lanes.enforce", Msg: "must be write | accept"}
+	}
 	if p.Render.Viewport != "" {
 		parts := strings.Split(p.Render.Viewport, "x")
 		if len(parts) != 2 {
@@ -959,6 +971,7 @@ func DefaultProject(id, name string) *Project {
 		},
 		Remote: Remote{Name: "origin", FetchOnOpen: false, AllowMCPVerbs: []string{}},
 		GitHub: GitHub{PRTool: "gh"},
+		Lanes:  Lanes{Enforce: "write"},
 		Shell: ShellPolicy{
 			Mode: "guarded",
 			Deny: []string{"rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="},
