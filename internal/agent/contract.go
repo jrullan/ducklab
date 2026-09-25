@@ -108,6 +108,7 @@ type NativeReviewChecks struct {
 	Threads        string `json:"threads"`
 	Representation string `json:"representation"`
 	Cleanup        string `json:"cleanup"`
+	Lane           string `json:"lane"`
 }
 
 // Approved reports whether the reviewer approved.
@@ -566,6 +567,7 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 			{"threads", v.NativeChecks.Threads},
 			{"representation", v.NativeChecks.Representation},
 			{"cleanup", v.NativeChecks.Cleanup},
+			{"lane", v.NativeChecks.Lane},
 		}
 		for _, check := range checks {
 			value := strings.TrimSpace(check.value)

@@ -96,6 +96,10 @@ type ExecuteParams struct {
 	// InvariantFindings deterministically checks the current candidate against
 	// engine-owned contracts such as the task's declared write lane.
 	InvariantFindings func() ([]conv.Finding, error)
+	// AdvisorLaneConflicts applies the same accepted-lane authority to an
+	// advisor note. Returned paths are observational evidence on the consult
+	// event; they never widen the lane or authorize the recommendation.
+	AdvisorLaneConflicts func(note string) []string
 	// Roster maps a role to the duckling that plays it.
 	Roster map[config.Role]config.DucklingID
 	// InventoryUnaccounted is the lexical coverage gap from an adoption survey.

@@ -223,8 +223,12 @@ func TestNativeVerdictRequiresConcreteSweepEvidence(t *testing.T) {
 	if _, err := ParseContract("verdict:native", generic); err == nil || !strings.Contains(err.Error(), "native_checks.completion") {
 		t.Fatalf("generic native evidence was accepted: %v", err)
 	}
+	missingLane := `{"verdict":"approve","findings":[],"native_checks":{"completion":"worker() completes the task","resources":"image_destroy() frees pixels","threads":"capture() unrefs the thread","representation":"convert() normalizes channel masks","cleanup":"worker() closes Display on errors"}}`
+	if _, err := ParseContract("verdict:native", missingLane); err == nil || !strings.Contains(err.Error(), "native_checks.lane") {
+		t.Fatalf("native approval without lane evidence was accepted: %v", err)
+	}
 
-	concrete := `{"verdict":"approve","findings":[],"native_checks":{"completion":"worker() returns the GTask on both success and error","resources":"image_destroy() frees pixels and ImageData","threads":"capture() refs task and unrefs the GThread handle","representation":"convert() uses ctz(mask), mask widths and XGetPixel","cleanup":"worker() closes Display and destroys XImage on every exit"}}`
+	concrete := `{"verdict":"approve","findings":[],"native_checks":{"completion":"worker() returns the GTask on both success and error","resources":"image_destroy() frees pixels and ImageData","threads":"capture() refs task and unrefs the GThread handle","representation":"convert() uses ctz(mask), mask widths and XGetPixel","cleanup":"worker() closes Display and destroys XImage on every exit","lane":"src/capture.c is within the declared src lane"}}`
 	got, err := ParseContract("verdict:native", concrete)
 	if err != nil || !got.(*Verdict).Approved() {
 		t.Fatalf("concrete native sweep was rejected: %v", err)

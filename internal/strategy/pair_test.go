@@ -421,6 +421,36 @@ func TestPairAdvisorStopEndsTheRunBeforeTheReviewer(t *testing.T) {
 	}
 }
 
+func TestPairAdvisorConsultRecordsLaneConflicts(t *testing.T) {
+	rec := &recorder{}
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: "stuck", ToolCalls: []agent.ToolCallRecord{{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: brake"}}}},
+		&agent.Outcome{Parsed: map[string]interface{}{"action": "note", "note": "edit tests/outside.c next"}},
+		&agent.Outcome{Text: "retried"},
+		verdictOutcome("approve"),
+	)
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	params.AdvisorLaneConflicts = func(note string) []string {
+		if strings.Contains(note, "tests/outside.c") {
+			return []string{"tests/outside.c"}
+		}
+		return nil
+	}
+	var consult map[string]interface{}
+	params.OnEvent = func(kind string, data map[string]interface{}) {
+		if kind == "advisor_consult" && data["outcome"] == "note" {
+			consult = data
+		}
+	}
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	conflicts, ok := consult["lane_conflict"].([]string)
+	if !ok || len(conflicts) != 1 || conflicts[0] != "tests/outside.c" {
+		t.Fatalf("advisor_consult lane_conflict = %#v", consult["lane_conflict"])
+	}
+}
+
 // The inner loop is bounded: after maxConsultRetries the round proceeds to
 // the reviewer even if the duck keeps handing out notes — the reviewer and
 // the gate are the independent check, the duck is not.

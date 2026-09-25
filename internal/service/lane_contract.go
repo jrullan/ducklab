@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/conv"
 )
+
+var advisorPathPattern = regexp.MustCompile(`(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+`)
 
 func taskCandidateInvariantFindings(projectRoot, taskID string, changed []string) []conv.Finding {
 	findings := taskLaneFindings(projectRoot, taskID, changed)
@@ -67,6 +70,86 @@ func taskLaneFindings(projectRoot, taskID string, changed []string) []conv.Findi
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return findings
+}
+
+// taskDeclaredLanePaths renders the complete lane for model-facing dossiers
+// from the same claims the deterministic invariant evaluates. Tree claims are
+// marked explicitly so a reviewer can distinguish one file from descendants.
+func taskDeclaredLanePaths(projectRoot, taskID string) []string {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil || plan == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if !strings.EqualFold(task.ID, taskID) {
+				continue
+			}
+			claims := sectionLaneClaims(task)
+			if len(claims) == 0 {
+				claims = ownsClaims(milestone.Owns)
+			}
+			var paths []string
+			for _, claim := range claims {
+				path := claim.path
+				if claim.tree {
+					path = strings.TrimSuffix(path, "/") + "/**"
+				}
+				paths = append(paths, path)
+			}
+			return uniqueStrings(paths)
+		}
+	}
+	return nil
+}
+
+// advisorLaneConflicts extracts concrete repository paths from an advisor
+// note, then subjects them to the same lane invariant as an actual diff. It is
+// intentionally conservative: slash-shaped paths are unambiguous, while a
+// bare token is considered a path only when it names a file that exists in
+// the project. URLs and prose are never treated as lane claims.
+func advisorLaneConflicts(projectRoot, taskID, note string) []string {
+	seen := map[string]bool{}
+	var mentioned []string
+	add := func(raw string) {
+		raw = strings.Trim(strings.TrimSpace(raw), "`'\".,;:()[]{}")
+		path := cleanLanePath(raw)
+		if path == "" || seen[path] || strings.Contains(path, "://") {
+			return
+		}
+		seen[path] = true
+		mentioned = append(mentioned, path)
+	}
+	for _, loc := range advisorPathPattern.FindAllStringIndex(note, -1) {
+		start := loc[0] - 10
+		if start < 0 {
+			start = 0
+		}
+		if strings.Contains(note[start:loc[0]], "://") {
+			continue
+		}
+		add(note[loc[0]:loc[1]])
+	}
+	for _, token := range strings.Fields(note) {
+		candidate := strings.Trim(strings.TrimSpace(token), "`'\".,;:()[]{}")
+		if candidate == "" || strings.Contains(candidate, "/") {
+			continue
+		}
+		path := cleanLanePath(candidate)
+		if path == "" {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(path)))
+		if err == nil && !info.IsDir() {
+			add(path)
+		}
+	}
+	findings := taskLaneFindings(projectRoot, taskID, mentioned)
+	conflicts := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		conflicts = append(conflicts, finding.File)
+	}
+	return conflicts
 }
 
 // taskFixtureNarrowingFindings catches the cheap, high-confidence forms of a

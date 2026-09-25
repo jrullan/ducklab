@@ -371,6 +371,41 @@ func TestTaskLaneUsesModifiedFilesAsExplicitWriteLane(t *testing.T) {
 	}
 }
 
+func TestAdvisorLaneConflictsUsesAcceptedTaskLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Core\n\n### T-012 — Backend\n\n**Owns:** src/backend\n",
+	})
+	for _, path := range []string{"src/backend/capture.c", "tests/test_capture.c", "meson.build"} {
+		full := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	note := "Read src/backend/capture.c, then edit tests/test_capture.c and `meson.build`; see https://example.com/reference."
+	got := advisorLaneConflicts(dir, "T-012", note)
+	if !slices.Equal(got, []string{"meson.build", "tests/test_capture.c"}) {
+		t.Fatalf("lane conflicts = %v", got)
+	}
+}
+
+func TestTaskDeclaredLanePathsIncludesOwnsProducesAndModifies(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Core\n\n### T-013 — Complete lane\n\n" +
+			"**Owns:** src/core\n\n**Produces:** file:README.md, dir:fixtures\n\n**Modifies:** file:meson.build\n",
+	})
+	got := taskDeclaredLanePaths(dir, "T-013")
+	for _, want := range []string{"src/core/**", "README.md", "fixtures/**", "meson.build"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("declared lane = %v; missing %q", got, want)
+		}
+	}
+}
+
 func TestBuildPromptCarriesProjectMemory(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

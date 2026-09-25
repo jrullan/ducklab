@@ -684,6 +684,9 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			}
 			return taskCandidateInvariantFindings(root, mc.req.TaskID, paths), nil
 		},
+		AdvisorLaneConflicts: func(note string) []string {
+			return advisorLaneConflicts(root, mc.req.TaskID, note)
+		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
 			if kind == "turn_interrupted" {
