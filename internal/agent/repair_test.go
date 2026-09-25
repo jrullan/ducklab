@@ -219,10 +219,20 @@ func TestParsedContractNormalizationRewritesRecordedReplyWithoutRepair(t *testin
 
 func TestNativeVerdictRepairInstructionIncludesCompleteSchema(t *testing.T) {
 	got := repairInstruction("verdict:native", errors.New("native_checks is required"))
-	for _, want := range []string{"native_checks", "completion", "resources", "threads", "representation", "cleanup", "authoritative validation result", "remove that finding", "approve with an empty findings array"} {
+	for _, want := range []string{"native_checks", "completion", "resources", "threads", "representation", "cleanup", "lane", "authoritative validation result", "remove that finding", "approve with an empty findings array"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("native repair instruction lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestReviewerSystemPromptCarriesAcceptedTaskLane(t *testing.T) {
+	messages := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "review"}, &tools.ExecContext{
+		ProjectRoot: t.TempDir(), TaskWriteLane: []string{"src/backend", "meson.build"},
+	}, true)
+	if len(messages) == 0 || !strings.Contains(messages[0].Content, "accepted task write lane is: src/backend, meson.build") ||
+		!strings.Contains(messages[0].Content, "critical engine-owned finding") {
+		t.Fatalf("reviewer system prompt lacks authoritative lane:\n%s", messages[0].Content)
 	}
 }
 

@@ -1262,8 +1262,15 @@ Ground rules, which you cannot change:
 		rolePrompt += `
 
 For a native-code diff, your JSON object MUST also contain:
-"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}
+"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence","lane":"changed paths vs declared lane evidence"}
 Each value names what you inspected in the final code. Bare words such as "ok", "pass", "verified", "none", or "n/a" are invalid. Findings still go in findings; native_checks records the sweep that supports either verdict.`
+	}
+	if turn.Role == config.RoleReviewer && len(ectx.TaskWriteLane) > 0 {
+		rolePrompt += fmt.Sprintf(`
+
+The accepted task write lane is: %s. Compare every changed path to this lane.
+An edit outside it is a critical engine-owned finding: do not approve it or
+recommend that another task's lane be treated as an exception.`, strings.Join(ectx.TaskWriteLane, ", "))
 	}
 	if turn.Role == config.RoleReviewer && len(ectx.TaskAcceptanceProbes) > 0 {
 		rolePrompt += fmt.Sprintf(`
@@ -2402,9 +2409,9 @@ Contract: %s
 What was wrong: %v
 
 Reply again with ONLY one JSON object, with no prose or Markdown fences, in exactly this shape:
-{"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"path or *","line":0,"issue":"what is wrong","fix":"valid concrete remedy","invariant":"rule when class-level"}],"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}}
+{"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"path or *","line":0,"issue":"what is wrong","fix":"valid concrete remedy","invariant":"rule when class-level"}],"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence","lane":"changed paths vs declared lane evidence"}}
 
-All five native_checks values are required and must name concrete final-code evidence. The "What was wrong" field is an authoritative validation result, not a suggestion or a question. Apply it literally. If it says a finding is inadmissible or must be deleted, remove that finding; do not defend or repeat it. If no valid finding remains, approve with an empty findings array.`, contract, parseErr)
+All six native_checks values are required and must name concrete final-code evidence. The "What was wrong" field is an authoritative validation result, not a suggestion or a question. Apply it literally. If it says a finding is inadmissible or must be deleted, remove that finding; do not defend or repeat it. If no valid finding remains, approve with an empty findings array.`, contract, parseErr)
 	}
 	if contract == "json:plan_manifest_patch" {
 		return fmt.Sprintf(`Your reply did not satisfy the transactional plan-manifest patch contract.

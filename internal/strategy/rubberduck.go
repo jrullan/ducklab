@@ -253,6 +253,11 @@ func consultAdvisor(ctx context.Context, params *ExecuteParams, runner TurnRunne
 	if a.Reshuffle != "" {
 		event["reshuffle"] = a.Reshuffle
 	}
+	if a.Note != "" && params.AdvisorLaneConflicts != nil {
+		if conflicts := params.AdvisorLaneConflicts(a.Note); len(conflicts) > 0 {
+			event["lane_conflict"] = conflicts
+		}
+	}
 	emit(params, "advisor_consult", event)
 	switch a.Action {
 	case "note":

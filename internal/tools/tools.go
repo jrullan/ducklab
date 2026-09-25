@@ -195,6 +195,11 @@ type ExecContext struct {
 	// file contracts parsed from the accepted plan. They let the core enforce
 	// existence and capability providers inspect cross-file contracts.
 	TaskProducedFiles []string
+	// TaskWriteLane is the complete human-approved Owns/Produces/Modifies lane
+	// shown to reviewers and advisors. TaskWritableFiles remains the exact file
+	// contract consumed by capability providers; this field also preserves
+	// tree-shaped claims.
+	TaskWriteLane []string
 	// TaskWritableFiles is the complete Produces/Modifies lane. Capability
 	// providers use it to decide whether a missing runner target can be created
 	// by this task or makes an acceptance probe impossible by construction.
