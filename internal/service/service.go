@@ -2018,9 +2018,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"detail": "running the full gate — the verdict is its exit code",
 	})
 	gateRoot := ectx.ProjectRoot
-	rs.gateRoot = gateRoot
-	rs.run.GateRoot = gateRoot
-	rs.writer.WriteState()
+	rs.recordGateRoot(gateRoot)
 	taskGate, taskGateLog, err := tools.RunTaskVerificationGate(ctx, ectx)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify task: %w", err))
@@ -4040,6 +4038,20 @@ func (s *Service) RunDir(runID string) string {
 func (rs *runState) setTracker(t *budget.Tracker) {
 	rs.wmu.Lock()
 	rs.tracker = t
+	rs.wmu.Unlock()
+}
+
+// recordGateRoot publishes the runtime and durable custody roots as one fact.
+// Concurrent builds inspect each other's snapshots while composing prompts;
+// a bare GateRoot write raced that read even though both runs used isolated
+// worktrees correctly.
+func (rs *runState) recordGateRoot(root string) {
+	rs.wmu.Lock()
+	rs.gateRoot = root
+	rs.run.GateRoot = root
+	if rs.writer != nil {
+		_ = rs.writer.WriteState()
+	}
 	rs.wmu.Unlock()
 }
 

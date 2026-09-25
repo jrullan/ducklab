@@ -255,9 +255,15 @@ func (s *Service) waitForRun(ctx context.Context, runID string) (*runlog.Run, er
 			s.runsMu.RLock()
 			rs := s.runs[runID]
 			s.runsMu.RUnlock()
-			if rs != nil && rs.done != nil {
+			var done <-chan struct{}
+			if rs != nil {
+				rs.wmu.Lock()
+				done = rs.done
+				rs.wmu.Unlock()
+			}
+			if done != nil {
 				select {
-				case <-rs.done:
+				case <-done:
 				case <-deadline:
 				case <-ctx.Done():
 				}

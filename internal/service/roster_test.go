@@ -37,6 +37,43 @@ func serviceWithDucklings(t *testing.T, ids ...string) *Service {
 	return s
 }
 
+// cleanupStartedRun makes every asynchronous test own the lifetime it starts.
+// A returned test used to leave chat and document workers running into the next
+// test's environment, turning package-order and race-detector load into flakes.
+func cleanupStartedRun(t *testing.T, s *Service, runID string) {
+	t.Helper()
+	t.Cleanup(func() {
+		detail, err := s.RunGet(context.Background(), runID)
+		wasQueued := err == nil && detail.Run != nil && detail.Run.Status == "queued"
+		if err == nil && detail.Run != nil && detail.Run.Status != "done" && detail.Run.Status != "failed" {
+			if err := s.RunAbort(context.Background(), runID); err != nil {
+				t.Errorf("cleanup run %s: %v", runID, err)
+			}
+		}
+		// Queued runs reserve a done channel but never start a worker to close it.
+		if wasQueued {
+			return
+		}
+		s.runsMu.RLock()
+		rs := s.runs[runID]
+		s.runsMu.RUnlock()
+		if rs == nil {
+			return
+		}
+		rs.wmu.Lock()
+		done := rs.done
+		rs.wmu.Unlock()
+		if done == nil {
+			return
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("cleanup run %s did not settle", runID)
+		}
+	})
+}
+
 // projectWithConfig creates a registered project with a real project.toml.
 func projectWithConfig(t *testing.T, s *Service, name string) (string, string) {
 	t.Helper()
@@ -374,20 +411,16 @@ func TestAStageRequestSeatsItsOwnDucklings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The roster lands when the stage's executor picks the run up.
+	cleanupStartedRun(t, s, run.ID)
 	s.runsMu.RLock()
-	rs := s.runs[run.ID]
+	stored := s.runs[run.ID]
 	s.runsMu.RUnlock()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(rs.snapshotRun().Roster) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	if stored != nil && run == stored.run {
+		t.Fatal("StageStart returned the mutable run record instead of a snapshot")
 	}
-	current := rs.snapshotRun()
-	if current.Roster["architect"] != "pato-dos" {
-		t.Errorf("architect = %q, want the request's own pick pato-dos", current.Roster["architect"])
+	if run.Roster["architect"] != "pato-dos" {
+		t.Errorf("architect = %q, want the request's own pick pato-dos", run.Roster["architect"])
 	}
-	s.RunAbort(context.Background(), run.ID)
-	s.waitForRun(context.Background(), run.ID)
 	// The saved seats did not move.
 	if s.cfg.Defaults.ModeSeats["council"]["architect"][0] != "pato-uno" {
 		t.Error("a per-run pick must never edit the saved seats")

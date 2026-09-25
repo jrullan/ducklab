@@ -532,13 +532,21 @@ type modeContext struct {
 // dispatchMode runs the requested duck mode.
 func (s *Service) modeTurnMedian(mode, exclude string) float64 {
 	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-	var turns []float64
+	states := make(map[string]*runState, len(s.runs))
 	for id, rs := range s.runs {
-		if id == exclude || rs == nil || rs.run == nil || rs.run.Mode != mode || rs.run.Budget.Turns <= 0 {
+		states[id] = rs
+	}
+	s.runsMu.RUnlock()
+	var turns []float64
+	for id, rs := range states {
+		if id == exclude || rs == nil || rs.run == nil {
 			continue
 		}
-		turns = append(turns, float64(rs.run.Budget.Turns))
+		current := rs.snapshotRun()
+		if current.Mode != mode || current.Budget.Turns <= 0 {
+			continue
+		}
+		turns = append(turns, float64(current.Budget.Turns))
 	}
 	if len(turns) == 0 {
 		return 0
@@ -654,9 +662,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		TurnCaps:       turnCaps.Caps,
 		TurnCapSources: turnCaps.Sources,
 		Gate: func(ctx context.Context) (string, string, error) {
-			mc.rs.gateRoot = root
-			mc.rs.run.GateRoot = root
-			mc.rs.writer.WriteState()
+			mc.rs.recordGateRoot(root)
 			gate, log, err := tools.RunVerificationGate(ctx, mc.ectx)
 			if err != nil {
 				// A build-system marker without its tool is not a gate error:
@@ -690,15 +696,21 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
 			if kind == "turn_interrupted" {
+				mc.rs.wmu.Lock()
 				mc.rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
 				mc.rs.writer.WriteState()
+				mc.rs.wmu.Unlock()
 			} else if kind == "turn_end" && data["incomplete"] != true {
 				// Keep a replayable checkpoint until a pending safe-point pause
 				// has either landed or been ruled out.
+				mc.rs.wmu.Lock()
 				mc.rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
+				mc.rs.wmu.Unlock()
 				if !s.pauseAtSafePoint(mc.rs) {
+					mc.rs.wmu.Lock()
 					mc.rs.run.InterruptedTurn = nil
 					mc.rs.writer.WriteState()
+					mc.rs.wmu.Unlock()
 				}
 			}
 		},
@@ -767,7 +779,9 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 
 	res, err := strategy.ExecuteTournament(ctx, tp)
 	if res != nil {
+		mc.rs.wmu.Lock()
 		mc.rs.run.Resolution = res.Resolution
+		mc.rs.wmu.Unlock()
 		mc.rs.writer.AppendEvent("resolution", map[string]interface{}{
 			"resolution": res.Resolution,
 			"winner":     res.Winner,
