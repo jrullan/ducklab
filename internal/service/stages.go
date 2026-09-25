@@ -1040,13 +1040,19 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 						finalReviewFindings = intValue(data["findings"])
 					}
 					if kind == "turn_interrupted" {
+						rs.wmu.Lock()
 						rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
 						rs.writer.WriteState()
+						rs.wmu.Unlock()
 					} else if kind == "turn_end" && data["incomplete"] != true {
+						rs.wmu.Lock()
 						rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
+						rs.wmu.Unlock()
 						if !s.pauseAtSafePoint(rs) {
+							rs.wmu.Lock()
 							rs.run.InterruptedTurn = nil
 							rs.writer.WriteState()
+							rs.wmu.Unlock()
 						}
 					}
 				},
