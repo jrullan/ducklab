@@ -55,14 +55,19 @@ type Python struct{}
 func (Python) ID() string { return "python" }
 func (Python) Detect(ctx Context) Contributions {
 	markers := existing(ctx.ProjectRoot, "pytest.ini", "pyproject.toml")
+	testRoots := []string(nil)
 	if dirExists(ctx.ProjectRoot, "tests") {
 		markers = append(markers, "tests/")
+		testRoots = append(testRoots, "tests")
 	}
 	hasFiles := hasPythonFiles(ctx.ProjectRoot)
 	if len(markers) == 0 && !hasFiles {
 		return Contributions{}
 	}
-	c := Contributions{Detection: Detection{Capability: "python", Evidence: markers}}
+	c := Contributions{
+		Detection: Detection{Capability: "python", Evidence: markers},
+		LaneHints: LaneHints{TestRoots: testRoots, TestRegistrationFiles: existing(ctx.ProjectRoot, "pytest.ini", "pyproject.toml")},
+	}
 	if len(markers) > 0 && commandSucceeds(ctx.ProjectRoot, "pytest -q --collect-only") {
 		c.Gates = append(c.Gates, GateCandidate{Capability: "python", Kind: "tests", Command: "pytest -q", Scope: ".", Priority: 20})
 	}
@@ -84,6 +89,8 @@ func (Node) Detect(ctx Context) Contributions {
 	if fileExistsPath(rootPackage) {
 		c.Detection = Detection{Capability: "node", Evidence: []string{"package.json"}}
 		if hasTestScript(rootPackage) {
+			c.LaneHints.TestRegistrationFiles = append(c.LaneHints.TestRegistrationFiles, "package.json")
+			c.LaneHints.TestRoots = append(c.LaneHints.TestRoots, existingDirs(ctx.ProjectRoot, "tests", "test", "__tests__")...)
 			c.Gates = append(c.Gates, GateCandidate{Capability: "node", Kind: "tests", Command: "npm test --silent", Scope: ".", Priority: 30})
 		}
 	}
@@ -96,6 +103,10 @@ func (Node) Detect(ctx Context) Contributions {
 			c.Detection = Detection{Capability: "node"}
 		}
 		c.Detection.Evidence = append(c.Detection.Evidence, "frontend/package.json")
+		c.LaneHints.TestRegistrationFiles = append(c.LaneHints.TestRegistrationFiles, "frontend/package.json")
+		for _, root := range existingDirs(filepath.Join(ctx.ProjectRoot, "frontend"), "tests", "test", "__tests__") {
+			c.LaneHints.TestRoots = append(c.LaneHints.TestRoots, filepath.ToSlash(filepath.Join("frontend", root)))
+		}
 		command := "cd frontend && npx vitest run"
 		if fileExists(ctx.ProjectRoot, "frontend/tsconfig.json") {
 			c.Detection.Evidence = append(c.Detection.Evidence, "frontend/tsconfig.json")
@@ -116,6 +127,7 @@ func (Rust) Detect(ctx Context) Contributions {
 	return Contributions{
 		Detection: Detection{Capability: "rust", Evidence: []string{"Cargo.toml"}},
 		Gates:     []GateCandidate{{Capability: "rust", Kind: "tests", Command: "cargo test", Scope: ".", Priority: 40}},
+		LaneHints: LaneHints{TestRoots: existingDirs(ctx.ProjectRoot, "tests"), TestRegistrationFiles: []string{"Cargo.toml"}},
 	}
 }
 
@@ -215,9 +227,17 @@ func (Meson) Detect(ctx Context) Contributions {
 	if !commandSucceeds(ctx.ProjectRoot, "meson --version") {
 		candidate.Unavailable = &MissingToolchain{Tool: "meson", Marker: "meson.build"}
 	}
+	testRoots := existingDirs(ctx.ProjectRoot, "tests", "test")
+	registration := []string{"meson.build"}
+	for _, root := range testRoots {
+		if fileExists(ctx.ProjectRoot, filepath.Join(root, "meson.build")) {
+			registration = append(registration, filepath.ToSlash(filepath.Join(root, "meson.build")))
+		}
+	}
 	return Contributions{
 		Detection: Detection{Capability: "meson", Evidence: []string{"meson.build"}},
 		Gates:     []GateCandidate{candidate},
+		LaneHints: LaneHints{TestRoots: testRoots, TestRegistrationFiles: registration},
 	}
 }
 
@@ -490,6 +510,15 @@ func existing(root string, paths ...string) []string {
 	var found []string
 	for _, path := range paths {
 		if fileExists(root, path) {
+			found = append(found, path)
+		}
+	}
+	return found
+}
+func existingDirs(root string, paths ...string) []string {
+	var found []string
+	for _, path := range paths {
+		if dirExists(root, path) {
 			found = append(found, path)
 		}
 	}

@@ -129,6 +129,15 @@ type Contributions struct {
 	Detection   Detection
 	Gates       []GateCandidate
 	ReviewRules []ReviewRule
+	// LaneHints identify shared test infrastructure a task may need to edit.
+	// Providers own this stack knowledge; promotion and execution only compose
+	// relative paths without learning Meson, Cargo, pytest, or Node layouts.
+	LaneHints LaneHints
+}
+
+type LaneHints struct {
+	TestRoots             []string
+	TestRegistrationFiles []string
 }
 
 // Profile is the deterministic composition of all matching providers.
@@ -136,6 +145,7 @@ type Profile struct {
 	Detections  []Detection
 	Gate        *GateCandidate
 	ReviewRules []ReviewRule
+	LaneHints   LaneHints
 }
 
 // Provider names one reusable project or stack capability. Optional detector
@@ -244,6 +254,8 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 			profile.Detections = append(profile.Detections, contribution.Detection)
 			profile.ReviewRules = append(profile.ReviewRules, contribution.ReviewRules...)
 		}
+		profile.LaneHints.TestRoots = append(profile.LaneHints.TestRoots, contribution.LaneHints.TestRoots...)
+		profile.LaneHints.TestRegistrationFiles = append(profile.LaneHints.TestRegistrationFiles, contribution.LaneHints.TestRegistrationFiles...)
 		gates = append(gates, contribution.Gates...)
 	}
 	resolveGate(&profile, gates)

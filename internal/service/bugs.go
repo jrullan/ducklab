@@ -13,12 +13,14 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/bug"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/store"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/verify"
 )
 
 // BugRequest reports something that is broken.
@@ -533,14 +535,18 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 			return nil, fmt.Errorf("read stored split proposal: %w", err)
 		}
 	}
-	taskIDs, err := appendPlanTasks(entry.Path, rec, portions)
+	promoted, err := preparePromotionPortions(entry.Path, rec, portions)
+	if err != nil {
+		return nil, err
+	}
+	taskIDs, err := appendPlanTasks(entry.Path, rec, promoted)
 	if err != nil {
 		return nil, err
 	}
 	for i, taskID := range taskIDs {
 		title, body := promotedTaskTitle(rec), promotedTaskBody(rec)
-		if len(portions) > 0 {
-			title, body = portions[i].Title, promotedPortionBody(rec, portions[i])
+		if len(promoted) > 0 {
+			title, body = promoted[i].Title, promotedPortionBody(rec, promoted[i])
 		}
 		if err := db.CreateTask(&store.Task{ID: taskID, Title: title, Body: body, Status: "todo"}); err != nil {
 			return nil, err
@@ -574,10 +580,108 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 	return out, nil
 }
 
+// preparePromotionPortions turns a proposed split into executable lanes before
+// it reaches the plan. A single portion can safely inherit every suspected
+// file. A real split must assign each suspected file explicitly: guessing
+// between sibling portions would recreate overlapping lanes under a different
+// name. Stack providers contribute shared test roots and registration files.
+func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []agent.SplitProposal) ([]promotionPortion, error) {
+	if len(portions) == 0 {
+		return nil, nil
+	}
+	out := make([]promotionPortion, len(portions))
+	for i, portion := range portions {
+		portion.Owns = uniqueStrings(portion.Owns)
+		out[i] = promotionPortion{SplitProposal: portion}
+	}
+	add := func(index int, path, reason string) {
+		path = cleanLanePath(path)
+		if path == "" || anyClaimContains(ownsClaims(out[index].Owns), path) {
+			return
+		}
+		out[index].Owns = append(out[index].Owns, path)
+		out[index].LaneAdditions = append(out[index].LaneAdditions, fmt.Sprintf("%s (%s)", path, reason))
+	}
+
+	for _, raw := range strings.Split(rec.SuspectedFiles, "\n") {
+		path := cleanLanePath(raw)
+		if path == "" {
+			continue
+		}
+		owner := -1
+		for i := range out {
+			if anyClaimContains(ownsClaims(out[i].Owns), path) {
+				owner = i
+				break
+			}
+		}
+		if owner >= 0 {
+			continue
+		}
+		if len(out) != 1 {
+			return nil, fmt.Errorf("split proposal does not assign suspected file %s to a portion; edit the proposal before promoting so Ducklab does not guess between lanes", path)
+		}
+		add(0, path, "triage suspected file")
+	}
+
+	for i := range out {
+		for _, source := range append([]string(nil), out[i].Owns...) {
+			ext := strings.ToLower(filepath.Ext(source))
+			if ext != ".c" && ext != ".cc" && ext != ".cpp" && ext != ".cxx" {
+				continue
+			}
+			stem := strings.TrimSuffix(source, filepath.Ext(source))
+			for _, headerExt := range []string{".h", ".hh", ".hpp", ".hxx"} {
+				header := stem + headerExt
+				if _, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(header))); err == nil {
+					add(i, header, "existing sibling header")
+				}
+			}
+		}
+	}
+
+	var testPortions []int
+	for i, portion := range out {
+		text := portion.Title + "\n" + strings.Join(portion.Acceptance, "\n")
+		if verify.MentionsTests(text) {
+			testPortions = append(testPortions, i)
+		}
+	}
+	if len(testPortions) == 0 && verify.MentionsTests(rec.Deliverables+"\n"+rec.TestStrategy+"\n"+rec.TestReason) {
+		if len(out) == 1 {
+			testPortions = []int{0}
+		} else {
+			return nil, fmt.Errorf("split proposal requires test or coverage work but no portion claims it; add that acceptance slice to exactly one portion before promoting")
+		}
+	}
+	if len(testPortions) > 1 {
+		return nil, fmt.Errorf("split proposal assigns shared test infrastructure to %d portions; give one portion ownership of the regression and make the others depend on it", len(testPortions))
+	}
+	if len(testPortions) == 1 {
+		cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
+		if err != nil {
+			return nil, fmt.Errorf("load project config for promotion lane: %w", err)
+		}
+		profile, _ := capability.DefaultRegistry().ResolveProject(capability.Context{ProjectRoot: projectRoot, Policies: cfg.Capabilities.Policy}, cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled)
+		for _, root := range uniqueStrings(profile.LaneHints.TestRoots) {
+			add(testPortions[0], root, "stack test root")
+		}
+		for _, file := range uniqueStrings(profile.LaneHints.TestRegistrationFiles) {
+			add(testPortions[0], file, "stack test registration")
+		}
+	}
+	return out, nil
+}
+
 // promotedPortionBody puts a split portion's contract ahead of the original
 // report. The report can describe the whole incident (and therefore sibling
 // work), so it is useful evidence but must not become this task's checklist.
-func promotedPortionBody(b *store.Bug, portion agent.SplitProposal) string {
+type promotionPortion struct {
+	agent.SplitProposal
+	LaneAdditions []string
+}
+
+func promotedPortionBody(b *store.Bug, portion promotionPortion) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n## Current portion contract (authoritative)\n\n**Acceptance slices:**\n", b.ID)
 	for _, criterion := range portion.Acceptance {
@@ -585,6 +689,9 @@ func promotedPortionBody(b *store.Bug, portion agent.SplitProposal) string {
 	}
 	if len(portion.Owns) > 0 {
 		fmt.Fprintf(&sb, "\n**Owns:** %s\n", strings.Join(portion.Owns, ", "))
+	}
+	if len(portion.LaneAdditions) > 0 {
+		fmt.Fprintf(&sb, "\n**Lane widened at promote:** %s\n", strings.Join(portion.LaneAdditions, "; "))
 	}
 	sb.WriteString("\nOnly the Acceptance slices and Owns above are required for this portion.\n")
 	sb.WriteString("\n## Parent context (non-binding)\n\n")
@@ -654,7 +761,7 @@ const bugsMilestoneTitle = "Reported bugs"
 
 // appendPlanTasks adds one task per proposal portion, each with its own lane.
 // With no portions it preserves the legacy single-task promotion exactly.
-func appendPlanTasks(projectRoot string, rec *store.Bug, portions []agent.SplitProposal) ([]string, error) {
+func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPortion) ([]string, error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
 		return nil, err
@@ -668,7 +775,7 @@ func appendPlanTasks(projectRoot string, rec *store.Bug, portions []agent.SplitP
 	}
 	hasProposal := len(portions) > 0
 	if !hasProposal {
-		portions = []agent.SplitProposal{{Title: promotedTaskTitle(rec)}}
+		portions = []promotionPortion{{SplitProposal: agent.SplitProposal{Title: promotedTaskTitle(rec)}}}
 	}
 	// One shared milestone per promotion: every portion lands under the same
 	// "Reported bugs" heading, keeping the plan document's structure readable.
