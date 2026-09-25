@@ -25,7 +25,7 @@ SRCDIRTY = $$(git diff-index --quiet HEAD -- . ':(exclude).ducklab' ':(exclude)c
 STAMPVER = $$(git describe --tags --match 'v[0-9]*' --always 2>/dev/null || echo unknown)$(SRCDIRTY)
 STAMPSHA = $$(git rev-parse HEAD 2>/dev/null || echo unknown)$(SRCDIRTY)
 
-.PHONY: all build test test-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
+.PHONY: all build test test-race test-service-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
 
 all: vet test frontend
 
@@ -41,6 +41,12 @@ test:
 
 test-race:
 	$(GO) test -race ./...
+
+# Service runs are asynchronous and share the densest lifecycle surface in the
+# engine. Keep the expensive soak explicit so ordinary builds stay fast while
+# race-sensitive PRs have one canonical gate instead of an ad-hoc command.
+test-service-race:
+	$(GO) test -race ./internal/service -count=20 -timeout=30m
 
 # No post-formatter: api-check compares byte-for-byte, and a formatter run
 # only on `api` and not on `check` would make every fresh generation look

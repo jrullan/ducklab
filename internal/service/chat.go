@@ -149,6 +149,10 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	if err != nil {
 		return nil, err
 	}
+	projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("load project config: %w", err)
+	}
 	if req.AboutKind == "document" {
 		if _, err := s.TraceShow(ctx, projectID, req.AboutID); err != nil {
 			return nil, fmt.Errorf("document chat subject: %w", err)
@@ -172,6 +176,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 		return nil, err
 	}
 
+	limits := s.chatBudget(projCfg)
 	run := &runlog.Run{
 		ID:                 runlog.GenerateRunID(),
 		ProjectID:          projectID,
@@ -184,6 +189,10 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 		Roster:             map[string]string{"consultant": req.Duckling},
 		ContextScopes:      scopes,
 		BugTargetProjectID: bugTargetID,
+		Budget: runlog.BudgetState{Limit: runlog.BudgetLimits{
+			USD: limits.MaxUSD, Tokens: limits.MaxTokens,
+			Turns: limits.MaxTurns, WallclockS: limits.MaxWallclockS,
+		}},
 		// The subject rides the record: the runs list should say what a chat
 		// was about without opening it.
 		Note: strings.TrimSpace(fmt.Sprintf("chat about %s %s", req.AboutKind, req.AboutID)),
@@ -199,6 +208,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	rs := &runState{
 		run: run, writer: writer, runDir: writer.RunDir(),
 		projectPath: entry.Path, cancel: cancel, done: make(chan struct{}),
+		tracker: budget.NewTracker(&limits),
 	}
 	s.attachWriter(rs, writer)
 	s.runsMu.Lock()
@@ -237,7 +247,10 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 			s.executeChatTurn(c, rs, entry.Path, req.AboutKind, req.AboutID, req.Duckling, req.Images)
 		},
 	})
-	return run, nil
+	// ChatStart must not hand callers the record the worker mutates. A
+	// caller inspecting the returned run used to race budget publication in
+	// the chat goroutine; the same alias made every later run mutation unsafe.
+	return rs.snapshotRun(), nil
 }
 
 // ChatSend continues a paused conversation with the person's next message.
@@ -346,24 +359,8 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	}
 	tracker := rs.tracker
 	if tracker == nil {
-		limits := &budget.Budget{
-			MaxUSD:    projCfg.Budget.MaxUSD,
-			MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
-			MaxTurns:  s.cfg.Defaults.Budget.MaxTurns,
-			// No wallclock ceiling: the tracker's clock starts when the
-			// conversation opens and never stops, so it measures the
-			// PERSON's thinking time between messages, not the model's
-			// work. A chat left open through an afternoon died mid-question
-			// at 7515s against the 1800s meant to stop runaway runs. Each
-			// reply is still bounded — turn caps, provider timeouts — and
-			// tokens and dollars, which measure real spend, keep their caps.
-			MaxWallclockS: 0,
-		}
-		merged := projectBudget(*limits, projCfg.Budget)
-		// Chat never caps wallclock time: the clock includes the person's
-		// thinking time between messages, not just model work.
-		merged.MaxWallclockS = 0
-		limits = &merged
+		limitsValue := s.chatBudget(projCfg)
+		limits := &limitsValue
 		tracker = budget.NewTracker(limits)
 		recordLimits(rs, limits)
 		rs.setTracker(tracker)
@@ -473,6 +470,18 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "chat"})
 	rs.writer.WriteState()
 	rs.wmu.Unlock()
+}
+
+// chatBudget resolves the durable spend ceilings before the worker starts.
+// Chat wallclock remains uncapped: its clock includes the person's thinking
+// time between messages, while tokens, turns and dollars measure real work.
+func (s *Service) chatBudget(projCfg *config.Project) budget.Budget {
+	limits := projectBudget(budget.Budget{
+		MaxUSD: projCfg.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
+	}, projCfg.Budget)
+	limits.MaxWallclockS = 0
+	return limits
 }
 
 func (s *Service) resolveChatScopes(subject *registry.ProjectEntry, requested string) ([]runlog.ContextScope, error) {

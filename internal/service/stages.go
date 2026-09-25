@@ -267,12 +267,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
-	s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
+	documentFilled := s.fillDocumentStageSeats(projCfg, roster, needsReviewer)
 	lineup := req.Ducklings
 	if mode == "solo" && !needsReviewer && len(lineup) > 1 {
 		lineup = lineup[:1]
 	}
-	applyStageLineup(roster, lineup)
+	filled := applyStageLineup(roster, lineup)
 	if roster[config.RoleArchitect] == "" {
 		return nil, fmt.Errorf("no architect seated for %s — assign one on the Roster board (or pass an architect on the launch)", mode)
 	}
@@ -309,16 +309,22 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// Recorded as what will actually run, not as a constant. A report that
 	// says every stage was a council when half were solo is a report that
 	// cannot answer the question it exists for.
+	warning := bothSidesWarning(roster)
+	profile, profileSource, _ := s.stageSupportProfile(roster, req.SupportProfile)
 	run := &runlog.Run{
-		ID:             runlog.GenerateRunID(),
-		ProjectID:      projectID,
-		Stage:          req.Stage,
-		Mode:           mode,
-		Status:         "running",
-		StartedAt:      time.Now().UTC().Format(time.RFC3339),
-		Autonomy:       orDefault(req.Autonomy, "guarded"),
-		AgentTurns:     req.AgentTurns,
-		SupportProfile: strings.TrimSpace(req.SupportProfile),
+		ID:                   runlog.GenerateRunID(),
+		ProjectID:            projectID,
+		Stage:                req.Stage,
+		Mode:                 mode,
+		Status:               "running",
+		StartedAt:            time.Now().UTC().Format(time.RFC3339),
+		Autonomy:             orDefault(req.Autonomy, "guarded"),
+		AgentTurns:           req.AgentTurns,
+		SupportProfile:       profile,
+		SupportProfileSource: profileSource,
+		Roster:               rosterStrings(roster),
+		RosterSources:        s.rosterSources(projCfg, mode, req.Ducklings, nil),
+		Warning:              warning,
 		// Always. Streaming is display state the bus fans out to whoever
 		// watches; gating it on the launcher's flag meant a stage launched
 		// from the CLI showed a person watching in the desktop no text and
@@ -328,6 +334,13 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		// An artifact stage has no executable gate: the verdict is UNVERIFIED
 		// until a person approves it, and saying so is the honest label (P3).
 		Gate: "none",
+	}
+	s.recordSeatTiers(run, roster)
+	for _, role := range documentFilled {
+		run.RosterSources[string(role)] = "documents council seat"
+	}
+	for _, role := range filled {
+		run.RosterSources[string(role)] = "request"
 	}
 
 	writer, err := runlog.NewWriter(entry.Path, run)
@@ -364,7 +377,9 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		rs: rs, ctx: runCtx,
 		exec: func(c context.Context) { s.executeStage(c, rs, entry.Path, req) },
 	})
-	return run, nil
+	// The resolved cast is a launch fact, not an eventual side effect. Return a
+	// snapshot rather than the record the stage goroutine continues to mutate.
+	return rs.snapshotRun(), nil
 }
 
 func stageNeedsReviewer(projectRoot, stageName, mode string, adopt bool) (bool, error) {
@@ -886,7 +901,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		},
 		ClearSectionedCheckpoint: func() error { return clearSectionedCheckpoint(rs.runDir) },
 		RestartInterruptedSection: func() {
+			rs.wmu.Lock()
 			if rs.run.InterruptedTurn == nil {
+				rs.wmu.Unlock()
 				return
 			}
 			rs.writer.AppendEvent("sectioned_pass_restarted", map[string]interface{}{
@@ -894,6 +911,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			})
 			rs.run.InterruptedTurn = nil
 			rs.writer.WriteState()
+			rs.wmu.Unlock()
 		},
 		Seed:      seed,
 		Mode:      req.Mode,

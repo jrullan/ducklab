@@ -539,9 +539,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// later — so solo runs no round gate at all.
 	if mode == "pair" {
 		params.Gate = func(ctx context.Context) (string, string, error) {
-			rs.gateRoot = projectRoot
-			rs.run.GateRoot = projectRoot
-			rs.writer.WriteState()
+			rs.recordGateRoot(projectRoot)
 			res, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
@@ -571,9 +569,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase":  "after",
 		"detail": "running the suite over the new test — an honest red is the deliverable",
 	})
-	rs.gateRoot = projectRoot
-	rs.run.GateRoot = projectRoot
-	rs.writer.WriteState()
+	rs.recordGateRoot(projectRoot)
 	after, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate after: %w", err))
@@ -674,9 +670,7 @@ func (s *Service) testFirstBaseline(ctx context.Context, rs *runState, projectRo
 		"phase":  "before",
 		"detail": "running the suite before any test is written — a red test only means something against a green baseline",
 	})
-	rs.gateRoot = projectRoot
-	rs.run.GateRoot = projectRoot
-	rs.writer.WriteState()
+	rs.recordGateRoot(projectRoot)
 	before, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		return nil, err

@@ -827,19 +827,18 @@ func TestAChatHasNoWallclockCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanupStartedRun(t, s, run.ID)
 	s.runsMu.RLock()
-	rs := s.runs[run.ID]
+	stored := s.runs[run.ID]
 	s.runsMu.RUnlock()
-	deadline := time.Now().Add(5 * time.Second)
-	for rs.snapshotRun().Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	if stored != nil && run == stored.run {
+		t.Fatal("ChatStart returned the mutable run record instead of a snapshot")
 	}
-	current := rs.snapshotRun()
-	if current.Budget.Limit.WallclockS != 0 {
+	if run.Budget.Limit.WallclockS != 0 {
 		t.Errorf("chat wallclock ceiling = %d, want none — idle time is not spend",
-			current.Budget.Limit.WallclockS)
+			run.Budget.Limit.WallclockS)
 	}
-	if current.Budget.Limit.Tokens == 0 {
+	if run.Budget.Limit.Tokens == 0 {
 		t.Error("the real-spend caps must survive: tokens ceiling is gone too")
 	}
 }
