@@ -17,9 +17,14 @@ import (
 // captureRender executes the project's render command and copies its PNG
 // artifacts into immutable run evidence. Render output never remains in the
 // run checkout, and rendering is deliberately not part of the verification verdict.
-func captureRender(ctx context.Context, root string, contract config.RenderContract, writer *runlog.Writer, runID, projectID string) ([]string, error) {
+type renderOutcome struct {
+	Captures []string
+	Note     string
+}
+
+func captureRender(ctx context.Context, root string, contract config.RenderContract, writer *runlog.Writer, runID, projectID string) (renderOutcome, error) {
 	if strings.TrimSpace(contract.Command) == "" {
-		return nil, nil
+		return renderOutcome{}, nil
 	}
 	timeout := contract.TimeoutS
 	if timeout <= 0 {
@@ -28,7 +33,8 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	parentCtx := ctx
+	renderCtx, cancel := context.WithTimeout(parentCtx, time.Duration(timeout)*time.Second)
 	defer cancel()
 	baseEnv := os.Environ()
 	envValue := func(name string) string {
@@ -71,12 +77,23 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		"DUCKLAB_RENDER_SCENES="+strings.Join(contract.Scenes, "\n"), "DUCKLAB_RENDER_VIEWPORT="+viewport,
 		"DUCKLAB_RENDER_OUTPUT="+outputDir,
 		"DUCKLAB_RENDER_TIMEOUT_S="+fmt.Sprintf("%d", timeout))
-	out, commandErr := xplat.ShellContext(ctx, root, env, contract.Command).CombinedOutput()
+	out, commandErr := xplat.ShellContext(renderCtx, root, env, contract.Command).CombinedOutput()
 	if strings.TrimSpace(contract.Artifacts) == "" {
 		if commandErr != nil {
-			return nil, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+			// Without an artifact contract this is an app-liveness smoke. A GUI
+			// that is still serving at the end of the observation window answered
+			// the question successfully; ShellContext killing it is cleanup, not
+			// an application failure. A parent cancellation remains a failure.
+			if renderCtx.Err() == context.DeadlineExceeded && parentCtx.Err() == nil {
+				note := fmt.Sprintf("render smoke stayed alive for %ds; stopped after the observation window", timeout)
+				if output := renderNoteOutput(out); output != "" {
+					note += "; output: " + output
+				}
+				return renderOutcome{Note: note}, nil
+			}
+			return renderOutcome{}, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
 		}
-		return nil, nil
+		return renderOutcome{}, nil
 	}
 	artifactPattern := contract.Artifacts
 	cleanPattern := filepath.Clean(artifactPattern)
@@ -88,13 +105,13 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		matches, err = filepath.Glob(artifactPattern)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("render artifacts glob: %w", err)
+		return renderOutcome{}, fmt.Errorf("render artifacts glob: %w", err)
 	}
 	if len(matches) == 0 {
 		if commandErr != nil {
-			return nil, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+			return renderOutcome{}, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
 		}
-		return nil, fmt.Errorf("render artifacts matched no files: %s", contract.Artifacts)
+		return renderOutcome{}, fmt.Errorf("render artifacts matched no files: %s", contract.Artifacts)
 	}
 	var captures []string
 	defer func() {
@@ -104,7 +121,7 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 	}()
 	for _, path := range matches {
 		if strings.ToLower(filepath.Ext(path)) != ".png" {
-			return nil, fmt.Errorf("render artifact is not a PNG: %s", filepath.Base(path))
+			return renderOutcome{}, fmt.Errorf("render artifact is not a PNG: %s", filepath.Base(path))
 		}
 		info, statErr := os.Stat(path)
 		if statErr != nil || info.IsDir() {
@@ -112,24 +129,33 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil, readErr
+			return renderOutcome{}, readErr
 		}
 		// The contract is PNG images, not arbitrary files renamed with .png.
 		// Check the PNG signature before attaching evidence so clients can safely
 		// render every capture as an image.
 		if len(data) < 8 || string(data[:8]) != "\x89PNG\r\n\x1a\n" {
-			return nil, fmt.Errorf("render artifact is not a valid PNG: %s", filepath.Base(path))
+			return renderOutcome{}, fmt.Errorf("render artifact is not a valid PNG: %s", filepath.Base(path))
 		}
 		name := filepath.Base(path)
 		if err := writer.WriteCapture(name, data); err != nil {
-			return nil, err
+			return renderOutcome{}, err
 		}
 		captures = append(captures, name)
 	}
 	if commandErr != nil {
 		// A dirty renderer is still successful when it produced usable evidence.
 		// Preserve the captures and let the caller record the exit as a caveat.
-		return captures, fmt.Errorf("render command exited unsuccessfully: %s: %w", strings.TrimSpace(string(out)), commandErr)
+		return renderOutcome{Captures: captures}, fmt.Errorf("render command exited unsuccessfully: %s: %w", strings.TrimSpace(string(out)), commandErr)
 	}
-	return captures, nil
+	return renderOutcome{Captures: captures}, nil
+}
+
+func renderNoteOutput(out []byte) string {
+	const maxRunes = 2000
+	runes := []rune(strings.TrimSpace(string(out)))
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return string(runes)
 }
