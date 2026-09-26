@@ -252,7 +252,7 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "bug_reopen",
-			"description": "Reopen a fixed bug when human verification finds the problem remains. This sends fixed→in_progress; only do this with the human's explicit consent, and do not change any run.",
+			"description": "Reopen a fixed bug when human verification finds the problem remains. This clears the consumed task binding, records it in the audit trail, and returns the bug to triaged so a new fix can be promoted. Only do this with the human's explicit consent, and do not change any run.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("the fixed bug, B-..."),

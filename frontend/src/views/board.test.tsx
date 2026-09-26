@@ -817,6 +817,21 @@ describe("moving a bug by hand", () => {
 
     await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "fixed"));
   });
+
+  it("names the fixed-bug backward move as reopen and explains its result", async () => {
+    const fixed = {
+      ...stuck, status: "fixed", next: ["verified", "in_progress"],
+    };
+    const c = client();
+    (c.bugs as ReturnType<typeof vi.fn>).mockResolvedValue([fixed]);
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText("vertex drag never starts"));
+
+    expect(screen.getByTestId("bug-move-in_progress").textContent).toBe("reopen");
+    expect(screen.getByTestId("bug-reopen-help").textContent).toContain("returns the bug to triaged");
+    fireEvent.click(screen.getByTestId("bug-move-in_progress"));
+    await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "in_progress"));
+  });
 });
 // The board showed every task's state and never answered the question a person
 // actually arrives with. The engine has computed it all along.

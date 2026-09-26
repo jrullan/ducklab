@@ -1803,20 +1803,30 @@ function BugNext({
           could reach a state the rail had no case for — a fixed bug sat at
           in_progress with nothing to click and no way to move it by hand. */}
       {(bug.next ?? []).length > 0 && (
-        <div className="flex flex-wrap items-center gap-1" data-testid="bug-moves">
-          <span className="text-xs text-ink-muted">move to</span>
-          {(bug.next ?? []).map((to) => (
-            <button
-              key={to}
-              type="button"
-              data-testid={`bug-move-${to}`}
-              disabled={busy}
-              onClick={() => act(() => client.moveBug(projectId, bug.id, to))}
-              className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-            >
-              {to.replace("_", " ")}
-            </button>
-          ))}
+        <div className="space-y-1" data-testid="bug-moves">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-xs text-ink-muted">move to</span>
+            {(bug.next ?? []).map((to) => {
+              const reopens = bug.status === "fixed" && to === "in_progress";
+              return (
+                <button
+                  key={to}
+                  type="button"
+                  data-testid={`bug-move-${to}`}
+                  disabled={busy}
+                  onClick={() => act(() => client.moveBug(projectId, bug.id, to))}
+                  className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+                >
+                  {reopens ? "reopen" : to.replace("_", " ")}
+                </button>
+              );
+            })}
+          </div>
+          {bug.status === "fixed" && (bug.next ?? []).includes("in_progress") && (
+            <p className="text-xs text-ink-muted" data-testid="bug-reopen-help">
+              Reopen when the fix did not answer the report. It clears the previous task binding and returns the bug to triaged so you can promote a new fix.
+            </p>
+          )}
         </div>
       )}
       {startedRun && (
