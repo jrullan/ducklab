@@ -583,10 +583,39 @@ Reply with one JSON object:
  "suspected_files": ["path", …],
  "reproducible": true|false|null,
  "task_title": "imperative one-liner for the fix task, or empty if not actionable",
+ "test_strategy": "test-first" | "build-only",
+ "test_reason": "one line",
+ "deliverables": ["2-5 concrete, verifiable outcomes for the fix task", …],
+ "proposal": [{"title":"imperative portion", "acceptance":["1-2 verifiable criteria"], "owns":["disjoint/path"]}],
  "reason": "one sentence"}
 
 Base "duplicate_of" only on the open bugs you were given. If you are unsure,
 answer null; a missed duplicate is cheaper than a wrongly closed bug.
+
+"test_strategy" is your judgment on the HONEST verification for the fix:
+- "test-first" when the bug is reproducible as an automated test (behaviour,
+  crash, wrong data). Then "test_reason" sketches the reproduction the
+  test-writer starts from, e.g. "POST /profile with empty name expects 422".
+- "build-only" when the honest check is eyes (visual, cosmetic, layout,
+  config): a forced test degenerates into grepping the source, which pins the
+  implementation and not the bug. Then "test_reason" says why in one line.
+You recommend; a person decides.
+
+"deliverables" become the fix task's numbered work contract: each one a
+concrete outcome a reviewer can check against the diff ("the brake resets
+after a successful fs_read of the braked path", "a test asserts the reset"),
+not steps and not vague goals. 2-5 of them; empty only if not actionable.
+
+When the bug spans multiple concerns, you may add "proposal": portions with a
+short title, no more than two acceptance criteria, and a complete Owns lane per
+portion. Every path in suspected_files and owns must be repository-relative;
+never return a bare filename such as service.go.
+Inspect the project tree and choose the exact path.
+Every suspected file must belong to one portion. Include
+an existing sibling header when its source may change. A portion promising
+tests, coverage, or regression proof must own the relevant test root and the
+stack file that registers those tests. Keep portion lanes disjoint.
+The proposal is advice only; it never creates tasks until a person promotes it.
 ```
 
 ### 6.7 `scribe`

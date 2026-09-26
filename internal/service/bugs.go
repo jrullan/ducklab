@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -591,8 +592,12 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	}
 	out := make([]promotionPortion, len(portions))
 	for i, portion := range portions {
-		portion.Owns = uniqueStrings(portion.Owns)
-		out[i] = promotionPortion{SplitProposal: portion}
+		resolved, additions, err := resolvePromotionLanePaths(projectRoot, portion.Owns)
+		if err != nil {
+			return nil, fmt.Errorf("split proposal portion %q: %w", portion.Title, err)
+		}
+		portion.Owns = resolved
+		out[i] = promotionPortion{SplitProposal: portion, LaneAdditions: additions}
 	}
 	add := func(index int, path, reason string) {
 		path = cleanLanePath(path)
@@ -604,7 +609,10 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	}
 
 	for _, raw := range strings.Split(rec.SuspectedFiles, "\n") {
-		path := cleanLanePath(raw)
+		path, resolution, err := resolvePromotionLanePath(projectRoot, raw)
+		if err != nil {
+			return nil, fmt.Errorf("triage suspected file: %w", err)
+		}
 		if path == "" {
 			continue
 		}
@@ -621,7 +629,11 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		if len(out) != 1 {
 			return nil, fmt.Errorf("split proposal does not assign suspected file %s to a portion; edit the proposal before promoting so Ducklab does not guess between lanes", path)
 		}
-		add(0, path, "triage suspected file")
+		reason := "triage suspected file"
+		if resolution != "" {
+			reason += "; " + resolution
+		}
+		add(0, path, reason)
 	}
 
 	for i := range out {
@@ -671,6 +683,77 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 	return out, nil
+}
+
+// resolvePromotionLanePaths turns the model's lane vocabulary into paths the
+// write invariant can actually enforce. Repository-relative paths are kept as
+// written. A bare basename is only useful when it identifies exactly one item
+// in the project tree; otherwise promotion stops before creating an
+// impossible task.
+func resolvePromotionLanePaths(projectRoot string, raw []string) ([]string, []string, error) {
+	var paths, additions []string
+	for _, item := range raw {
+		path, resolution, err := resolvePromotionLanePath(projectRoot, item)
+		if err != nil {
+			return nil, nil, err
+		}
+		if path == "" {
+			continue
+		}
+		paths = append(paths, path)
+		if resolution != "" {
+			additions = append(additions, fmt.Sprintf("%s (%s)", path, resolution))
+		}
+	}
+	return uniqueStrings(paths), uniqueStrings(additions), nil
+}
+
+func resolvePromotionLanePath(projectRoot, raw string) (string, string, error) {
+	path := cleanLanePath(raw)
+	if path == "" || strings.Contains(path, "/") {
+		return path, "", nil
+	}
+	// Root-level files and directories such as meson.build and tests are
+	// already valid repository-relative paths, despite having no slash.
+	if _, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(path))); err == nil {
+		return path, "", nil
+	}
+
+	var matches []string
+	err := filepath.WalkDir(projectRoot, func(candidate string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".ducklab", "build", "node_modules", "vendor":
+				if candidate != projectRoot {
+					return filepath.SkipDir
+				}
+			}
+		}
+		if candidate == projectRoot || entry.Name() != path {
+			return nil
+		}
+		rel, relErr := filepath.Rel(projectRoot, candidate)
+		if relErr != nil {
+			return relErr
+		}
+		matches = append(matches, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("resolve bare lane path %q: %w", path, err)
+	}
+	slices.Sort(matches)
+	switch len(matches) {
+	case 0:
+		return "", "", fmt.Errorf("bare lane path %q matches no repository path; use a repository-relative path", path)
+	case 1:
+		return matches[0], fmt.Sprintf("resolved bare lane %s", path), nil
+	default:
+		return "", "", fmt.Errorf("bare lane path %q is ambiguous; use one of: %s", path, strings.Join(matches, ", "))
+	}
 }
 
 // promotedPortionBody puts a split portion's contract ahead of the original

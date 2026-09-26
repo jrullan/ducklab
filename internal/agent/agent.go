@@ -2480,10 +2480,13 @@ not steps and not vague goals. 2-5 of them; empty only if not actionable.
 
 When the bug spans multiple concerns, you may add "proposal": portions with a
 short title, no more than two acceptance criteria, and a complete Owns lane per
-portion. Every suspected file must belong to one portion. Include an existing
-sibling header when its source may change. A portion promising tests, coverage,
-or regression proof must own the relevant test root and the stack file that
-registers those tests. Keep portion lanes disjoint.
+portion. Every path in suspected_files and owns must be repository-relative;
+never return a bare filename such as service.go.
+Inspect the project tree and choose the exact path.
+Every suspected file must belong to one portion. Include
+an existing sibling header when its source may change. A portion promising
+tests, coverage, or regression proof must own the relevant test root and the
+stack file that registers those tests. Keep portion lanes disjoint.
 The proposal is advice only; it never creates tasks until a person promotes it.`
 
 // usageMap is what goes to llm.jsonl for one call.
