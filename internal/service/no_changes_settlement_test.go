@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,5 +61,35 @@ func TestAcceptedNoChangesBuildSettlesTaskAndLeavesItOutOfAutopilotQueue(t *test
 	}
 	if next != nil {
 		t.Fatalf("autopilot queue returned %s after accepted no_changes run", next.ID)
+	}
+}
+
+func TestNoChangesCannotAcceptAReopenedBugFix(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-001 — Rework\n\n### T-001 — Fix it again\n\n" +
+			reopenEvidenceHeading + "\n\nReopened: T-000 did not answer the report.\n",
+	})
+	run := &runlog.Run{
+		ID: "r-reopened-empty", ProjectID: projectID, TaskID: "T-001", Stage: "build",
+		Status: "paused", PendingKind: "gate", Verdict: "PASSED", NoChanges: true,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.acceptRun(context.Background(), rs, entry, "", "human")
+	if err == nil || !strings.Contains(err.Error(), "unchanged tree cannot be its fix") {
+		t.Fatalf("accept error = %v", err)
+	}
+	if run.Accepted {
+		t.Fatal("reopened no-change run was accepted")
 	}
 }

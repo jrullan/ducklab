@@ -571,10 +571,10 @@ func (c *Client) BugAttach(projectID, bugID, filename, dataB64 string) (map[stri
 }
 
 // BugPromote turns a bug into a task. The actor signs the audit trail.
-func (c *Client) BugPromote(projectID, bugID, actor string) (map[string]interface{}, error) {
+func (c *Client) BugPromote(projectID, bugID, actor, note string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/promote",
-		map[string]string{"actor": actor}, &result)
+		map[string]string{"actor": actor, "note": note}, &result)
 	return result, err
 }
 

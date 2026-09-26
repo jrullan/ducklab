@@ -729,10 +729,14 @@ func bugCmd(verb string, args []string, repo string) int {
 
 	case "promote":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab bug promote <id>")
+			fmt.Fprintln(os.Stderr, "usage: ducklab bug promote <id> [--note text]")
 			return 2
 		}
-		out, err := client.BugPromote(projectID, args[0], "human")
+		note := ""
+		if len(args) >= 3 && args[1] == "--note" {
+			note = args[2]
+		}
+		out, err := client.BugPromote(projectID, args[0], "human", note)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 2

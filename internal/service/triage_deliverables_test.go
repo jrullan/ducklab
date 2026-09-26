@@ -23,7 +23,7 @@ func TestPromotedTaskCarriesTheTriagersDeliverables(t *testing.T) {
 		TestStrategy: "test-first",
 		Deliverables: "The brake resets after a successful fs_read of the braked path\nA test asserts the reset restores a one-probe window",
 	}
-	body := promotedTaskBody(b)
+	body := promotedTaskBody(b, "")
 	if !strings.Contains(body, "**Deliverables:**\n- The brake resets after a successful fs_read of the braked path\n- A test asserts the reset restores a one-probe window\n") {
 		t.Fatalf("body lacks the checklist:\n%s", body)
 	}
@@ -38,7 +38,7 @@ func TestPromotedTaskCarriesTheTriagersDeliverables(t *testing.T) {
 // label keeps the historical all-bullets reading.
 func TestPromotedTaskWithoutDeliverablesKeepsItsShape(t *testing.T) {
 	b := &store.Bug{ID: "B-001", Title: "t", Body: "prose only", TriageReason: "r"}
-	body := promotedTaskBody(b)
+	body := promotedTaskBody(b, "")
 	if strings.Contains(body, "**Deliverables:**") {
 		t.Fatalf("invented a checklist:\n%s", body)
 	}
