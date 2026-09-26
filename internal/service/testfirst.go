@@ -699,6 +699,12 @@ func judgeTestFirstWithGate(before, after *verify.Result, diff string, globs []s
 		return "FAILED", "no test file was written, so nothing was specified"
 	}
 	if after.ExitCode == 0 {
+		// Red -> green is evidence of a fix, not a vacuous test. Diagnose this
+		// transition before the ordinary green-baseline branch so the person is
+		// sent to a build run instead of being told the gate was "still" green.
+		if before.ExitCode != 0 {
+			return "FAILED", "the gate was red and this turn turned it green: that is a fix, not a failing specification — launch this task as a build run"
+		}
 		// A green result is only meaningful for files the command actually
 		// reaches. The old Go-only gate made a correct frontend test look
 		// vacuous because it never ran Vitest.
