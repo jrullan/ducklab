@@ -215,6 +215,58 @@ func TestPromotionBareLanePathRequiresExactlyOneMatch(t *testing.T) {
 	}
 }
 
+func TestBugPromotionRecordsAndDropsUnresolvableSuspectedFiles(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, root := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, path := range []string{"src/app/clipboard_handler.c", "src/app/lifecycle.c", "src/delivery/lifecycle.c"} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "clipboard lifecycle fails"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.ApplyTriage(context.Background(), id, []map[string]interface{}{{
+		"bug": "B-001", "severity": "normal", "reason": "advisory guesses include bad basenames",
+		"suspected_files": []string{"config.c", "lifecycle.c", "src/app/clipboard_handler.c"},
+		"proposal": []interface{}{map[string]interface{}{
+			"title": "Correct clipboard lifecycle", "acceptance": []interface{}{"clipboard lifecycle works"}, "owns": []interface{}{"src/app/clipboard_handler.c"},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
+	if err != nil {
+		t.Fatalf("advisory suspected files blocked promotion: %v", err)
+	}
+	plan, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := plan.Section(out["task"].(string))
+	if task == nil {
+		t.Fatal("promoted task is absent from plan")
+	}
+	for _, want := range []string{
+		"suspected file config.c ignored: no such repository path",
+		"suspected file lifecycle.c ignored: basename is ambiguous",
+		"src/app/lifecycle.c",
+		"src/delivery/lifecycle.c",
+	} {
+		if !strings.Contains(task.Body, want) {
+			t.Errorf("promotion note lacks %q:\n%s", want, task.Body)
+		}
+	}
+	if slices.Contains(task.Owns, "config.c") || slices.Contains(task.Owns, "lifecycle.c") {
+		t.Fatalf("unresolvable advisory paths leaked into enforced lane: %v", task.Owns)
+	}
+}
+
 func TestBugPromotionRefusesToGuessASuspectedFileBetweenPortions(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
