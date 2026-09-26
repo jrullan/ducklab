@@ -38,6 +38,21 @@ func TestAStillGreenGateFailsTheRun(t *testing.T) {
 	}
 }
 
+func TestARedGateTurnedGreenIsDiagnosedAsAFix(t *testing.T) {
+	verdict, detail := judgeTestFirst(red(), green(), testDiff, nil)
+	if verdict != "FAILED" {
+		t.Errorf("red-to-green test-first verdict = %s, want FAILED", verdict)
+	}
+	for _, want := range []string{"was red", "turned it green", "a fix", "build run"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("red-to-green diagnosis lacks %q: %q", want, detail)
+		}
+	}
+	if strings.Contains(detail, "still green") || strings.Contains(detail, "asserts nothing") {
+		t.Errorf("red-to-green diagnosis falsely calls the fix vacuous: %q", detail)
+	}
+}
+
 // A passing frontend test is not a vacuous specification when the configured
 // gate never executes frontend/. Diagnose the coverage boundary explicitly so
 // a redo note does not falsely blame the assertion.
