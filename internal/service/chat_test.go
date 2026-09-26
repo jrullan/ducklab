@@ -151,6 +151,53 @@ func TestRunChatRefusesARunFromAnotherProject(t *testing.T) {
 	}
 }
 
+func TestBugChatIncludesEngineLifecycleTruthAndPriorConsultations(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.BugAdd(context.Background(), p.ID, BugRequest{Title: "button remains disabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugMove(context.Background(), p.ID, b.ID, "triaged", "human"); err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := s.BugPromote(context.Background(), p.ID, b.ID, "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := promoted["task"].(string)
+
+	prior := &runlog.Run{
+		ID: "r-prior-chat", ProjectID: p.ID, Stage: "chat", Status: "done",
+		Note: "chat about bug " + b.ID, StartedAt: "2026-09-24T20:06:33Z",
+	}
+	w, err := runlog.NewWriter(dir, prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.AppendEvent("message", map[string]interface{}{"role": "human", "content": "Promote says the bug already has a task."})
+	w.AppendEvent("message", map[string]interface{}{"role": "consultant", "content": "Do not retry Promote; first reopen the fixed report and verify the legal actions."})
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	current := &runlog.Run{ID: "r-current-chat", ProjectID: p.ID, Stage: "chat", Note: "chat about bug " + b.ID}
+	prompt := s.chatPromptFor(context.Background(), &runState{run: current, runDir: t.TempDir()}, dir, "bug", b.ID)
+	for _, want := range []string{
+		"Legal next statuses", "fixed", "triaged", "Promotion is unavailable", taskID,
+		"Prior consultations", "r-prior-chat", "2026-09-24T20:06:33Z",
+		"Promote says the bug already has a task", "Do not retry Promote",
+		"Do not repeat advice that the transcript records as tried and unsuccessful",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("bug chat dossier is missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestChatRecordsAnExplicitHarnessScopeAndBugDestination(t *testing.T) {
 	s := serviceWithDucklings(t, "consultant")
 	subject, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "Fledge", GitInit: true})
