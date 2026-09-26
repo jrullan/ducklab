@@ -132,6 +132,34 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 	if err != nil {
 		return nil, fmt.Errorf("no bug %s", id)
 	}
+	// Reopening a claimed fix starts a new piece of work. Keeping the consumed
+	// task bound here makes promote refuse forever ("already task T-nnn") and
+	// falsely presents the accepted task as the current fix. Preserve that task
+	// in the audit trail, clear the live binding, and return to triaged so the
+	// person can confirm the new evidence before minting another task.
+	if bug.Status(rec.Status) == bug.Fixed && bug.Status(to) == bug.InProgress {
+		if actor == "" {
+			actor = "human"
+		}
+		from, previousTask := rec.Status, rec.TaskID
+		rec.Status = string(bug.Triaged)
+		rec.TaskID = ""
+		rec.DuplicateOf = ""
+		if err := db.UpdateBug(rec); err != nil {
+			return nil, err
+		}
+		note := "reopened after the previous fix did not answer the report"
+		if previousTask != "" {
+			note = fmt.Sprintf("reopened after %s was accepted; the previous fix did not answer the report", previousTask)
+		}
+		audit := bug.AuditEntry{
+			Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "reopen", Note: note,
+		}
+		appendBugAudit(entry.Path, audit)
+		out := toBug(rec)
+		out.History = []bug.AuditEntry{audit}
+		return out, nil
+	}
 	next, err := bug.Move(bug.Status(rec.Status), bug.Status(to))
 	if err != nil {
 		return nil, err
@@ -947,8 +975,21 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		if sev, _ := p["severity"].(string); sev != "" {
 			rec.Severity = sev
 		}
+		invalidDuplicate := ""
 		if dup, _ := p["duplicate_of"].(string); dup != "" {
-			rec.DuplicateOf = dup
+			target, targetErr := db.GetBug(dup)
+			if targetErr != nil {
+				rec.DuplicateOf = ""
+				invalidDuplicate = fmt.Sprintf("duplicate target %s does not exist; kept for human triage", dup)
+			} else {
+				targetStatus := bug.Status(target.Status)
+				if targetStatus != bug.Open && targetStatus != bug.Triaged && targetStatus != bug.InProgress {
+					rec.DuplicateOf = ""
+					invalidDuplicate = fmt.Sprintf("duplicate target %s is %s; kept for human triage instead of retiring this report", dup, target.Status)
+				} else {
+					rec.DuplicateOf = dup
+				}
+			}
 		}
 		// The half of the answer that says WHERE. It lived only in the run's
 		// event stream, so promoting the bug days later carried the reporter's
@@ -969,6 +1010,12 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		}
 		if v, _ := p["reason"].(string); v != "" {
 			rec.TriageReason = v
+		}
+		if invalidDuplicate != "" {
+			if rec.TriageReason != "" {
+				rec.TriageReason += "; "
+			}
+			rec.TriageReason += invalidDuplicate
 		}
 		if files, ok := p["suspected_files"].([]interface{}); ok {
 			var names []string
