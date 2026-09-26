@@ -597,6 +597,9 @@ export interface Bug {
   attachments?: string[];
   /** The audit trail: every status transition, signed by who made it. */
   history?: BugAuditEntry[];
+  /** A reopened report must receive a fresh contract before it can become a
+   * new task; the previous contract described the fix that failed. */
+  needs_triage?: boolean;
   /** The split on the table: the portions "make it a task" will turn into one
    * task each. A triager recommends one; the person writes, corrects or
    * discards it through bugEdit until promote consumes it. */
@@ -1608,10 +1611,11 @@ export class EngineClient {
       status,
     });
   }
-  promoteBug(projectId: string, bugId: string) {
+  promoteBug(projectId: string, bugId: string, note?: string) {
     return this.request<{ bug: string; task: string; status: string }>(
       "POST",
       `/v1/projects/${projectId}/bugs/${bugId}/promote`,
+      note?.trim() ? { note: note.trim() } : undefined,
     );
   }
   /** The solo-baseline comparison (03 §3.10). `rendered` is the engine's own

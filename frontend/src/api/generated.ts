@@ -38,6 +38,7 @@ export interface BugBug {
   duplicate_of?: string;
   history?: BugAuditEntry[];
   id?: string;
+  needs_triage?: boolean;
   next?: string[];
   proposal?: BugPortion[];
   reporter?: string;

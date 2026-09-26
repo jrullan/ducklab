@@ -1751,6 +1751,8 @@ function BugNext({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const [startedRun, setStartedRun] = useState<string | null>(null);
+  const [promoteNote, setPromoteNote] = useState("");
+  const wasReopened = (bug.history ?? []).some((entry) => entry.via === "reopen");
 
   const act = (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -1767,7 +1769,7 @@ function BugNext({
 
   return (
     <div className="space-y-2" data-testid="bug-next">
-      {bug.status === "open" && (
+      {(bug.status === "open" || bug.needs_triage) && (
         <button
           type="button"
           data-testid="bug-next-triage"
@@ -1776,19 +1778,37 @@ function BugNext({
           className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           title="classify this bug — severity, duplicates, promotability"
         >
-          Triage this bug
+          {bug.needs_triage ? "Re-triage this bug" : "Triage this bug"}
         </button>
       )}
-      {bug.status === "triaged" && (
-        <button
-          type="button"
-          data-testid="bug-next-promote"
-          disabled={busy}
-          onClick={() => act(() => client.promoteBug(projectId, bug.id))}
-          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-        >
-          {(bug.proposal?.length ?? 0) > 1 ? `Make it ${bug.proposal!.length} tasks` : "Make it a task"}
-        </button>
+      {bug.status === "triaged" && !bug.needs_triage && (
+        <div className="space-y-1">
+          {wasReopened && (
+            <label className="block text-xs text-ink-muted">
+              What must this attempt address that the previous fix missed?
+              <textarea
+                data-testid="bug-promote-note"
+                value={promoteNote}
+                onChange={(event) => setPromoteNote(event.target.value)}
+                className="mt-1 block w-full rounded border border-hairline bg-surface px-2 py-1 text-xs text-ink"
+              />
+            </label>
+          )}
+          <button
+            type="button"
+            data-testid="bug-next-promote"
+            disabled={busy || (wasReopened && !promoteNote.trim())}
+            onClick={() => act(() => client.promoteBug(projectId, bug.id, promoteNote))}
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          >
+            {(bug.proposal?.length ?? 0) > 1 ? `Make it ${bug.proposal!.length} tasks` : "Make it a task"}
+          </button>
+        </div>
+      )}
+      {bug.needs_triage && (
+        <p className="text-xs text-ink-muted" data-testid="bug-retriage-help">
+          Its previous fix did not hold. Record a fresh contract from the reopen evidence before promoting new work.
+        </p>
       )}
       {bug.task_id && (
         <p className="text-xs text-ink-muted">
@@ -1803,20 +1823,30 @@ function BugNext({
           could reach a state the rail had no case for — a fixed bug sat at
           in_progress with nothing to click and no way to move it by hand. */}
       {(bug.next ?? []).length > 0 && (
-        <div className="flex flex-wrap items-center gap-1" data-testid="bug-moves">
-          <span className="text-xs text-ink-muted">move to</span>
-          {(bug.next ?? []).map((to) => (
-            <button
-              key={to}
-              type="button"
-              data-testid={`bug-move-${to}`}
-              disabled={busy}
-              onClick={() => act(() => client.moveBug(projectId, bug.id, to))}
-              className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-            >
-              {to.replace("_", " ")}
-            </button>
-          ))}
+        <div className="space-y-1" data-testid="bug-moves">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-xs text-ink-muted">move to</span>
+            {(bug.next ?? []).map((to) => {
+              const reopens = bug.status === "fixed" && to === "in_progress";
+              return (
+                <button
+                  key={to}
+                  type="button"
+                  data-testid={`bug-move-${to}`}
+                  disabled={busy}
+                  onClick={() => act(() => client.moveBug(projectId, bug.id, to))}
+                  className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+                >
+                  {reopens ? "reopen" : to.replace("_", " ")}
+                </button>
+              );
+            })}
+          </div>
+          {bug.status === "fixed" && (bug.next ?? []).includes("in_progress") && (
+            <p className="text-xs text-ink-muted" data-testid="bug-reopen-help">
+              Reopen when the fix did not answer the report. It clears the previous task binding and returns the bug to triaged so you can promote a new fix.
+            </p>
+          )}
         </div>
       )}
       {startedRun && (

@@ -410,6 +410,10 @@ func TestInitializeAndToolListSpeakMCP(t *testing.T) {
 	if !strings.Contains(strings.ToLower(fmt.Sprint(reopen["description"])), "consent") {
 		t.Errorf("bug_reopen description should explain consent: %q", reopen["description"])
 	}
+	description := strings.ToLower(fmt.Sprint(reopen["description"]))
+	if !strings.Contains(description, "triaged") || !strings.Contains(description, "clears") {
+		t.Errorf("bug_reopen description should name its actual result: %q", reopen["description"])
+	}
 }
 
 // The record must never say a human decided what a model decided.
@@ -793,7 +797,7 @@ func (f *fakeEngine) BugTriage(projectID, bugID string, req map[string]interface
 	return map[string]interface{}{"id": "r-triage"}, nil
 }
 
-func (f *fakeEngine) BugPromote(projectID, bugID, actor string) (map[string]interface{}, error) {
+func (f *fakeEngine) BugPromote(projectID, bugID, actor, note string) (map[string]interface{}, error) {
 	return map[string]interface{}{"task": "T-100"}, nil
 }
 

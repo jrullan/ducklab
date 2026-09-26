@@ -817,6 +817,58 @@ describe("moving a bug by hand", () => {
 
     await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "fixed"));
   });
+
+  it("names the fixed-bug backward move as reopen and explains its result", async () => {
+    const fixed = {
+      ...stuck, status: "fixed", next: ["verified", "in_progress"],
+    };
+    const c = client();
+    (c.bugs as ReturnType<typeof vi.fn>).mockResolvedValue([fixed]);
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText("vertex drag never starts"));
+
+    expect(screen.getByTestId("bug-move-in_progress").textContent).toBe("reopen");
+    expect(screen.getByTestId("bug-reopen-help").textContent).toContain("returns the bug to triaged");
+    fireEvent.click(screen.getByTestId("bug-move-in_progress"));
+    await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "in_progress"));
+  });
+
+  it("requires a fresh triage contract after reopen", async () => {
+    const reopened = {
+      ...stuck, status: "triaged", task_id: undefined, needs_triage: true,
+      next: ["in_progress", "duplicate", "wontfix"],
+    };
+    const c = client();
+    (c.bugs as ReturnType<typeof vi.fn>).mockResolvedValue([reopened]);
+    (c as unknown as { triageBugs: ReturnType<typeof vi.fn> }).triageBugs = vi.fn(() => Promise.resolve({ id: "r-triage" }));
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText("vertex drag never starts"));
+
+    expect(screen.queryByTestId("bug-next-promote")).toBeNull();
+    expect(screen.getByTestId("bug-retriage-help").textContent).toContain("fresh contract");
+    fireEvent.click(screen.getByText("Re-triage this bug"));
+    await waitFor(() => expect(c.triageBugs).toHaveBeenCalledWith("p", "B-001"));
+  });
+
+  it("carries the person's rework note into a reopened bug promotion", async () => {
+    const retriaged = {
+      ...stuck, status: "triaged", task_id: undefined, needs_triage: false,
+      history: [{ ts: "2026-09-26T00:00:00Z", bug: "B-001", from: "fixed", to: "triaged", actor: "human", via: "reopen" }],
+      next: ["in_progress", "duplicate", "wontfix"],
+    };
+    const c = client();
+    (c.bugs as ReturnType<typeof vi.fn>).mockResolvedValue([retriaged]);
+    (c as unknown as { promoteBug: ReturnType<typeof vi.fn> }).promoteBug = vi.fn(() => Promise.resolve({ task: "T-025" }));
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText("vertex drag never starts"));
+
+    const promote = screen.getByTestId("bug-next-promote") as HTMLButtonElement;
+    expect(promote.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("bug-promote-note"), { target: { value: "exercise the compositor echo path" } });
+    expect(promote.disabled).toBe(false);
+    fireEvent.click(promote);
+    await waitFor(() => expect(c.promoteBug).toHaveBeenCalledWith("p", "B-001", "exercise the compositor echo path"));
+  });
 });
 // The board showed every task's state and never answered the question a person
 // actually arrives with. The engine has computed it all along.

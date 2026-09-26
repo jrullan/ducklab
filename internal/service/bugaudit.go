@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bug"
@@ -66,4 +67,46 @@ func readBugAudit(projectRoot string) map[string][]bug.AuditEntry {
 		out[e.Bug] = append(out[e.Bug], e)
 	}
 	return out
+}
+
+// bugNeedsRetriage is true when the latest contract-affecting event is a
+// reopen. A later triage/retriage consumes that evidence and makes promotion
+// available again. Status alone cannot express this sub-state: reopened bugs
+// deliberately return to triaged so they can be inspected before new work is
+// minted.
+func bugNeedsRetriage(history []bug.AuditEntry) bool {
+	pending := false
+	for _, entry := range history {
+		switch entry.Via {
+		case "reopen":
+			pending = true
+		case "triage", "retriage", "contract-edit":
+			pending = false
+		}
+	}
+	return pending
+}
+
+func latestReopen(history []bug.AuditEntry) (bug.AuditEntry, bool) {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Via == "reopen" {
+			return history[i], true
+		}
+	}
+	return bug.AuditEntry{}, false
+}
+
+func previousFixTask(history []bug.AuditEntry) string {
+	seenReopen := false
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := history[i]
+		if entry.Via == "reopen" {
+			seenReopen = true
+			continue
+		}
+		if seenReopen && (entry.Via == "task-accepted" || entry.Via == "promote") && strings.HasPrefix(entry.Note, "T-") {
+			return entry.Note
+		}
+	}
+	return ""
 }

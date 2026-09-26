@@ -237,6 +237,7 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("a triaged bug, B-..."),
+				"note":       str("required for a reopened bug: what the new attempt must address that the previous fix missed"),
 			}, "project_id", "bug_id"),
 		},
 		{
@@ -252,7 +253,7 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "bug_reopen",
-			"description": "Reopen a fixed bug when human verification finds the problem remains. This sends fixed→in_progress; only do this with the human's explicit consent, and do not change any run.",
+			"description": "Reopen a fixed bug when human verification finds the problem remains. This clears the consumed task binding, records it in the audit trail, and returns the bug to triaged so a new fix can be promoted. Only do this with the human's explicit consent, and do not change any run.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("the fixed bug, B-..."),
@@ -699,7 +700,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "bug_promote":
-		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client)
+		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client, a.str("note"))
 		if err != nil {
 			return nil, err
 		}
