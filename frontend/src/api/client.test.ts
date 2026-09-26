@@ -60,6 +60,28 @@ describe("summary board requests", () => {
   });
 });
 
+describe("build mode resolution", () => {
+  it("leaves an untouched mode absent so the engine can apply Settings", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ id: "r-1" }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    await c.runStart("p", "T-001", { mode: "" });
+    await c.runStart("p", "T-002", { mode: "pair" });
+
+    expect(bodies[0]).not.toHaveProperty("mode");
+    expect(bodies[1]).toMatchObject({ mode: "pair" });
+  });
+});
+
 describe("what an error names", () => {
   it("names the stale engine when a route is unknown, and the fix", async () => {
     const c = clientAnswering(404, "404 page not found", "text/plain", { "X-Ducklab-Unknown-Route": "true" });
