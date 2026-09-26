@@ -11,6 +11,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/registry"
@@ -633,17 +634,33 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 		}
 	case "bug":
 		if list, err := s.BugList(ctx, rs.run.ProjectID, false); err == nil {
-			for _, bug := range list {
-				if bug.ID != aboutID {
+			for _, report := range list {
+				if report.ID != aboutID {
 					continue
 				}
-				fmt.Fprintf(&b, "Bug %s [%s, %s]: %s\n\n%s\n", bug.ID, bug.Severity, bug.Status, bug.Title, bug.Body)
-				if bug.TaskID != "" {
-					fmt.Fprintf(&b, "\nFix task: %s", bug.TaskID)
+				fmt.Fprintf(&b, "Bug %s [%s, %s]: %s\n\n%s\n", report.ID, report.Severity, report.Status, report.Title, report.Body)
+				fmt.Fprintf(&b, "\n### Engine lifecycle truth\n\nLegal next statuses: %s.\n", strings.Join(statusStrings(report.Next), ", "))
+				switch {
+				case report.TaskID != "":
+					fmt.Fprintf(&b, "Promotion is unavailable: this bug is currently bound to task %s, and the engine refuses a second promotion while that binding is live.\n", report.TaskID)
+				case report.Status == bug.Triaged:
+					b.WriteString("Promotion is available because the bug is triaged and has no current task binding.\n")
+				default:
+					fmt.Fprintf(&b, "Promotion is unavailable while the bug is %s; it must be triaged with no current task binding.\n", report.Status)
+				}
+				if steps, stepErr := s.ProjectNext(ctx, rs.run.ProjectID); stepErr == nil {
+					for _, step := range steps {
+						if step.Ref == report.ID || containsExactString(step.Refs, report.ID) {
+							fmt.Fprintf(&b, "Engine guide action: %s — %s\n", step.Action, step.Reason)
+						}
+					}
+				}
+				if report.TaskID != "" {
+					fmt.Fprintf(&b, "\nFix task: %s", report.TaskID)
 					// The fix runs, newest first: what was actually done.
 					if runs, rErr := s.RunList(ctx, RunFilter{ProjectID: rs.run.ProjectID}); rErr == nil {
 						for _, r := range runs {
-							if r.TaskID == bug.TaskID {
+							if r.TaskID == report.TaskID {
 								fmt.Fprintf(&b, "\n- run %s: %s %s %s (accepted=%v, commit=%.8s)",
 									r.ID, r.Stage, r.Status, r.Verdict, r.Accepted, r.CommitSHA)
 							}
@@ -653,6 +670,7 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 				}
 			}
 		}
+		s.appendPriorConsultations(ctx, &b, rs, aboutKind, aboutID)
 	case "task":
 		b.WriteString(s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, aboutID))
 		if runs, rErr := s.RunList(ctx, RunFilter{ProjectID: rs.run.ProjectID}); rErr == nil {
@@ -794,6 +812,89 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 	}
 	b.WriteString("Reply to the human's last message.")
 	return b.String()
+}
+
+func statusStrings(statuses []bug.Status) []string {
+	out := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		out = append(out, string(status))
+	}
+	return out
+}
+
+func containsExactString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// appendPriorConsultations gives a new consultant the decisions and failed
+// advice already recorded about the same subject. A model should not require a
+// person to remember a run id, nor spend its first turn rediscovering chats the
+// engine can identify deterministically.
+func (s *Service) appendPriorConsultations(ctx context.Context, b *strings.Builder, current *runState, aboutKind, aboutID string) {
+	if strings.TrimSpace(aboutID) == "" {
+		return
+	}
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: current.run.ProjectID})
+	if err != nil {
+		return
+	}
+	type consultation struct {
+		id, started, human, consultant string
+	}
+	var prior []consultation
+	subject := "chat about " + aboutKind + " " + aboutID
+	for _, run := range runs {
+		if run.ID == current.run.ID || run.Stage != "chat" {
+			continue
+		}
+		detail, detailErr := s.RunGet(ctx, run.ID)
+		if detailErr != nil {
+			continue
+		}
+		matched := strings.Contains(run.Note, subject)
+		item := consultation{id: run.ID, started: run.StartedAt}
+		for _, event := range detail.Events {
+			if event.Type != "message" {
+				continue
+			}
+			content, _ := event.Data["content"].(string)
+			role, _ := event.Data["role"].(string)
+			if strings.Contains(content, aboutID) {
+				matched = true
+			}
+			switch role {
+			case "human":
+				item.human = content
+			case "consultant":
+				item.consultant = content
+			}
+		}
+		if matched {
+			prior = append(prior, item)
+			if len(prior) == 3 {
+				break
+			}
+		}
+	}
+	if len(prior) == 0 {
+		return
+	}
+	b.WriteString("\n### Prior consultations about this subject\n\n")
+	for _, item := range prior {
+		fmt.Fprintf(b, "- %s (%s)\n", item.id, item.started)
+		if item.human != "" {
+			fmt.Fprintf(b, "  - Human's last reply: %s\n", firstN(item.human, 600))
+		}
+		if item.consultant != "" {
+			fmt.Fprintf(b, "  - Last suggested next step / consultant answer: %s\n", firstN(item.consultant, 1000))
+		}
+	}
+	b.WriteString("Use these transcripts as evidence. Do not repeat advice that the transcript records as tried and unsuccessful. If the engine facts above do not verify a UI path, say that you cannot verify it instead of asserting that it exists.\n")
 }
 
 // Reserve roughly one sixteenth of the chosen consultant's context for each
