@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/vcs"
+	"github.com/jrullan/ducklab/internal/verify"
 	"github.com/jrullan/ducklab/internal/xplat"
 )
 
@@ -30,6 +32,8 @@ type appState struct {
 	logPath   string
 	done      chan struct{}
 	exitErr   error
+	builtSHA  string
+	builtAt   time.Time
 }
 
 // AppStatus is the running-app answer for one project.
@@ -53,6 +57,11 @@ type AppStatus struct {
 	ExitError string `json:"exit_error,omitempty"`
 	// LogTail is the end of the app's combined output, for the same reason.
 	LogTail string `json:"log_tail,omitempty"`
+	// BuiltSHA/BuiltAt identify the source state whose configured build gate
+	// ran immediately before launch. They are absent when no build command is
+	// configured, so the UI never implies freshness it did not establish.
+	BuiltSHA string `json:"built_sha,omitempty"`
+	BuiltAt  string `json:"built_at,omitempty"`
 }
 
 // AppStart launches the project's configured run.command as a managed
@@ -69,11 +78,23 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	if cfg.Run.Command == "" {
 		return nil, fmt.Errorf("not started — this project has no run.command; set how the app starts in Projects (project set run.command \"…\")")
 	}
+	// Do not rebuild under an already-running process. The locked check below
+	// remains authoritative for two concurrent starts; this early check avoids
+	// the ordinary second click mutating its live binary before being refused.
+	s.appMu.Lock()
+	running := s.apps[projectID]
+	if running != nil && running.alive() {
+		pid := running.pid
+		s.appMu.Unlock()
+		return nil, fmt.Errorf("not started — the app is already running (pid %d); stop it first", pid)
+	}
+	s.appMu.Unlock()
 
 	// The environment check, before the process: a failed preflight names
 	// what is missing in its own words, where a failed launch is a crash to
 	// decode from a log tail.
 	appEnv := append(os.Environ(), "DUCKLAB_RUN_ID=manual-"+fmt.Sprint(time.Now().Unix()), "DUCKLAB_PROJECT_ID="+projectID)
+	preflightRanBuild := false
 	if cfg.Run.Preflight != "" {
 		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -85,6 +106,35 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 			}
 			return nil, fmt.Errorf("not started — the environment is not ready (preflight %q failed): %s", cfg.Run.Preflight, firstN(msg, 400))
 		}
+		preflightRanBuild = strings.TrimSpace(cfg.Run.Preflight) == strings.TrimSpace(cfg.Verify.Build) && strings.TrimSpace(cfg.Verify.Build) != ""
+	}
+
+	// A configured build command is the authoritative way to refresh an app
+	// artifact. Run it in the registered project tree immediately before the
+	// process starts; otherwise Launch can serve a binary produced by an old
+	// checkout even though every accepted run built elsewhere in a worktree.
+	builtSHA := ""
+	builtAt := time.Time{}
+	if strings.TrimSpace(cfg.Verify.Build) != "" {
+		if !preflightRanBuild {
+			if strings.TrimSpace(cfg.Verify.Setup) != "" {
+				setup := cfg.Verify
+				setup.Mode = string(verify.GateCustom)
+				setup.Custom = cfg.Verify.Setup
+				result, runErr := verify.Run(ctx, entry.Path, setup, verify.Identity{RunID: "app-setup", ProjectID: projectID})
+				if runErr != nil || result.ExitCode != 0 {
+					return nil, appBuildError("setup", result, runErr)
+				}
+			}
+			build := cfg.Verify
+			build.Mode = string(verify.GateBuild)
+			result, runErr := verify.Run(ctx, entry.Path, build, verify.Identity{RunID: "app-build", ProjectID: projectID})
+			if runErr != nil || result.ExitCode != 0 {
+				return nil, appBuildError("build", result, runErr)
+			}
+		}
+		builtAt = time.Now()
+		builtSHA, _ = vcs.New(entry.Path).HeadSHA()
 	}
 
 	s.appMu.Lock()
@@ -115,7 +165,7 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	st := &appState{
 		cancel: cancel, pid: cmd.Process.Pid,
 		startedAt: time.Now(), logPath: logPath,
-		done: make(chan struct{}),
+		done: make(chan struct{}), builtSHA: builtSHA, builtAt: builtAt,
 	}
 	s.apps[projectID] = st
 	go func() {
@@ -173,6 +223,10 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		return out
 	}
 	out.LogTail = tailFile(st.logPath, 2048)
+	out.BuiltSHA = st.builtSHA
+	if !st.builtAt.IsZero() {
+		out.BuiltAt = st.builtAt.UTC().Format(time.RFC3339)
+	}
 	if !st.alive() {
 		if st.exitErr != nil {
 			out.ExitError = st.exitErr.Error()
@@ -186,6 +240,17 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		out.Health = probeHealth(cfg.Run.Health)
 	}
 	return out
+}
+
+func appBuildError(phase string, result *verify.Result, err error) error {
+	if err != nil {
+		return fmt.Errorf("not started — the configured %s command could not run: %w", phase, err)
+	}
+	detail := strings.TrimSpace(result.Output)
+	if detail == "" {
+		detail = fmt.Sprintf("exit %d", result.ExitCode)
+	}
+	return fmt.Errorf("not started — the configured %s command failed: %s", phase, firstN(detail, 400))
 }
 
 func (st *appState) alive() bool {

@@ -627,6 +627,8 @@ export interface ServiceAcceptResult {
 }
 
 export interface ServiceAppStatus {
+  built_at?: string;
+  built_sha?: string;
   command?: string;
   configured?: boolean;
   exit_error?: string;
