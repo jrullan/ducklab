@@ -611,7 +611,14 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	for _, raw := range strings.Split(rec.SuspectedFiles, "\n") {
 		path, resolution, err := resolvePromotionLanePath(projectRoot, raw)
 		if err != nil {
-			return nil, fmt.Errorf("triage suspected file: %w", err)
+			// suspected_files is advisory evidence, not the enforced lane. Keep
+			// Owns strict above, but do not make a triager's guessed or ambiguous
+			// basename impossible for the person to promote or edit later.
+			note := ignoredSuspectedFileNote(raw, err)
+			for i := range out {
+				out[i].TriageNotes = append(out[i].TriageNotes, note)
+			}
+			continue
 		}
 		if path == "" {
 			continue
@@ -748,12 +755,35 @@ func resolvePromotionLanePath(projectRoot, raw string) (string, string, error) {
 	slices.Sort(matches)
 	switch len(matches) {
 	case 0:
-		return "", "", fmt.Errorf("bare lane path %q matches no repository path; use a repository-relative path", path)
+		return "", "", &promotionLanePathError{Path: path}
 	case 1:
 		return matches[0], fmt.Sprintf("resolved bare lane %s", path), nil
 	default:
-		return "", "", fmt.Errorf("bare lane path %q is ambiguous; use one of: %s", path, strings.Join(matches, ", "))
+		return "", "", &promotionLanePathError{Path: path, Matches: matches}
 	}
+}
+
+type promotionLanePathError struct {
+	Path    string
+	Matches []string
+}
+
+func (e *promotionLanePathError) Error() string {
+	if len(e.Matches) == 0 {
+		return fmt.Sprintf("bare lane path %q matches no repository path; use a repository-relative path", e.Path)
+	}
+	return fmt.Sprintf("bare lane path %q is ambiguous; use one of: %s", e.Path, strings.Join(e.Matches, ", "))
+}
+
+func ignoredSuspectedFileNote(raw string, err error) string {
+	path := cleanLanePath(raw)
+	if resolutionErr, ok := err.(*promotionLanePathError); ok {
+		if len(resolutionErr.Matches) == 0 {
+			return fmt.Sprintf("suspected file %s ignored: no such repository path", resolutionErr.Path)
+		}
+		return fmt.Sprintf("suspected file %s ignored: basename is ambiguous (%s)", resolutionErr.Path, strings.Join(resolutionErr.Matches, ", "))
+	}
+	return fmt.Sprintf("suspected file %s ignored: %v", path, err)
 }
 
 // promotedPortionBody puts a split portion's contract ahead of the original
@@ -762,6 +792,7 @@ func resolvePromotionLanePath(projectRoot, raw string) (string, string, error) {
 type promotionPortion struct {
 	agent.SplitProposal
 	LaneAdditions []string
+	TriageNotes   []string
 }
 
 func promotedPortionBody(b *store.Bug, portion promotionPortion) string {
@@ -775,6 +806,9 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion) string {
 	}
 	if len(portion.LaneAdditions) > 0 {
 		fmt.Fprintf(&sb, "\n**Lane widened at promote:** %s\n", strings.Join(portion.LaneAdditions, "; "))
+	}
+	if len(portion.TriageNotes) > 0 {
+		fmt.Fprintf(&sb, "\n**Triage notes at promote:** %s\n", strings.Join(uniqueStrings(portion.TriageNotes), "; "))
 	}
 	sb.WriteString("\nOnly the Acceptance slices and Owns above are required for this portion.\n")
 	sb.WriteString("\n## Parent context (non-binding)\n\n")
