@@ -1350,11 +1350,12 @@ func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
 	// clicks from the agents acting for them, not authentication.
 	var req struct {
 		Actor string `json:"actor"`
+		Note  string `json:"note"`
 	}
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
 	}
-	out, err := s.svc.BugPromote(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Actor)
+	out, err := s.svc.BugPromoteWithNote(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Actor, req.Note)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

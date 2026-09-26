@@ -2165,6 +2165,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.Failure = detail
 		}
 	}
+	var taskText string
+	if task := s.findTask(ctx, rs.run.ProjectID, rs.run.TaskID); task != nil {
+		taskText = task.Title + "\n" + task.Body
+	}
 	rs.writer.WriteDiff(diff)
 	if rs.run.HarnessProfile != nil {
 		for _, finding := range coverageFindings {
@@ -2186,6 +2190,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 		}
 	}
+	noChanges := strings.TrimSpace(diff) == ""
+	if failure := reopenedNoChangeFailure(taskText); noChanges && failure != "" {
+		verdict = "FAILED"
+		rs.run.Failure = failure
+	}
 	rs.run.Verdict = verdict
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
 	if s.afterRunDiff != nil {
@@ -2201,10 +2210,14 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// A run that touched nothing is a distinct outcome, and every mode used to
 	// invent its own: pair recorded PASSED, tournament died applying an empty
 	// patch. Recorded here, once, where the diff is already in hand.
-	if strings.TrimSpace(diff) == "" {
+	if noChanges {
 		rs.run.NoChanges = true
+		detail := "this run changed no files — the work was already in the tree"
+		if failure := reopenedNoChangeFailure(taskText); failure != "" {
+			detail = failure
+		}
 		rs.writer.AppendEvent("no_changes", map[string]interface{}{
-			"detail": "this run changed no files — the work was already in the tree",
+			"detail": detail,
 		})
 	}
 	rs.wmu.Unlock()
@@ -2217,10 +2230,6 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// The task's own words decide whether this is a surprise. A task that says
 	// "add tests for X" does not need a warning about tests changing, and a
 	// warning that is always on is one nobody reads.
-	var taskText string
-	if task := s.findTask(ctx, rs.run.ProjectID, rs.run.TaskID); task != nil {
-		taskText = task.Title + "\n" + task.Body
-	}
 	if tamper := verify.CheckTampering(diff, taskText, projCfg.Verify.TestGlobs); tamper.Flagged() {
 		rs.run.TestsModified = true
 		rs.writer.WriteTestHunks(tamper.Hunks)
@@ -2770,6 +2779,13 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 			actor = "human"
 		}
 	}
+	if rs.run.NoChanges && rs.run.TaskID != "" {
+		if task := s.findTask(ctx, rs.run.ProjectID, rs.run.TaskID); task != nil {
+			if failure := reopenedNoChangeFailure(task.Title + "\n" + task.Body); failure != "" {
+				return fmt.Errorf("%s", failure)
+			}
+		}
+	}
 	if rs.run.PendingKind == "gate" && stringValueAny(rs.run.PendingData["review_verdict"]) != "" &&
 		stringValueAny(rs.run.PendingData["review_verdict"]) != "approve" {
 		return fmt.Errorf("final reviewer requested changes; revise or reject this proposal before accepting")
@@ -3045,6 +3061,13 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 	}
 	s.commitRunRecord(entry.Path, rs)
 	return nil
+}
+
+func reopenedNoChangeFailure(taskText string) string {
+	if !strings.Contains(taskText, reopenEvidenceHeading) {
+		return ""
+	}
+	return "this task exists because the previous fix did not hold; an unchanged tree cannot be its fix — read the reopen evidence"
 }
 
 // acceptWorktreeRun proves exactly the commit that will be fast-forwarded into

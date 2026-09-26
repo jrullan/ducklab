@@ -237,6 +237,7 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("a triaged bug, B-..."),
+				"note":       str("required for a reopened bug: what the new attempt must address that the previous fix missed"),
 			}, "project_id", "bug_id"),
 		},
 		{
@@ -699,7 +700,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "bug_promote":
-		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client)
+		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client, a.str("note"))
 		if err != nil {
 			return nil, err
 		}

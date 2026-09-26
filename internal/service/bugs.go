@@ -105,6 +105,7 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 		if entryErr == nil {
 			b.Attachments = listAttachments(entry.Path, b.ID)
 			b.History = audit[b.ID]
+			b.NeedsTriage = bugNeedsRetriage(b.History)
 		}
 		out = append(out, b)
 	}
@@ -145,6 +146,17 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 		rec.Status = string(bug.Triaged)
 		rec.TaskID = ""
 		rec.DuplicateOf = ""
+		// The old contract described the fix that just failed verification. It
+		// must not become the checklist for the next attempt merely because its
+		// words are still literally true of the current tree.
+		rec.Component = ""
+		rec.SuspectedFiles = ""
+		rec.TaskTitle = ""
+		rec.TriageReason = ""
+		rec.TestStrategy = ""
+		rec.TestReason = ""
+		rec.Deliverables = ""
+		rec.Proposal = ""
 		if err := db.UpdateBug(rec); err != nil {
 			return nil, err
 		}
@@ -158,6 +170,7 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 		appendBugAudit(entry.Path, audit)
 		out := toBug(rec)
 		out.History = []bug.AuditEntry{audit}
+		out.NeedsTriage = true
 		return out, nil
 	}
 	next, err := bug.Move(bug.Status(rec.Status), bug.Status(to))
@@ -253,15 +266,20 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 	if err != nil {
 		return nil, err
 	}
+	all, err := s.BugList(ctx, projectID, false)
+	if err != nil {
+		return nil, err
+	}
 	var todo []bug.Bug
 	for _, b := range open {
-		if b.Status == bug.Open && (bugID == "" || b.ID == bugID) {
+		eligible := b.Status == bug.Open || (b.Status == bug.Triaged && b.NeedsTriage)
+		if eligible && (bugID == "" || b.ID == bugID) {
 			todo = append(todo, b)
 		}
 	}
 	if len(todo) == 0 {
 		if bugID != "" {
-			return nil, fmt.Errorf("bug %s is not open for triage", bugID)
+			return nil, fmt.Errorf("bug %s does not need triage", bugID)
 		}
 		return nil, fmt.Errorf("no untriaged bugs")
 	}
@@ -303,7 +321,7 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 		"stage": "triage", "mode": "solo", "bugs": len(todo),
 	})
 
-	go s.executeTriage(runCtx, rs, entry.Path, todo, open)
+	go s.executeTriage(runCtx, rs, entry.Path, todo, all)
 	return run, nil
 }
 
@@ -371,7 +389,13 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			"round": 1, "turn": i, "role": string(config.RoleTriager),
 			"duckling": string(duckling), "bug": b.ID,
 		})
-		out, err := runner(ctx, turn, duckling, triagePrompt(b, all), belt,
+		previousContract := ""
+		if previousTaskID := previousFixTask(b.History); previousTaskID != "" {
+			if task := s.findTask(ctx, rs.run.ProjectID, previousTaskID); task != nil {
+				previousContract = task.Title + "\n\n" + task.Body
+			}
+		}
+		out, err := runner(ctx, turn, duckling, triagePrompt(b, all, previousContract), belt,
 			strategy.TurnContext{Round: 1, Index: i})
 		if err != nil {
 			// One bad bug does not poison the others: the rest of the batch
@@ -482,12 +506,30 @@ func (s *Service) triageAutonomy(projectPath string) string {
 // Only the open ones: proposing a duplicate of something already closed would
 // reopen a decision that was made, and the prompt says to base the answer only
 // on what it was given.
-func triagePrompt(b bug.Bug, all []bug.Bug) string {
+func triagePrompt(b bug.Bug, all []bug.Bug, previousContract string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## The bug\n\n**%s — %s**\n\nReported severity: %s\n\n", b.ID, b.Title, b.Severity)
 	if strings.TrimSpace(b.Body) != "" {
 		sb.WriteString(strings.TrimSpace(b.Body))
 		sb.WriteString("\n\n")
+	}
+	if b.NeedsTriage {
+		sb.WriteString("## Reopen evidence (authoritative)\n\n")
+		if reopened, ok := latestReopen(b.History); ok {
+			fmt.Fprintf(&sb, "%s\n", reopened.Note)
+		}
+		for _, related := range all {
+			if related.DuplicateOf != b.ID {
+				continue
+			}
+			fmt.Fprintf(&sb, "\n- %s — %s\n  %s\n", related.ID, related.Title, strings.TrimSpace(related.Body))
+		}
+		if strings.TrimSpace(previousContract) != "" {
+			sb.WriteString("\n### Previous consumed task contract\n\n")
+			sb.WriteString(strings.TrimSpace(previousContract))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\nThe previous contract described a fix that failed verification. Write new acceptance slices against this evidence; do not reuse a slice merely because the current tree already satisfies it.\n\n")
 	}
 	sb.WriteString("## Other open bugs\n\n")
 	others := 0
@@ -510,6 +552,14 @@ func triagePrompt(b bug.Bug, all []bug.Bug) string {
 // a bug is a fix for the summary, and the reproduction steps are the part most
 // easily lost in paraphrase.
 func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string) (map[string]interface{}, error) {
+	return s.BugPromoteWithNote(ctx, projectID, bugID, actor, "")
+}
+
+func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, actor, note string) (map[string]interface{}, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
 		return nil, err
@@ -524,6 +574,13 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 		// Already promoted. Reported rather than done twice: a second task for
 		// one report splits the work and leaves both halves looking unfinished.
 		return nil, fmt.Errorf("%s is already task %s", bugID, rec.TaskID)
+	}
+	history := readBugAudit(entry.Path)[rec.ID]
+	if bugNeedsRetriage(history) {
+		return nil, fmt.Errorf("%s was reopened because its previous fix did not hold; triage it again (or edit and save a fresh contract) before promoting new work", bugID)
+	}
+	if _, reopened := latestReopen(history); reopened && strings.TrimSpace(note) == "" {
+		return nil, fmt.Errorf("%s was reopened; promotion requires a note saying what this attempt must address that the previous fix missed", bugID)
 	}
 	if bug.Status(rec.Status) == bug.Duplicate || bug.Status(rec.Status) == bug.WontFix ||
 		bug.Status(rec.Status) == bug.Closed {
@@ -554,10 +611,6 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 	// out T-001 in a project whose plan already had T-001 through T-010: the
 	// promoted task was invisible to every command, and the one the CLI told
 	// you to run was a different task with the same name.
-	entry, err := s.registry.Get(projectID)
-	if err != nil {
-		return nil, err
-	}
 	var portions []agent.SplitProposal
 	if rec.Proposal != "" {
 		if err := json.Unmarshal([]byte(rec.Proposal), &portions); err != nil {
@@ -568,14 +621,15 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 	if err != nil {
 		return nil, err
 	}
-	taskIDs, err := appendPlanTasks(entry.Path, rec, promoted)
+	reopenContext := promotionReopenEvidence(db, rec, history, note)
+	taskIDs, err := appendPlanTasks(entry.Path, rec, promoted, reopenContext)
 	if err != nil {
 		return nil, err
 	}
 	for i, taskID := range taskIDs {
-		title, body := promotedTaskTitle(rec), promotedTaskBody(rec)
+		title, body := promotedTaskTitle(rec), promotedTaskBody(rec, reopenContext)
 		if len(promoted) > 0 {
-			title, body = promoted[i].Title, promotedPortionBody(rec, promoted[i])
+			title, body = promoted[i].Title, promotedPortionBody(rec, promoted[i], reopenContext)
 		}
 		if err := db.CreateTask(&store.Task{ID: taskID, Title: title, Body: body, Status: "todo"}); err != nil {
 			return nil, err
@@ -823,7 +877,7 @@ type promotionPortion struct {
 	TriageNotes   []string
 }
 
-func promotedPortionBody(b *store.Bug, portion promotionPortion) string {
+func promotedPortionBody(b *store.Bug, portion promotionPortion, reopenContext string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n## Current portion contract (authoritative)\n\n**Acceptance slices:**\n", b.ID)
 	for _, criterion := range portion.Acceptance {
@@ -840,13 +894,18 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion) string {
 	}
 	sb.WriteString("\nOnly the Acceptance slices and Owns above are required for this portion.\n")
 	sb.WriteString("\n## Parent context (non-binding)\n\n")
-	sb.WriteString(promotedTaskBody(b))
+	sb.WriteString(promotedTaskBody(b, reopenContext))
 	return sb.String()
 }
 
-func promotedTaskBody(b *store.Bug) string {
+func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n", b.ID)
+	if strings.TrimSpace(reopenContext) != "" {
+		sb.WriteString(reopenEvidenceHeading + "\n\n")
+		sb.WriteString(strings.TrimSpace(reopenContext))
+		sb.WriteString("\n\nAn unchanged tree cannot satisfy this task: it exists because the previous fix did not hold.\n\n")
+	}
 	if strings.TrimSpace(b.Body) != "" {
 		sb.WriteString("## Reported\n\n")
 		sb.WriteString(strings.TrimSpace(b.Body))
@@ -892,6 +951,33 @@ func promotedTaskBody(b *store.Bug) string {
 	return sb.String()
 }
 
+func promotionReopenEvidence(db *store.DB, rec *store.Bug, history []bug.AuditEntry, promoteNote string) string {
+	reopened, ok := latestReopen(history)
+	if !ok {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Reopened: %s", strings.TrimSpace(reopened.Note))
+	if reopened.TS != "" {
+		fmt.Fprintf(&sb, " (%s)", reopened.TS)
+	}
+	sb.WriteString(".\n")
+	if strings.TrimSpace(promoteNote) != "" {
+		fmt.Fprintf(&sb, "\nPerson's promote note (verbatim):\n%s\n", strings.TrimSpace(promoteNote))
+	}
+	reports, err := db.ListBugs()
+	if err != nil {
+		return sb.String()
+	}
+	for _, report := range reports {
+		if report.DuplicateOf != rec.ID {
+			continue
+		}
+		fmt.Fprintf(&sb, "\nEvidence linked from %s — %s:\n%s\n", report.ID, report.Title, strings.TrimSpace(report.Body))
+	}
+	return sb.String()
+}
+
 // bugsMilestoneTitle names the milestone promoted bugs land under.
 //
 // Their own milestone rather than the last one: a fix is not part of the
@@ -903,10 +989,11 @@ func promotedTaskBody(b *store.Bug) string {
 // PREFIX-<digits> — so the heading was silently unrecognised and the task it
 // contained was read as a child of whatever milestone came before it.
 const bugsMilestoneTitle = "Reported bugs"
+const reopenEvidenceHeading = "## Reopen evidence (authoritative)"
 
 // appendPlanTasks adds one task per proposal portion, each with its own lane.
 // With no portions it preserves the legacy single-task promotion exactly.
-func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPortion) ([]string, error) {
+func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPortion, reopenContext string) ([]string, error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
 		return nil, err
@@ -929,9 +1016,9 @@ func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPor
 	for _, portion := range portions {
 		id := fmt.Sprintf("T-%03d", stage.NextFree(existing, "T"))
 		existing = append(existing, artifact.Section{ID: id})
-		task := artifact.Section{ID: id, Title: portion.Title, Body: promotedTaskBody(rec)}
+		task := artifact.Section{ID: id, Title: portion.Title, Body: promotedTaskBody(rec, reopenContext)}
 		if hasProposal {
-			task.Body = promotedPortionBody(rec, portion)
+			task.Body = promotedPortionBody(rec, portion, reopenContext)
 			task.Owns = portion.Owns
 		}
 		placed := false
@@ -993,6 +1080,11 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		return 0, err
 	}
 	defer db.Close()
+	entry, entryErr := s.registry.Get(projectID)
+	var audit map[string][]bug.AuditEntry
+	if entryErr == nil {
+		audit = readBugAudit(entry.Path)
+	}
 
 	applied := 0
 	for _, p := range proposals {
@@ -1006,6 +1098,7 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 			// to lose the rest of the batch.
 			continue
 		}
+		refreshing := bug.Status(rec.Status) == bug.Triaged && bugNeedsRetriage(audit[rec.ID])
 		if sev, _ := p["severity"].(string); sev != "" {
 			rec.Severity = sev
 		}
@@ -1082,6 +1175,9 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 			}
 			rec.Proposal = string(data)
 		}
+		if refreshing && strings.TrimSpace(rec.Proposal) == "" {
+			return applied, fmt.Errorf("retriage %s must produce a fresh proposal with acceptance slices before it can be promoted again", rec.ID)
+		}
 		// A classification must never undo a promotion. Move(InProgress,
 		// Triaged) is a LEGAL transition — it exists so a person can send
 		// half-started work back — so relying on Move to refuse was wrong:
@@ -1099,7 +1195,7 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 			if next, err := bug.Move(bug.Status(rec.Status), to); err == nil {
 				from := rec.Status
 				rec.Status = string(next)
-				if entry, eerr := s.registry.Get(projectID); eerr == nil {
+				if entryErr == nil {
 					appendBugAudit(entry.Path, bug.AuditEntry{
 						Bug: rec.ID, From: from, To: rec.Status, Actor: "engine", Via: "triage",
 					})
@@ -1108,6 +1204,14 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		}
 		if err := db.UpdateBug(rec); err != nil {
 			return applied, err
+		}
+		if refreshing && entryErr == nil {
+			refresh := bug.AuditEntry{
+				Bug: rec.ID, From: rec.Status, To: rec.Status, Actor: "engine", Via: "retriage",
+				Note: "fresh contract recorded after reopen",
+			}
+			appendBugAudit(entry.Path, refresh)
+			audit[rec.ID] = append(audit[rec.ID], refresh)
 		}
 		applied++
 	}
@@ -1250,6 +1354,7 @@ func promotedTaskTitle(b *store.Bug) string {
 // own transitions; letting a form set them would put the loop's rules in two
 // places.
 func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugRequest) (*bug.Bug, error) {
+	entry, entryErr := s.registry.Get(projectID)
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
 		return nil, err
@@ -1260,6 +1365,8 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 	if err != nil {
 		return nil, fmt.Errorf("no bug %s", bugID)
 	}
+	needsFreshContract := entryErr == nil && bugNeedsRetriage(readBugAudit(entry.Path)[rec.ID])
+	freshContract := false
 	if t := strings.TrimSpace(req.Title); t != "" {
 		rec.Title = t
 	}
@@ -1300,12 +1407,22 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 				return nil, fmt.Errorf("store split proposal: %w", err)
 			}
 			rec.Proposal = string(data)
+			freshContract = needsFreshContract
 		}
 	}
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
 	}
-	return toBug(rec), nil
+	out := toBug(rec)
+	if freshContract {
+		audit := bug.AuditEntry{
+			Bug: rec.ID, From: rec.Status, To: rec.Status, Actor: "human", Via: "contract-edit",
+			Note: "fresh contract recorded after reopen",
+		}
+		appendBugAudit(entry.Path, audit)
+		out.History = []bug.AuditEntry{audit}
+	}
+	return out, nil
 }
 
 // TaskRemove deletes a task from the plan, and unlinks the report it came from.

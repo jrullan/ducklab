@@ -797,7 +797,7 @@ func (f *fakeEngine) BugTriage(projectID, bugID string, req map[string]interface
 	return map[string]interface{}{"id": "r-triage"}, nil
 }
 
-func (f *fakeEngine) BugPromote(projectID, bugID, actor string) (map[string]interface{}, error) {
+func (f *fakeEngine) BugPromote(projectID, bugID, actor, note string) (map[string]interface{}, error) {
 	return map[string]interface{}{"task": "T-100"}, nil
 }
 

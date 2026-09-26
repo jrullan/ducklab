@@ -141,8 +141,17 @@ func TestReopenFixedBugClearsConsumedTaskAndCanPromoteAgain(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "the fix did not work"})
 	ctx := context.Background()
+	entry, _ := s.registry.Get(id)
+	if err := os.WriteFile(filepath.Join(entry.Path, "fix.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	if _, err := s.BugMove(ctx, id, "B-001", "triaged", "human"); err != nil {
+	if _, err := s.ApplyTriage(ctx, id, []map[string]interface{}{{
+		"bug": "B-001",
+		"proposal": []map[string]interface{}{{
+			"title": "first fix", "acceptance": []string{"the old literal slice is true"}, "owns": []string{"fix.go"},
+		}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.BugPromote(ctx, id, "B-001", "human")
@@ -158,14 +167,43 @@ func TestReopenFixedBugClearsConsumedTaskAndCanPromoteAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reopened.Status != bug.Triaged || reopened.TaskID != "" {
+	if reopened.Status != bug.Triaged || reopened.TaskID != "" || !reopened.NeedsTriage {
 		t.Fatalf("reopened bug = %+v, want triaged with no current task", reopened)
 	}
 	if len(reopened.History) == 0 || !strings.Contains(reopened.History[len(reopened.History)-1].Note, firstTask) {
 		t.Fatalf("reopen history does not preserve %s: %+v", firstTask, reopened.History)
 	}
 
-	second, err := s.BugPromote(ctx, id, "B-001", "human")
+	if _, err := s.BugPromote(ctx, id, "B-001", "human"); err == nil || !strings.Contains(err.Error(), "triage it again") {
+		t.Fatalf("stale contract was promotable after reopen: %v", err)
+	}
+	evidence, err := s.BugAdd(ctx, id, BugRequest{Title: "compositor echo exits immediately", Body: "is_local flips to false on the compositor echo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceDB, err := s.openProjectDB(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceRec, err := evidenceDB.GetBug(evidence.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceRec.Status = string(bug.Duplicate)
+	evidenceRec.DuplicateOf = "B-001"
+	if err := evidenceDB.UpdateBug(evidenceRec); err != nil {
+		t.Fatal(err)
+	}
+	evidenceDB.Close()
+	if _, err := s.ApplyTriage(ctx, id, []map[string]interface{}{{
+		"bug": "B-001",
+		"proposal": []map[string]interface{}{{
+			"title": "second fix", "acceptance": []string{"new evidence is observed on the failing path"}, "owns": []string{"fix.go"},
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.BugPromoteWithNote(ctx, id, "B-001", "human", "observe the compositor echo before releasing the hold")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +216,23 @@ func TestReopenFixedBugClearsConsumedTaskAndCanPromoteAgain(t *testing.T) {
 	}
 	if len(listed[0].History) < 2 {
 		t.Fatalf("prior task history was lost: %+v", listed[0].History)
+	}
+	db, err := s.openProjectDB(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	secondTask, err := db.GetTask(second["task"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{reopenEvidenceHeading, firstTask, "new evidence is observed", evidence.ID, "is_local flips to false", "observe the compositor echo"} {
+		if !strings.Contains(secondTask.Body, want) {
+			t.Errorf("rework task misses %q:\n%s", want, secondTask.Body)
+		}
+	}
+	if strings.Contains(secondTask.Body, "old literal slice") {
+		t.Errorf("rework task reused the consumed contract:\n%s", secondTask.Body)
 	}
 }
 
@@ -218,6 +273,24 @@ func TestTriageDoesNotRetireReportAsDuplicateOfFixedBug(t *testing.T) {
 	}
 	if !strings.Contains(got.TriageReason, "B-001") || !strings.Contains(got.TriageReason, "fixed") {
 		t.Fatalf("triage reason does not explain the refused duplicate: %q", got.TriageReason)
+	}
+}
+
+func TestRetriagePromptCarriesReopenAndLinkedEvidence(t *testing.T) {
+	reopened := bug.Bug{
+		ID: "B-017", Title: "clipboard exits early", Severity: bug.High,
+		Status: bug.Triaged, NeedsTriage: true,
+		History: []bug.AuditEntry{{Via: "reopen", Note: "reopened after T-030 was accepted"}},
+	}
+	linked := bug.Bug{
+		ID: "B-020", Title: "compositor echo", Body: "is_local flips to false",
+		Status: bug.Duplicate, DuplicateOf: "B-017",
+	}
+	prompt := triagePrompt(reopened, []bug.Bug{reopened, linked}, "T-030 old task\n\n- old literal slice")
+	for _, want := range []string{"Reopen evidence", "T-030", "B-020", "is_local flips", "Previous consumed task contract", "old literal slice", "Write new acceptance slices"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("retriage prompt misses %q:\n%s", want, prompt)
+		}
 	}
 }
 

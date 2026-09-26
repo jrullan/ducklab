@@ -138,6 +138,10 @@ type Bug struct {
 	// Populated from the project's audit log on reads that carry full bugs;
 	// moves recorded before the log existed simply aren't here.
 	History []AuditEntry `json:"history,omitempty"`
+	// NeedsTriage marks a reopened report whose old fix contract was consumed.
+	// It remains triaged in the lifecycle, but cannot be promoted until new
+	// evidence has produced a fresh contract.
+	NeedsTriage bool `json:"needs_triage,omitempty"`
 	// Next are the statuses this bug may legally move to.
 	//
 	// Reported by the engine rather than worked out by each client: the loop's

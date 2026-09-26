@@ -115,6 +115,9 @@
           "id": {
             "type": "string"
           },
+          "needs_triage": {
+            "type": "boolean"
+          },
           "next": {
             "items": {
               "type": "string"
