@@ -137,6 +137,90 @@ func TestPromoteRefusesToDoItTwice(t *testing.T) {
 	}
 }
 
+func TestReopenFixedBugClearsConsumedTaskAndCanPromoteAgain(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id := projectWithBugs(t, s, BugRequest{Title: "the fix did not work"})
+	ctx := context.Background()
+
+	if _, err := s.BugMove(ctx, id, "B-001", "triaged", "human"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.BugPromote(ctx, id, "B-001", "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTask := first["task"].(string)
+	if fixed, err := s.BugFixedByTask(ctx, id, firstTask); err != nil || fixed != "B-001" {
+		t.Fatal(err)
+	}
+
+	reopened, err := s.BugMove(ctx, id, "B-001", "in_progress", "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Status != bug.Triaged || reopened.TaskID != "" {
+		t.Fatalf("reopened bug = %+v, want triaged with no current task", reopened)
+	}
+	if len(reopened.History) == 0 || !strings.Contains(reopened.History[len(reopened.History)-1].Note, firstTask) {
+		t.Fatalf("reopen history does not preserve %s: %+v", firstTask, reopened.History)
+	}
+
+	second, err := s.BugPromote(ctx, id, "B-001", "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second["task"] == firstTask {
+		t.Fatalf("re-promote reused consumed task %s", firstTask)
+	}
+	listed, err := s.BugList(ctx, id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed[0].History) < 2 {
+		t.Fatalf("prior task history was lost: %+v", listed[0].History)
+	}
+}
+
+func TestTriageDoesNotRetireReportAsDuplicateOfFixedBug(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id := projectWithBugs(t, s,
+		BugRequest{Title: "original"},
+		BugRequest{Title: "fix does not work"},
+	)
+	ctx := context.Background()
+	if _, err := s.BugMove(ctx, id, "B-001", "triaged", "human"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugMove(ctx, id, "B-001", "in_progress", "human"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugMove(ctx, id, "B-001", "fixed", "human"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.ApplyTriage(ctx, id, []map[string]interface{}{{
+		"bug": "B-002", "duplicate_of": "B-001", "reason": "same symptom",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.openProjectDB(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.GetBug("B-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != string(bug.Triaged) || got.DuplicateOf != "" {
+		t.Fatalf("report disappeared behind fixed duplicate: %+v", got)
+	}
+	if !strings.Contains(got.TriageReason, "B-001") || !strings.Contains(got.TriageReason, "fixed") {
+		t.Fatalf("triage reason does not explain the refused duplicate: %q", got.TriageReason)
+	}
+}
+
 func TestPromoteRefusesADecidedBug(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "x"})
