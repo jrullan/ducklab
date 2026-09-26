@@ -986,7 +986,10 @@ export class EngineClient {
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
       task_id: taskId,
-      mode: opts.mode || "solo",
+      // Empty means "let the engine resolve the configured build mode". Do
+      // not invent solo here: the engine owns fallback and records whether
+      // the choice came from Settings, the project, or its final fallback.
+      ...(opts.mode ? { mode: opts.mode } : {}),
       ducklings: opts.ducklings ?? [],
       seats: opts.seats ?? {},
       rounds: opts.rounds ?? 0,

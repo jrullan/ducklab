@@ -981,6 +981,33 @@ describe("the rail follows the contract's order", () => {
     expect(chipText(buildCfg!, 1)).toContain("default");
   });
 
+  it("leaves an untouched build-only mode for the engine instead of forcing solo", async () => {
+    const runStart = vi.fn(() => Promise.resolve({ id: "r-9" }));
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "A task", milestone: "M-01", status: "todo",
+            next: ["test_first", "run", "remove"] },
+        ]),
+      ),
+      modeDefaults: vi.fn(() =>
+        Promise.resolve({
+          rounds: {}, agent_max_turns: 24,
+          build_mode: "pair", test_mode: "solo", ducklings: {},
+        }),
+      ),
+      runStart,
+    } as unknown as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("build-only"));
+    await waitFor(() => expect(runStart).toHaveBeenCalledWith("p", "T-001", expect.objectContaining({
+      mode: "",
+      ducklings: [],
+      seats: {},
+    })));
+  });
+
   // The plain launcher — a test-ready task where run is primary — opens on
   // the same Settings default MODE as the TDD block: a habit that held in one
   // rendering of the rail and not the other was half a setting. Its SEATS,

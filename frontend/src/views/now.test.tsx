@@ -291,6 +291,23 @@ describe("Now — the inbox", () => {
     expect(screen.getAllByText(/\$0\.50/)).toHaveLength(1);
   });
 
+  it("leaves an untouched build-only mode for the engine instead of forcing solo", async () => {
+    const runStart = vi.fn(() => Promise.resolve({ id: "r-build" }));
+    const client = clientWith({
+      taskNext: vi.fn(() => Promise.resolve({ id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {}, test_mode: "solo", build_mode: "pair" })),
+      runStart,
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("tdd-block");
+    fireEvent.click(screen.getByTestId("build-only"));
+    await waitFor(() => expect(runStart).toHaveBeenCalledWith("p", "T-048", expect.objectContaining({
+      mode: "",
+      ducklings: [],
+      seats: {},
+    })));
+  });
+
   it("uses calm status language and a context-neutral note on a ready task", async () => {
     const client = clientWith({
       taskNext: vi.fn(() => Promise.resolve({ id: "T-048", title: "Clipboard inspection", milestone: "M-07", status: "todo", next: ["test_first", "run"] })),
