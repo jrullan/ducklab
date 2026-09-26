@@ -75,6 +75,11 @@ export function AppControl({ client, projectId }: { client: EngineClient; projec
           open
         </button>
       )}
+      {app.running && app.built_sha && (
+        <span className="text-xs text-ink-muted" data-testid="app-built-head" title={app.built_at}>
+          built HEAD {app.built_sha.slice(0, 8)} before launch
+        </span>
+      )}
       <button
         type="button"
         data-testid={app.running ? "app-stop" : "app-launch"}

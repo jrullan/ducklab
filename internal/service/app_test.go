@@ -4,9 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // The lesson that forced this feature: a project reached all-tasks-accepted
@@ -178,5 +182,91 @@ func TestPreflightGuardsTheLaunch(t *testing.T) {
 	}
 	if err := s.AppStop(context.Background(), p.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppLaunchBuildsCurrentHeadBeforeStarting(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.build": "printf fresh > app.bin",
+		"run.command":  "test \"$(cat app.bin)\" = fresh && sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	started, err := s.AppStart(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.AppStop(context.Background(), p.ID) //nolint:errcheck
+	wantSHA, err := vcs.New(dir).HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.BuiltSHA != wantSHA || started.BuiltAt == "" {
+		t.Fatalf("launch build provenance = sha %q at %q, want HEAD %q", started.BuiltSHA, started.BuiltAt, wantSHA)
+	}
+	if body, err := os.ReadFile(filepath.Join(dir, "app.bin")); err != nil || string(body) != "fresh" {
+		t.Fatalf("launch did not build the current tree: body=%q err=%v", body, err)
+	}
+}
+
+func TestAppLaunchRefusesAFailedBuild(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.build": "echo compiler rejected main.c && false",
+		"run.command":  "sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.AppStart(context.Background(), p.ID)
+	if err == nil || !strings.Contains(err.Error(), "configured build command failed") || !strings.Contains(err.Error(), "compiler rejected main.c") {
+		t.Fatalf("failed build launch error = %v", err)
+	}
+	st, statusErr := s.AppStatus(context.Background(), p.ID)
+	if statusErr != nil {
+		t.Fatal(statusErr)
+	}
+	if st.Running {
+		t.Fatal("app started despite a failed build")
+	}
+}
+
+func TestAppLaunchDoesNotRepeatABuildUsedAsPreflight(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "printf built\\n >> build-count"
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.build":  command,
+		"run.preflight": command,
+		"run.command":   "sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppStart(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	defer s.AppStop(context.Background(), p.ID) //nolint:errcheck
+	body, err := os.ReadFile(filepath.Join(dir, "build-count"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(body), "built"); got != 1 {
+		t.Fatalf("shared preflight/build command ran %d times, want once", got)
 	}
 }

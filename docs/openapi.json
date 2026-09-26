@@ -2165,6 +2165,12 @@
       },
       "ServiceAppStatus": {
         "properties": {
+          "built_at": {
+            "type": "string"
+          },
+          "built_sha": {
+            "type": "string"
+          },
           "command": {
             "type": "string"
           },

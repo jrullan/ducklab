@@ -131,6 +131,8 @@ export interface AppStatus {
   requires?: string;
   exit_error?: string;
   log_tail?: string;
+  built_sha?: string;
+  built_at?: string;
 }
 
 export interface LandingOffer { commit_sha: string; evidence: string }
