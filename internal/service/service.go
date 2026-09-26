@@ -2060,17 +2060,21 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 	}
 	if projCfg.RenderConfigured && render.Command != "" {
-		captures, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
-		if len(captures) > 0 {
-			rs.run.Captures = captures
-			event := map[string]interface{}{"ok": true, "captures": captures}
+		rendered, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
+		if len(rendered.Captures) > 0 {
+			rs.run.Captures = rendered.Captures
+			event := map[string]interface{}{"ok": true, "captures": rendered.Captures}
 			if renderErr != nil {
 				event["note"] = "captures attached despite dirty render exit: " + renderErr.Error()
+			} else if rendered.Note != "" {
+				event["note"] = rendered.Note
 			}
 			rs.writer.AppendEvent("render", event)
 		} else if renderErr != nil {
 			rs.run.Warning = "render failed: " + renderErr.Error()
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": false, "reason": renderErr.Error()})
+		} else if rendered.Note != "" {
+			rs.writer.AppendEvent("render", map[string]interface{}{"ok": true, "note": rendered.Note})
 		}
 	}
 	effectiveGate := string(gateResult.Gate)
