@@ -533,6 +533,90 @@ describe("RunView — asking a stage for changes", () => {
     expect(screen.getByTestId("request-changes-button")).toBeInTheDocument();
   });
 
+  // B-435: after a request-changes review the page stacked three surfaces —
+  // a card with no Accept and no reason, a findings card pointing at a
+  // "Request changes below" that was above it, and a Warning restating the
+  // findings. One decision surface: the findings inside the card, the note
+  // prefilled with them, the duplicate warning gone.
+  it("keeps the reviewer's objections inside the decision and prefills the note with them", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      warning: "post-composition reviewer requested changes with 2 finding(s); revise or discard this proposal",
+      pending_data: { composition_review_verdict: "request-changes" },
+    });
+    useRuns.setState((state) => ({
+      ...state,
+      events: {
+        ...state.events,
+        "r-1": [{
+          type: "message",
+          run_id: "r-1",
+          data: {
+            role: "reviewer",
+            verdict: "request-changes",
+            findings: [
+              { severity: "major", file: "SPEC-002", line: 21, issue: "Transitions still name a modifier key press", fix: "trigger on pointer release" },
+              { severity: "major", file: "SPEC-002", issue: "capture_target is assigned twice" },
+            ],
+          },
+        }],
+      },
+    }));
+    render(<RunView runId="r-1" client={recording({})} />);
+
+    const card = await screen.findByTestId("decision-card");
+    expect(screen.getAllByTestId("stage-dissent")).toHaveLength(1);
+    expect(within(card).getByTestId("stage-dissent")).toBeInTheDocument();
+    expect(within(card).getByTestId("stage-dissent-why").textContent).toContain("cannot be accepted");
+    expect(within(card).getByTestId("stage-dissent-why").textContent).toContain("note below");
+    expect(within(card).getByTestId("stage-dissent-list").textContent).toContain("capture_target is assigned twice");
+    const note = within(card).getByTestId("change-note") as HTMLTextAreaElement;
+    expect(note.value).toContain("[major] Transitions still name a modifier key press (SPEC-002:21) Fix: trigger on pointer release");
+    expect(note.value).toContain("[major] capture_target is assigned twice (SPEC-002)");
+    expect(note.placeholder).not.toContain("locking an angle");
+    expect(screen.queryByTestId("run-warning")).toBeNull();
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
+  });
+
+  it("composes the mechanical-blocker seed and the reviewer's findings in one note", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      pending_data: { proposal_blockers: ["unknown field Implementa; use Implements"] },
+    });
+    useRuns.setState((state) => ({
+      ...state,
+      events: { ...state.events, "r-1": [{ type: "message", run_id: "r-1", data: { role: "reviewer", verdict: "request-changes", findings: [{ severity: "minor", issue: "a wording nit" }] } }] },
+    }));
+    render(<RunView runId="r-1" client={recording({})} />);
+    const note = (await screen.findByTestId("change-note")) as HTMLTextAreaElement;
+    expect(note.value).toContain("unknown field Implementa; use Implements");
+    expect(note.value).toContain("[minor] a wording nit");
+  });
+
+  it("still shows a warning that is not the composition-review restatement", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      warning: "render failed: signal: killed · post-composition reviewer requested changes with 1 finding(s); revise or discard this proposal",
+    });
+    useRuns.setState((state) => ({
+      ...state,
+      events: { ...state.events, "r-1": [{ type: "message", run_id: "r-1", data: { role: "reviewer", verdict: "request-changes", findings: [{ issue: "one" }] } }] },
+    }));
+    render(<RunView runId="r-1" client={recording({})} />);
+    await screen.findByTestId("decision-card");
+    expect(screen.getByTestId("run-warning").textContent).toContain("render failed: signal: killed");
+    expect(screen.getByTestId("run-warning").textContent).not.toContain("post-composition reviewer");
+  });
+
   it("separates deterministic proposal blockers from inherited debt and drafts the actionable correction", async () => {
     show({
       stage: "spec",

@@ -710,6 +710,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     lastVerdict && lastVerdict.verdict.toLowerCase().replace(/_/g, "-") !== "approve"
     ? lastVerdict
     : null;
+  // B-435: the engine's warning restated the dissent the card already shows
+  // ("post-composition reviewer requested changes with N finding(s)"). One
+  // fact, one place: that segment is dropped while the dissent is on screen;
+  // any other warning text still renders.
+  const shownWarning = stripCompositionReviewWarning(run.warning, !!stageDissent);
   // Already filed, from the RECORD — local state only remembers this mount's
   // clicks, and a filed run re-visited offered to file again.
   const recordedFiling = findingsFiled(events);
@@ -1093,6 +1098,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         documentGate={!!(documentProposal || run.stage === "release")}
         landedAs={landedAs}
         dissent={codeRun ? dissent : null}
+        documentDissent={stageDissent ? { findings: stageDissent.findings, blocking: !next.includes("accept") } : null}
         acceptAndFix={codeRun && dissent && dissent.findings > 0 && next.includes("accept") ? {
           busy: fixBusy,
           error: fixError,
@@ -1668,7 +1674,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
         </section>
       )}
-      {stageDissent && (
+      {stageDissent && !decisionOpen && (
         <section data-testid="stage-dissent" className="m-2 rounded-card border border-serious p-3">
           <StatusChip role="serious" label={`the reviewer asked for changes — ${stageDissent.findings.length} finding${stageDissent.findings.length === 1 ? "" : "s"}`} />
           <ul className="mt-2 space-y-1 text-sm" data-testid="stage-dissent-list">
@@ -1679,11 +1685,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-sm text-ink">
-            These are revision notes on the draft, not bugs. {run.pending_data?.review_verdict
-              ? <>Acceptance is blocked while this dissent stands. Send the proposal back with <strong>Request changes</strong> below, or discard it.</>
-              : <>If they should be addressed, send the proposal back with <strong>Request changes</strong> below — the note carries them into the revision run.</>}
-          </p>
         </section>
       )}
       {fileable && !decisionOpen && (
@@ -1768,10 +1769,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <p className="mt-2 text-sm text-ink-muted">Lawful options: retry acceptance unchanged, explicitly try an additive-only union followed by the full gate, or reject. Edits and deletions are never auto-resolved.</p>
         </section>
       )}
-      {run.warning && (
+      {shownWarning && (
         <section data-testid="run-warning" className="m-2 rounded-card border border-serious p-3">
           <h2 className="mb-1 text-sm font-medium" style={{ color: "var(--status-serious)" }}>Warning</h2>
-          <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.warning}</p>
+          <p className="whitespace-pre-wrap break-words text-sm text-ink">{shownWarning}</p>
         </section>
       )}
       {run.failure && (
@@ -2740,4 +2741,15 @@ function LLMCallRow({ call, color }: { call: LLMCall; color?: string }) {
       </details>
     </li>
   );
+}
+
+/** The composition-review segment of run.warning duplicates the dissent
+ * block; strip it when that block is shown, keep everything else. */
+export function stripCompositionReviewWarning(warning: string | undefined, dissentShown: boolean): string {
+  if (!warning) return "";
+  if (!dissentShown) return warning;
+  const kept = warning
+    .split(" · ")
+    .filter((segment) => !segment.startsWith("post-composition reviewer requested changes"));
+  return kept.join(" · ");
 }

@@ -35,6 +35,7 @@ export function DecisionCard({
   documentGate,
   landedAs,
   dissent,
+  documentDissent,
   acceptAndFix,
   fileFindings,
   requestChangesDraft,
@@ -70,6 +71,15 @@ export function DecisionCard({
   /** B-261: a green gate over an unconvinced reviewer belongs INSIDE the
    * decision, not beside it. */
   dissent?: { verdict: string; findings: number; notes: string[] } | null;
+  /** B-435: a document draft whose reviewer asked for changes. The findings
+   * are the reason Accept is absent, so they live INSIDE the decision, above
+   * the note they are meant to travel in — not in a sibling card pointing at
+   * a control that is somewhere else. */
+  documentDissent?: {
+    findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[];
+    /** True when the engine withholds Accept while the dissent stands. */
+    blocking: boolean;
+  } | null;
   /** The one-click "accept what passed, then a follow-up run that reads the
    * objections". It launches a run, and the card says so before the click. */
   acceptAndFix?: { busy: boolean; error?: string | null; mode: string; spent?: string; onClick: () => void };
@@ -87,19 +97,27 @@ export function DecisionCard({
    * overwrites text the person has already entered. */
   requestChangesDraft?: string;
 }) {
-  const [note, setNote] = useState(requestChangesDraft ?? "");
-  const seededRequestChangesDraft = useRef(requestChangesDraft);
+  // Two engine-derived seeds compose: the mechanical blockers this proposal
+  // introduced (B-430) and the reviewer's own objections (B-435). Retyping
+  // either lost words and the revision run read a paraphrase. Editable,
+  // never sent without the person's click.
+  const seed = composeRequestChangesSeed(requestChangesDraft, documentDissent?.findings ?? []);
+  const [note, setNote] = useState(seed);
+  const seededRequestChangesDraft = useRef(seed);
   const [redoDraft, setRedoDraft] = useState(redoNote?.draft ?? "");
   const [asking, setAsking] = useState(false);
 
+  // A seed that arrives after mount (the run record hydrates in pieces)
+  // still fills an untouched editor, but never overwrites what the person
+  // typed.
   useEffect(() => {
-    if (!requestChangesDraft || requestChangesDraft === seededRequestChangesDraft.current) return;
+    if (!seed || seed === seededRequestChangesDraft.current) return;
     setNote((current) => {
       if (current.trim() && current !== seededRequestChangesDraft.current) return current;
-      seededRequestChangesDraft.current = requestChangesDraft;
-      return requestChangesDraft;
+      seededRequestChangesDraft.current = seed;
+      return seed;
     });
-  }, [requestChangesDraft]);
+  }, [seed]);
 
   const offers = (verb: string) => next.includes(verb);
 
@@ -273,6 +291,29 @@ export function DecisionCard({
         </div>
       )}
 
+      {documentDissent && documentDissent.findings.length > 0 && (
+        <div className="mb-3 rounded border border-serious p-2" data-testid="stage-dissent">
+          <span className="text-xs font-medium text-serious">
+            the reviewer asked for changes — {documentDissent.findings.length} finding{documentDissent.findings.length === 1 ? "" : "s"}
+          </span>
+          <p className="mt-1 text-sm text-ink" data-testid="stage-dissent-why">
+            {documentDissent.blocking
+              ? <>Acceptance is blocked while these stand: this draft cannot be accepted as it is. Send it back with the note below, or discard it.</>
+              : <>These are revision notes on the draft, not bugs. To have them addressed, send the draft back with the note below; it carries them into the revision run.</>}
+          </p>
+          <ul className="mt-1 space-y-1 text-sm" data-testid="stage-dissent-list">
+            {documentDissent.findings.map((f, i) => (
+              <li key={i} className="text-ink-secondary">
+                {f.severity && <span className="mr-1 text-xs uppercase text-ink-muted">[{f.severity}]</span>}
+                {f.issue}
+                {f.file && <span className="text-ink-muted"> — {f.file}{f.line ? `:${f.line}` : ""}</span>}
+                {f.fix && <span className="text-ink-muted"> · fix: {f.fix}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Above the document, not below it: the decision is what this screen is
           for, and a control under a long draft is a control nobody scrolls to. */}
       {offers("request_changes") && onRequestChanges && (
@@ -280,8 +321,8 @@ export function DecisionCard({
           <textarea
             aria-label="what to change"
             data-testid="change-note"
-            rows={2}
-            placeholder="Right except SPEC-004 — locking an angle should also stop the opposite vertex from being dragged."
+            rows={note ? Math.min(8, note.split("\n").length + 1) : 2}
+            placeholder="What should change in this draft, section by section."
             value={note}
             onChange={(e) => setNote(e.target.value)}
             className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
@@ -314,4 +355,24 @@ export function DecisionCard({
       )}
     </div>
   );
+}
+
+/** The note a document revision starts from: one line per finding, in the
+ * reviewer's words, so the architect reads the objection and not a summary
+ * of it. Empty when there is nothing to carry. */
+export function composeRequestChangesSeed(
+  draft: string | undefined,
+  findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[],
+): string {
+  return [draft ?? "", documentDissentNote(findings)].filter((part) => part.trim()).join("\n\n");
+}
+
+export function documentDissentNote(findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[]): string {
+  return findings
+    .map((f) => {
+      const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
+      const fix = f.fix ? ` Fix: ${f.fix}` : "";
+      return `- ${f.severity ? `[${f.severity}] ` : ""}${f.issue}${where}${fix}`;
+    })
+    .join("\n");
 }
