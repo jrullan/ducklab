@@ -203,6 +203,10 @@ type Capabilities struct {
 	JSONMode      bool `json:"json_mode"`
 	ContextTokens int  `json:"context_tokens"`
 	Vision        bool `json:"vision"`
+	// ThinkingControl records the result of an endpoint probe. Empty means the
+	// endpoint has not been asked; "disabled" means reasoning.enabled=false was
+	// accepted; "mandatory" means the endpoint explicitly refused it.
+	ThinkingControl string `json:"thinking_control,omitempty"`
 }
 
 // Provider is the interface every model endpoint implements.

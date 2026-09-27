@@ -774,6 +774,12 @@
           "probed_at": {
             "type": "string"
           },
+          "thinking_control": {
+            "type": "string"
+          },
+          "thinking_control_note": {
+            "type": "string"
+          },
           "vision": {
             "type": "boolean"
           }

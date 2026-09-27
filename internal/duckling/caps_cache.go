@@ -16,7 +16,8 @@ import (
 // an endpoint can change, so it must not be cached forever either (02 §7).
 const capsTTL = 30 * 24 * time.Hour
 
-// CapsCache persists probe results keyed by "provider:model".
+// CapsCache persists probe results keyed by "provider:model". Registry callers
+// append a concrete OpenRouter endpoint tag to model when one is pinned.
 //
 // Keyed by provider AND model, not by duckling id: two ducklings pointing at
 // the same model behind the same endpoint have the same capabilities, and

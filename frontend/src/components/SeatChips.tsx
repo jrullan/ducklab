@@ -141,6 +141,15 @@ export function SeatChips({
             {facts.includes("json") && d?.caps?.json_mode && (
               <span className="text-ink-muted" title="has a JSON mode">{"{}"}</span>
             )}
+            {d?.params?.disable_thinking && d?.caps?.thinking_control === "mandatory" && (
+              <span
+                className="text-critical"
+                title={d.caps.thinking_control_note ?? "this endpoint requires reasoning; Ducklab keeps it visible"}
+                data-testid="chip-thinking-mandatory"
+              >
+                ⚠ thinking
+              </span>
+            )}
           </button>
         );
       })}

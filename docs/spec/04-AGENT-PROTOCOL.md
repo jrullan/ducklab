@@ -374,17 +374,26 @@ string escaping of a whole source file is where they fail.
 
 ### 5.5 Thinking-token suppression
 
-When `params.disable_thinking = true`, Ducklab must, in order of what the
-provider supports:
+When `params.disable_thinking = true`, Ducklab maps the request by endpoint:
 
-1. send `{"chat_template_kwargs":{"enable_thinking":false}}` (vLLM/Qwen family),
-2. send `{"reasoning":{"exclude":true}}` (OpenRouter),
-3. append the stop sequences `["</think>"]` and strip any `<think>…</think>`
-   span from the response content before parsing.
+1. local vLLM/llama.cpp Qwen templates receive
+   `{"chat_template_kwargs":{"enable_thinking":false}}`;
+2. an OpenRouter endpoint is probed with
+   `{"reasoning":{"enabled":false}}`. If accepted, subsequent calls use that
+   exact control. If the endpoint answers that reasoning is mandatory, Ducklab
+   sends no suppression control and keeps the reasoning visible in the record;
+3. `{"reasoning":{"exclude":true}}` is never a default suppression control:
+   it hides billed reasoning rather than disabling it;
+4. Ducklab never adds `</think>` as a stop sequence. It separates any inline
+   `<think>…</think>` span after generation, without truncating the answer.
 
-Step 3 always runs regardless, as a safety net. A response that is *only* a
-thinking block is treated as empty and retried with an explicit instruction to
-place the answer outside the thinking block. Before classifying it as empty,
+The Ducklings card and run roster distinguish verified-disabled,
+mandatory-visible, and unverified suppression. A response that is *only* a
+thinking block is classified as reasoning-only and retried with an explicit
+instruction to place the answer outside the thinking block. A response with no
+content, reasoning, or tool call is classified separately as an empty
+completion; the final diagnostic reports the actual count of each class.
+Before classifying a response as empty or reasoning-only,
 Ducklab checks whether the reasoning channel contains one complete, valid and
 authorized Dialect B tool call. A fenced call, or a bare JSON object containing
 only that call, is executed and recorded as

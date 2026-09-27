@@ -123,6 +123,13 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.Vision != nil {
 		caps.Vision = *cfg.Caps.Vision
 	}
+	// Declared capabilities and observed endpoint behaviour are complementary.
+	// A native_tools declaration must not hide a cached mandatory-reasoning
+	// result from the request builder.
+	if probed, ok := s.ducklings.CachedCaps(id); ok {
+		caps.ThinkingControl = probed.ThinkingControl
+		caps.ThinkingControlNote = probed.ThinkingControlNote
+	}
 
 	loop := &agent.Loop{
 		Provider: p,

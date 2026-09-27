@@ -284,15 +284,34 @@ describe("Ducklings", () => {
 
   // The first thing to check when a run burns tokens and writes nothing, so it
   // belongs on the card and not only behind an edit click.
-  it("shows on the card whether thinking is suppressed", async () => {
+  it("does not claim unverified thinking suppression", async () => {
     const client = clientWith(
       [duckling({ id: "pato-deepseek", params: { disable_thinking: true } })],
       [provider({ id: "local" })],
     );
     render(<Ducklings client={client} projectId="" />);
     const card = await screen.findByTestId("duckling-card-pato-deepseek");
-    expect(card.textContent).toContain("suppressed");
+    expect(card.textContent).toContain("disable requested — unverified");
     expect(card.textContent).toContain("8,192 (default)");
+  });
+
+  it("warns when the probed endpoint requires thinking", async () => {
+    const client = clientWith(
+      [duckling({
+        id: "pato-deepseek",
+        params: { disable_thinking: true },
+        caps: {
+          native_tools: false,
+          context_tokens: 128000,
+          thinking_control: "mandatory",
+          thinking_control_note: "endpoint requires reasoning; Ducklab will keep it visible",
+        },
+      })],
+      [provider({ id: "openrouter" })],
+    );
+    render(<Ducklings client={client} projectId="" />);
+    const card = await screen.findByTestId("duckling-card-pato-deepseek");
+    expect(card.textContent).toContain("mandatory — kept visible");
   });
 
   // Runs and reports are recorded under the id, so changing it would orphan
