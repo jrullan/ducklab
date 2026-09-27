@@ -89,6 +89,21 @@ func TestMergeFragmentConsumesExplicitSectionDeletion(t *testing.T) {
 	}
 }
 
+func TestMergeFragmentConsumesAParsedDeleteTombstone(t *testing.T) {
+	base := &artifact.Document{Sections: []artifact.Section{{ID: "SPEC-006", Title: "Duplicate", Body: "old"}}}
+	fragment, err := artifact.Parse("## SPEC-006 — Duplicate\n\n**Delete:** yes\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragment.FieldErrors) != 0 {
+		t.Fatalf("tombstone was rejected before composition: %v", fragment.FieldErrors)
+	}
+	out := mergeFragment(base, fragment.Sections, "SPEC")
+	if len(out.Sections) != 0 {
+		t.Fatalf("parsed tombstone survived as a proposal section: %+v", out.Sections)
+	}
+}
+
 func TestMergeFragmentAcceptsDeleteMarkerOnHeading(t *testing.T) {
 	base := &artifact.Document{Sections: []artifact.Section{{ID: "REQ-005", Title: "Keyboard shortcuts", Body: "old"}}}
 	out := mergeFragment(base, []artifact.Section{{

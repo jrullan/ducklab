@@ -149,9 +149,13 @@ func ValidPlanArtifact(item string) bool {
 // fieldVocabulary is the single authority for parser and syntax-lint field validation.
 var fieldVocabulary = []FieldDefinition{
 	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope},
+	{Canonical: "Delete", Kind: KindIntent, Scope: SectionScope},
 	{Canonical: "Originates from", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Priority", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Status", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Assumption", Kind: KindRequirements, Scope: SectionScope},
+	{Canonical: "Delete", Kind: KindRequirements, Scope: SectionScope},
 	{Canonical: "Implements", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Priority", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Status", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Complexity", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Verification", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Exercises", Kind: KindSpec, Scope: SectionScope}, {Canonical: "As-built", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Covers", Kind: KindSpec, Scope: SectionScope},
+	{Canonical: "Delete", Kind: KindSpec, Scope: SectionScope},
 	{Canonical: "Owns", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Milestone", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Work unit", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Acceptance slices", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Toolchain", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Implements", Kind: KindPlan, Scope: PlanMilestoneScope},
+	{Canonical: "Delete", Kind: KindPlan, Scope: PlanMilestoneScope},
 	{Canonical: "Implements", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeSpecIDs, Required: true},
 	{Canonical: "Priority", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Status", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Complexity", Kind: KindPlan, Scope: PlanTaskScope},
 	{Canonical: "Depends on", Kind: KindPlan, Scope: PlanTaskScope, Aliases: []string{"Dependencies"}}, {Canonical: "Role hint", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Acceptance", Kind: KindPlan, Scope: PlanTaskScope},
@@ -165,6 +169,7 @@ var fieldVocabulary = []FieldDefinition{
 	{Canonical: "Verification", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeCommand, Required: true},
 	{Canonical: "Exercises", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true, MinItems: 1},
 	{Canonical: "Out of scope", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Assumption", Kind: KindPlan, Scope: PlanTaskScope},
+	{Canonical: "Delete", Kind: KindPlan, Scope: PlanTaskScope},
 }
 
 // FieldVocabulary returns a copy of the canonical, scoped field schema.
@@ -743,6 +748,16 @@ func parseFieldLine(line string) (key, value string, bold, ok bool) {
 	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
 	bold = strings.HasPrefix(t, "**")
 	if bold {
+		// Machine fields put the colon inside the bold marker (`**Key:**`).
+		// A prose bullet label puts it outside (`- **Label**: explanation`).
+		// Treating both as fields made every descriptive label in pre-grammar
+		// specs look like contract debt (B-429).
+		if closeAt := strings.Index(t[2:], "**"); closeAt >= 0 {
+			closeAt += 2
+			if colonAt := strings.Index(t, ":"); colonAt > closeAt {
+				return "", "", false, false
+			}
+		}
 		t = strings.TrimPrefix(t, "**")
 	}
 	i := strings.Index(t, ":")
@@ -1018,7 +1033,7 @@ func parseFrontmatter(fm string) Frontmatter {
 // callers can still inspect and migrate legacy artifacts.
 func grammarDiagnostic(f Frontmatter) []FieldError {
 	if !f.grammarSet {
-		return []FieldError{{Code: "legacy_grammar"}}
+		return []FieldError{{Code: "legacy_grammar", Detail: fmt.Sprintf("frontmatter has no grammar; add grammar: %d", CurrentGrammar)}}
 	}
 	if _, err := strconv.Atoi(f.grammarRaw); err != nil {
 		return []FieldError{{Key: "grammar", Code: "invalid_frontmatter", Token: f.grammarRaw, Detail: fmt.Sprintf("grammar must be an integer, got %q", f.grammarRaw)}}

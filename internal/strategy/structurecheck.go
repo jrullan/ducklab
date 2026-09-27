@@ -635,6 +635,17 @@ func ProposalStructureFindingsForAmendment(base, proposed *artifact.Document) (b
 	for _, finding := range ProposalStructureFindings(base) {
 		baseline[finding] = true
 	}
+	// Proposal storage stamps the current grammar before this comparison, so
+	// the candidate correctly has no legacy diagnostic. Keep the accepted
+	// document's migration debt visible as a notice without blaming or blocking
+	// the architect that produced a grammar-current amendment (B-432).
+	if base != nil && proposed != nil && base.Front.Grammar != artifact.CurrentGrammar && proposed.Front.Grammar == artifact.CurrentGrammar {
+		kind := string(base.Front.Kind)
+		if kind == "" {
+			kind = "document"
+		}
+		notices = append(notices, fmt.Sprintf("accepted %s does not use the current grammar; the proposal uses grammar: %d and will migrate it when accepted", kind, artifact.CurrentGrammar))
+	}
 	for _, finding := range ProposalStructureFindings(proposed) {
 		if baseline[finding] {
 			notices = append(notices, finding)
