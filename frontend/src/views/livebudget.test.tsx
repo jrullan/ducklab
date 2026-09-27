@@ -140,6 +140,25 @@ describe("the run's budget while it is running", () => {
     expect(await screen.findByTestId("reasoning-ratio-glm53")).toHaveTextContent("93× thinking/content");
   });
 
+  it("uses the configured reasoning/content warning ratio", async () => {
+    const defaults = vi.spyOn(client, "modeDefaults").mockResolvedValue({
+      rounds: {}, agent_max_turns: 24, reasoning_content_ratio_warning: 100,
+    });
+    useRuns.getState().applyEvent(
+      budgetEvent({
+        usd: 0.6, tokens: 40000, turns: 2, wallclock_s: 348,
+        limit: { usd: 2, tokens: 1500000, turns: 24, wallclock_s: 1800 },
+        ducklings: {
+          glm53: { calls: 2, tokens: 40000, cost_usd: 0.6, reasoning_tokens: 33606, content_tokens: 363 },
+        },
+      }),
+    );
+    render(<RunView runId="r-1" client={client} />);
+    await waitFor(() => expect(defaults).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("reasoning-ratio-glm53")).toBeNull());
+    defaults.mockRestore();
+  });
+
   // The line-up is known the moment the run starts — it is the roster — but
   // rows only appeared as each model's first call landed, so a pair run
   // opened showing nobody and the second seat materialised minutes later.

@@ -307,6 +307,8 @@ export interface ModeDefaultsView {
   http_timeout_s?: number;
   /** In-band tool calls tolerated from a no-tools seat before direct conclusion. */
   narrated_tool_limit?: number;
+  /** Warn when hidden reasoning tokens reach this multiple of visible output. */
+  reasoning_content_ratio_warning?: number;
   /** Contextual implementer default for a small seat in pair mode. More-specific role/run choices may cross it. */
   small_seat_pair_reserve?: number;
   /** What each mode does when nothing overrides it, so a client can show the

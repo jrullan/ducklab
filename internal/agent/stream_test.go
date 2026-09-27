@@ -269,7 +269,7 @@ func TestUnsupportedStreamingDetectsRepetition(t *testing.T) {
 	loop.OnDelta = func(_ *Turn, _ string) {}
 	turn := &Turn{Role: config.RoleImplementer, Prompt: "x", Contract: "freeform", MaxTurns: 1}
 
-	_, err := chatMaybeStreaming(context.Background(), loop, turn, provider.ChatRequest{})
+	_, err := chatMaybeStreaming(context.Background(), loop, turn, provider.ChatRequest{}, 0)
 	if !errors.Is(err, ErrRepetitionLoop) {
 		t.Fatalf("error = %v, want repetition loop", err)
 	}

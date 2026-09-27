@@ -208,10 +208,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [landingNote, setLandingNote] = useState("");
   const [landingOffer, setLandingOffer] = useState<LandingOffer | null>(null);
   const [landingManualOpen, setLandingManualOpen] = useState(false);
+  const [reasoningContentRatioWarning, setReasoningContentRatioWarning] = useState(50);
   const persistedPublicationInfo = [...(run?.remote_receipts ?? [])]
     .reverse()
     .find((receipt) => receipt.status === "local_only")?.detail;
   const effectivePublicationInfo = publicationInfo ?? persistedPublicationInfo;
+
+  useEffect(() => {
+    let cancelled = false;
+    client.modeDefaults().then((defaults) => {
+      if (!cancelled) setReasoningContentRatioWarning(defaults.reasoning_content_ratio_warning ?? 50);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [client]);
 
   // Fetch the run's history on open.
   //
@@ -2589,7 +2598,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                               · thinking-only
                             </span>
                           )}
-                          {(d.content_tokens ?? 0) > 0 && (d.reasoning_tokens ?? 0) >= 50 * (d.content_tokens ?? 0) && (
+                          {(d.content_tokens ?? 0) > 0 && (d.reasoning_tokens ?? 0) >= reasoningContentRatioWarning * (d.content_tokens ?? 0) && (
                             <span className="ml-1 text-warning" data-testid={`reasoning-ratio-${id}`} title={`${tokens(d.reasoning_tokens ?? 0)} reasoning tokens vs ${tokens(d.content_tokens ?? 0)} visible-content tokens`}>
                               · {Math.round((d.reasoning_tokens ?? 0) / (d.content_tokens ?? 1))}× thinking/content
                             </span>

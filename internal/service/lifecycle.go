@@ -56,6 +56,9 @@ func (s *Service) publishEvent(projectID string, e *runlog.Event) {
 	if e.Type == "repetition_loop" {
 		s.bus.Publish(bus.Event{Type: "distress", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: map[string]interface{}{"reason": "repetition_loop", "detail": e.Data}})
 	}
+	if e.Type == "provider_stall" {
+		s.bus.Publish(bus.Event{Type: "distress", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: map[string]interface{}{"reason": "provider_stall", "detail": e.Data}})
+	}
 }
 
 // publishTransition emits a derived, operator-facing transition. These are

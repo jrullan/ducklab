@@ -2985,6 +2985,9 @@
             },
             "type": "object"
           },
+          "reasoning_content_ratio_warning": {
+            "type": "integer"
+          },
           "role_pins": {
             "additionalProperties": {
               "items": {
@@ -3043,6 +3046,7 @@
           "http_timeout_s",
           "narrated_tool_limit",
           "phase_turns",
+          "reasoning_content_ratio_warning",
           "role_turns",
           "rounds",
           "script_role_turns",

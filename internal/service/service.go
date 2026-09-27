@@ -5141,6 +5141,14 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			"attempt": attempt, "error": err.Error(),
 		})
 	}
+	cache.onProviderStall = func(t *agent.Turn, bound time.Duration) {
+		rs.writer.AppendEvent("provider_stall", map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": string(t.Duckling),
+			"bound_ms": bound.Milliseconds(),
+			"detail":   fmt.Sprintf("non-streaming provider sent nothing for %s", bound),
+		})
+	}
 	cache.onRepetitionLoop = func(t *agent.Turn, repeated string) {
 		rs.writer.AppendEvent("repetition_loop", map[string]interface{}{
 			"round": t.Round, "turn": t.Index, "role": string(t.Role),

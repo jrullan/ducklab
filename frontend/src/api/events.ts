@@ -262,6 +262,7 @@ export const KNOWN_EVENT_TYPES = [
   // Provider weather as it happens: a transient failure per attempt, so a
   // stalled upstream reads as "retrying (2)" instead of as death.
   "provider_retry",
+	"provider_stall",
   "repetition_loop",
   "gate",
   "round_gate",

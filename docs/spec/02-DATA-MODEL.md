@@ -107,6 +107,7 @@ phase_turns         = { build = 40, test = 60 } # implementer calls/reply before
 small_seat_pair_reserve = 24      # contextual pair default; role/run/no-cap may cross it
 http_timeout_s      = 300
 narrated_tool_limit = 2           # one direct-contract retry when a tool-less seat narrates this many calls
+reasoning_content_ratio_warning = 50 # warn when hidden reasoning is this many times visible output
 transient_retries   = 3
 
 [defaults.budget]

@@ -123,6 +123,9 @@ type Defaults struct {
 	// that has no tools. At the limit Ducklab asks once for the final contract
 	// instead of letting the model narrate an imaginary tool session.
 	NarratedToolLimit int `toml:"narrated_tool_limit" json:"narrated_tool_limit"`
+	// ReasoningContentRatioWarning controls when the run view calls out a seat
+	// whose hidden reasoning tokens dwarf its visible answer tokens.
+	ReasoningContentRatioWarning int `toml:"reasoning_content_ratio_warning" json:"reasoning_content_ratio_warning"`
 	// SmallSeatPairReserve is the default calls/reply portion for a small
 	// implementer in pair mode. It protects time for independent review, but
 	// remains a default: role/run overrides and a live no-cap lift may cross it.
@@ -720,6 +723,9 @@ func (g *Global) Validate(path string) error {
 	if g.Defaults.NarratedToolLimit <= 0 || g.Defaults.NarratedToolLimit > 20 {
 		return &Error{File: path, Key: "defaults.narrated_tool_limit", Msg: "must be 1 to 20"}
 	}
+	if g.Defaults.ReasoningContentRatioWarning <= 0 || g.Defaults.ReasoningContentRatioWarning > 1000 {
+		return &Error{File: path, Key: "defaults.reasoning_content_ratio_warning", Msg: "must be 1 to 1000"}
+	}
 	if g.Defaults.Budget.MaxUSD <= 0 {
 		return &Error{File: path, Key: "defaults.budget.max_usd", Msg: "must be positive"}
 	}
@@ -783,15 +789,16 @@ func DefaultGlobal() *Global {
 	return &Global{
 		Schema: 1,
 		Defaults: Defaults{
-			Autonomy:             AutonomyGuarded,
-			Mode:                 ModeSolo,
-			RepairAttempts:       2,
-			ToolResultMaxBytes:   32768,
-			AgentMaxTurns:        24,
-			NarratedToolLimit:    2,
-			SmallSeatPairReserve: DefaultSmallSeatPairReserve,
-			HTTPTimeoutS:         300,
-			TransientRetries:     3,
+			Autonomy:                     AutonomyGuarded,
+			Mode:                         ModeSolo,
+			RepairAttempts:               2,
+			ToolResultMaxBytes:           32768,
+			AgentMaxTurns:                24,
+			NarratedToolLimit:            2,
+			ReasoningContentRatioWarning: 50,
+			SmallSeatPairReserve:         DefaultSmallSeatPairReserve,
+			HTTPTimeoutS:                 300,
+			TransientRetries:             3,
 			Budget: Budget{
 				MaxUSD:                        2.00,
 				MaxTokens:                     400000,

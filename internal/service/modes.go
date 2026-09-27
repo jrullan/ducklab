@@ -45,6 +45,9 @@ type loopCache struct {
 	// onRetry lands every transient provider failure on the record as it
 	// happens — the alternative was up to twenty silent minutes.
 	onRetry func(*agent.Turn, int, error)
+	// onProviderStall identifies the local non-streaming watchdog separately
+	// from a run wallclock expiry or an upstream HTTP error.
+	onProviderStall func(*agent.Turn, time.Duration)
 	// onCapNear says, in time to act, that a reply is on its last allowed
 	// model call.
 	onCapNear func(*agent.Turn, int, int)
@@ -74,6 +77,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnToolStart = c.onToolStart
 	l.OnRepetitionLoop = c.onRepetitionLoop
 	l.OnRetry = c.onRetry
+	l.OnProviderStall = c.onProviderStall
 	if writer, ok := c.writer.(*runLogAdapter); ok && writer != nil && writer.w != nil {
 		l.OnRecovery = func(turn *agent.Turn, kind string, data map[string]interface{}) {
 			event := make(map[string]interface{}, len(data)+4)
@@ -131,6 +135,7 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 		MaxTurns:              s.cfg.Defaults.AgentMaxTurns,
 		RepairAttempts:        s.cfg.Defaults.RepairAttempts,
 		ContractRepairTimeout: time.Duration(s.cfg.Defaults.HTTPTimeoutS) * time.Second,
+		NonStreamingTimeout:   time.Duration(s.cfg.Defaults.HTTPTimeoutS) * time.Second,
 		NarratedToolLimit:     s.cfg.Defaults.NarratedToolLimit,
 		RunWriter:             writer,
 	}
