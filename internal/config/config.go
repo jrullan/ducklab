@@ -135,6 +135,10 @@ type Defaults struct {
 	// failures stop the loop (0 = built-in default of 2).
 	AutopilotMaxTasks int `toml:"autopilot_max_tasks" json:"autopilot_max_tasks"`
 	AutopilotMaxFails int `toml:"autopilot_max_fails" json:"autopilot_max_fails"`
+	// AutopilotPath chooses the front door for an ordinary buildable task when
+	// triage did not require build-only verification. Empty preserves the
+	// historical test-first path.
+	AutopilotPath string `toml:"autopilot_path" json:"autopilot_path"`
 	// Rounds is how many rounds each mode runs, keyed by mode name. Absent or
 	// zero leaves the script's own limit alone.
 	//

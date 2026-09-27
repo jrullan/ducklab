@@ -25,6 +25,8 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
     modeDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
     engineDefaults: vi.fn(() => Promise.resolve({ max_concurrent_runs: 2, cpu_ceiling: 8 })),
     engineDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
+    autopilotDefaults: vi.fn(() => Promise.resolve({ max_tasks: 10, max_fails: 2, autonomy: "guarded", path: "test-first" as const })),
+    autopilotDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
     ducklings: vi.fn(() =>
       Promise.resolve([
         { id: "pato-atom", provider: "aitopatom", model: "q" },
@@ -488,8 +490,8 @@ describe("saving the settings", () => {
 // engine now reports each mode's capacity and the extra boxes go dark.
 // The person who always builds in pair and tests in solo re-picked both on
 // every task. Settings records the habit; every launcher opens on it.
-describe("default phase modes in Settings", () => {
-  it("lets build and test defaults be picked, explains the project fallback, and saves both choices", async () => {
+describe("autopilot path and phase modes in Settings", () => {
+  it("states the unattended path, keeps its modes beside it, and saves all three choices", async () => {
     const client = clientWith({
       modeDefaults: vi.fn(() =>
         Promise.resolve({
@@ -505,20 +507,24 @@ describe("default phase modes in Settings", () => {
     });
     render(settings(client));
 
-    const build = (await screen.findByLabelText("build runs open in")) as HTMLSelectElement;
-    const test = screen.getByLabelText("test runs open in") as HTMLSelectElement;
+    const build = (await screen.findByTestId("default-build-mode")) as HTMLSelectElement;
+    const test = screen.getByTestId("default-test-mode") as HTMLSelectElement;
     expect(build.value).toBe("pair");
     expect(test.value).toBe("solo");
     expect([...build.options].map((option) => option.value)).toEqual(["", "solo", "pair", "tournament", "split"]);
-    expect(screen.getByTestId("config-settings").textContent).toContain("config.toml-only for now");
+    expect([...test.options].map((option) => option.value)).toEqual(["", "solo", "pair"]);
+    expect(screen.getByTestId("ap-path-summary")).toHaveTextContent("test-first in solo, then build in pair");
 
     fireEvent.change(build, { target: { value: "tournament" } });
-    fireEvent.change(test, { target: { value: "split" } });
+    fireEvent.change(test, { target: { value: "pair" } });
+    fireEvent.change(screen.getByTestId("ap-path"), { target: { value: "build" } });
+    expect(screen.getByTestId("ap-path-summary")).toHaveTextContent("build directly in tournament");
     fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
     const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    expect(body).toMatchObject({ build_mode: "tournament", test_mode: "split" });
+    expect(body).toMatchObject({ build_mode: "tournament", test_mode: "pair" });
+    await waitFor(() => expect(client.autopilotDefaultsSet).toHaveBeenCalledWith(expect.objectContaining({ path: "build" })));
   });
 });
 

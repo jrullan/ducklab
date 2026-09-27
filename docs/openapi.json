@@ -2351,12 +2351,16 @@
           },
           "max_tasks": {
             "type": "integer"
+          },
+          "path": {
+            "type": "string"
           }
         },
         "required": [
           "autonomy",
           "max_fails",
-          "max_tasks"
+          "max_tasks",
+          "path"
         ],
         "type": "object"
       },
