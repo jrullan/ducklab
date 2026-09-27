@@ -22,34 +22,60 @@ type renderOutcome struct {
 	Note     string
 }
 
+const defaultProductSmokeTimeoutS = 3
+
+// productSmokeConfig keeps the compatibility fallback in one place. A
+// project may give the gate a headless/test-safe command without changing the
+// command a person launches.
+func productSmokeConfig(run config.RunApp) (command, source string, timeoutS int) {
+	command = strings.TrimSpace(run.Smoke)
+	source = "run.smoke"
+	if command == "" {
+		command = strings.TrimSpace(run.Command)
+		source = "run.command"
+	}
+	timeoutS = run.SmokeTimeoutS
+	if timeoutS <= 0 {
+		timeoutS = defaultProductSmokeTimeoutS
+	}
+	return command, source, timeoutS
+}
+
 // smokeRunCommand closes the gap between "compiled" and "runs". A command
 // that exits successfully is a valid CLI smoke; a long-lived GUI/server that
 // survives the observation window is stopped and counted as live. Because the
-// command is the human-approved run.command, this adds no inferred executable
-// authority to the gate.
-func smokeRunCommand(ctx context.Context, root, command, runID, projectID string) (string, error) {
+// command is the human-approved run.smoke (or its documented run.command
+// fallback), so this adds no inferred executable authority to the gate.
+func smokeRunCommand(ctx context.Context, root, command, source string, timeoutS int, runID, projectID string) (string, error) {
 	if strings.TrimSpace(command) == "" {
 		return "", nil
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "run.smoke"
+	}
+	if timeoutS <= 0 {
+		timeoutS = defaultProductSmokeTimeoutS
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	parentCtx := ctx
-	smokeCtx, cancel := context.WithTimeout(parentCtx, 3*time.Second)
+	window := time.Duration(timeoutS) * time.Second
+	smokeCtx, cancel := context.WithTimeout(parentCtx, window)
 	defer cancel()
 	env := append(os.Environ(), "DUCKLAB_RUN_ID="+runID, "DUCKLAB_PROJECT_ID="+projectID)
 	out, commandErr := xplat.ShellContext(smokeCtx, root, env, command).CombinedOutput()
 	if commandErr == nil {
-		return "run.command exited successfully", nil
+		return source + " exited successfully", nil
 	}
 	if smokeCtx.Err() == context.DeadlineExceeded && parentCtx.Err() == nil {
-		note := "run.command stayed alive for 3s; stopped after the product-smoke observation window"
+		note := fmt.Sprintf("%s stayed alive for %s; stopped after the product-smoke observation window", source, window)
 		if output := renderNoteOutput(out); output != "" {
 			note += "; output: " + output
 		}
 		return note, nil
 	}
-	return "", fmt.Errorf("run.command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+	return "", fmt.Errorf("%s: %s: %w", source, strings.TrimSpace(string(out)), commandErr)
 }
 
 func captureRender(ctx context.Context, root string, contract config.RenderContract, writer *runlog.Writer, runID, projectID string) (renderOutcome, error) {

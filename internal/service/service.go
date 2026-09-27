@@ -2099,16 +2099,17 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 	}
 	appSmokeGate := "none"
-	if taskGate != "red" && probeGate != "red" && verify.IsGreen(gateResult) && strings.TrimSpace(projCfg.Run.Command) != "" {
-		note, smokeErr := smokeRunCommand(ctx, ectx.ProjectRoot, projCfg.Run.Command, rs.run.ID, rs.run.ProjectID)
+	smokeCommand, smokeSource, smokeTimeoutS := productSmokeConfig(projCfg.Run)
+	if taskGate != "red" && probeGate != "red" && verify.IsGreen(gateResult) && smokeCommand != "" {
+		note, smokeErr := smokeRunCommand(ctx, ectx.ProjectRoot, smokeCommand, smokeSource, smokeTimeoutS, rs.run.ID, rs.run.ProjectID)
 		if smokeErr != nil {
 			appSmokeGate = "red"
 			verificationOutput = "blocking product smoke: " + smokeErr.Error() + "\n\nprior successful verification evidence:\n" + verificationOutput
-			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": false, "command": projCfg.Run.Command, "reason": smokeErr.Error()})
+			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": false, "command": smokeCommand, "source": smokeSource, "timeout_s": smokeTimeoutS, "reason": smokeErr.Error()})
 		} else {
 			appSmokeGate = "green"
 			verificationOutput += "\nproduct smoke: " + note
-			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": true, "command": projCfg.Run.Command, "note": note})
+			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": true, "command": smokeCommand, "source": smokeSource, "timeout_s": smokeTimeoutS, "note": note})
 		}
 	}
 	// Rendering is optional evidence and a failure is only a caveat.

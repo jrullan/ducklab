@@ -122,6 +122,11 @@ export type GateStatus = {
 export interface AppStatus {
   configured: boolean;
   command?: string;
+  smoke?: string;
+  /** Effective post-gate smoke command and the field that supplied it. */
+  smoke_command?: string;
+  smoke_source?: "run.smoke" | "run.command";
+  smoke_timeout_s: number;
   url?: string;
   running: boolean;
   pid?: number;

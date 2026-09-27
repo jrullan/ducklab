@@ -128,6 +128,36 @@ func TestAppStatusSuggestsButDoesNotAdoptDetectedRunCommands(t *testing.T) {
 	}
 }
 
+func TestAppStatusNamesTheEffectiveProductSmoke(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"run.command": "./interactive-ui", "run.smoke_timeout_s": "9",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.AppStatus(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SmokeCommand != "./interactive-ui" || status.SmokeSource != "run.command" || status.SmokeTimeoutS != 9 {
+		t.Fatalf("command fallback status = %+v", status)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{"run.smoke": "./interactive-ui --headless"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.AppStatus(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SmokeCommand != "./interactive-ui --headless" || status.SmokeSource != "run.smoke" {
+		t.Fatalf("explicit smoke status = %+v", status)
+	}
+}
+
 // A command that dies on its own leaves its exit and its last words on the
 // status — the first thing a person needs when Launch appears to do nothing.
 func TestACrashedAppReportsItsExit(t *testing.T) {

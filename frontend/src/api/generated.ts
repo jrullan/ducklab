@@ -176,6 +176,8 @@ export interface ConfigRunApp {
   health?: string;
   preflight?: string;
   requires?: string;
+  smoke?: string;
+  smoke_timeout_s?: number;
   url?: string;
 }
 
@@ -641,6 +643,10 @@ export interface ServiceAppStatus {
   preflight?: string;
   requires?: string;
   running?: boolean;
+  smoke?: string;
+  smoke_command?: string;
+  smoke_source?: string;
+  smoke_timeout_s?: number;
   started_at?: string;
   suggestions?: ServiceAppSuggestion[];
   url?: string;

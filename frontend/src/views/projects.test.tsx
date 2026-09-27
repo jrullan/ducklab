@@ -75,8 +75,29 @@ describe("Projects", () => {
     expect(screen.getByTestId("app-command")).toHaveValue("./build/capture-ui");
     fireEvent.click(screen.getByTestId("app-save"));
     await waitFor(() => expect(client.projectUpdate).toHaveBeenCalledWith("alpha", {
-      "run.command": "./build/capture-ui", "run.url": "", "run.health": "", "run.preflight": "", "run.requires": "",
+      "run.command": "./build/capture-ui", "run.smoke": "", "run.smoke_timeout_s": "3",
+      "run.url": "", "run.health": "", "run.preflight": "", "run.requires": "",
     }));
+  });
+
+  it("shows and edits the exact command used by the product-smoke gate", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    (client.appStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: true,
+      command: "./capture-ui",
+      smoke: "./capture-ui --headless",
+      smoke_command: "./capture-ui --headless",
+      smoke_source: "run.smoke",
+      smoke_timeout_s: 8,
+      running: false,
+    });
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+
+    expect(await screen.findByTestId("app-smoke-effective")).toHaveTextContent("run.smoke, 8s");
+    expect(screen.getByTestId("app-smoke-effective")).toHaveTextContent("./capture-ui --headless");
+    fireEvent.click(screen.getByTestId("app-edit"));
+    expect(screen.getByTestId("app-smoke")).toHaveValue("./capture-ui --headless");
+    expect(screen.getByTestId("app-smoke-timeout")).toHaveValue("8");
   });
 
   it("shows the engine's refusal rather than failing silently", async () => {

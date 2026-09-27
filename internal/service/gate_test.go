@@ -30,6 +30,28 @@ func TestOnDemandGateIncludesConfiguredProductSmoke(t *testing.T) {
 	}
 }
 
+func TestOnDemandGateUsesSmokeInsteadOfLaunchingTheInteractiveCommand(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "headless-smoke", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.mode": "custom", "verify.custom": "true",
+		"run.command": "printf 'interactive command must not run\\n' >&2; exit 19",
+		"run.smoke":   "printf 'headless smoke ran\\n'", "run.smoke_timeout_s": "7",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.GateRun(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Green || !strings.Contains(result.Output, "run.smoke exited successfully") || strings.Contains(result.Output, "interactive command must not run") {
+		t.Fatalf("gate did not use the explicit headless smoke: %+v", result)
+	}
+}
+
 // A project with no gate produces UNVERIFIED forever and says nothing about
 // it. The note is what turns "why does nothing ever pass" into one line at the
 // end of the first run.
