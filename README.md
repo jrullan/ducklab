@@ -240,9 +240,13 @@ ducklab. Stack capabilities propose `run.command` choices from build metadata
 but a person must adopt one. Once configured, every otherwise-green build gate
 executes `run.smoke` when declared, otherwise it falls back to `run.command`.
 This lets an interactive application declare a headless smoke without opening
-its real UI during every gate. A clean exit or surviving `run.smoke_timeout_s`
-(3 seconds by default) is the product smoke that closes the gap between
-“compiled” and “runs”.
+its real UI during every gate. `run.smoke_expect = "exit" | "live"` defines
+success: `exit` requires status 0 inside `run.smoke_timeout_s`; `live` requires
+the process to survive the whole observation window. When omitted, an explicit
+`run.smoke` defaults to `exit`, while a `run.command` fallback or an app with a
+URL/health endpoint defaults to `live`. The gate and UI always state the
+effective expectation, so an interactive program that exits cleanly in 20 ms
+cannot masquerade as a booted product.
 
 Gate and shell process trees always receive `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID`. For example, excercise-tracker can use `DATABASE_URL=test_db_${DUCKLAB_RUN_ID}` in `[verify].tests`, and a compose preflight can use `${DUCKLAB_PROJECT_ID}` as its per-run project name. Ducklab guarantees identity only; provisioning and teardown remain the project's.
 

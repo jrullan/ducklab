@@ -106,6 +106,14 @@ func TestProjectRejectsNegativeSmokeTimeout(t *testing.T) {
 	}
 }
 
+func TestProjectRejectsUnknownSmokeExpectation(t *testing.T) {
+	p := DefaultProject("demo", "Demo")
+	p.Run.SmokeExpect = "maybe"
+	if err := p.Validate("project.toml"); err == nil || !strings.Contains(err.Error(), "run.smoke_expect") {
+		t.Fatalf("invalid smoke expectation error = %v", err)
+	}
+}
+
 func TestLoadGlobal(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")

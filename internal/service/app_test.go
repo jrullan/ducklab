@@ -143,7 +143,7 @@ func TestAppStatusNamesTheEffectiveProductSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.SmokeCommand != "./interactive-ui" || status.SmokeSource != "run.command" || status.SmokeTimeoutS != 9 {
+	if status.SmokeCommand != "./interactive-ui" || status.SmokeSource != "run.command" || status.SmokeExpectation != "live" || status.SmokeTimeoutS != 9 {
 		t.Fatalf("command fallback status = %+v", status)
 	}
 	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{"run.smoke": "./interactive-ui --headless"}); err != nil {
@@ -153,7 +153,7 @@ func TestAppStatusNamesTheEffectiveProductSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.SmokeCommand != "./interactive-ui --headless" || status.SmokeSource != "run.smoke" {
+	if status.SmokeCommand != "./interactive-ui --headless" || status.SmokeSource != "run.smoke" || status.SmokeExpectation != "exit" {
 		t.Fatalf("explicit smoke status = %+v", status)
 	}
 }

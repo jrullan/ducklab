@@ -181,9 +181,9 @@ func (s *Service) GateRun(ctx context.Context, projectID string) (*GateResult, e
 		// A gate that could not run is not green, whatever its exit code says.
 		Green: res.ExitCode == 0 && res.Gate != verify.GateNone,
 	}
-	smokeCommand, smokeSource, smokeTimeoutS := productSmokeConfig(projCfg.Run)
+	smokeCommand, smokeSource, smokeExpectation, smokeTimeoutS := productSmokeConfig(projCfg.Run)
 	if result.Green && smokeCommand != "" {
-		note, smokeErr := smokeRunCommand(ctx, entry.Path, smokeCommand, smokeSource, smokeTimeoutS, "gate-run", projectID)
+		note, smokeErr := smokeRunCommand(ctx, entry.Path, smokeCommand, smokeSource, smokeExpectation, smokeTimeoutS, "gate-run", projectID)
 		if smokeErr != nil {
 			result.Green = false
 			result.ExitCode = 1

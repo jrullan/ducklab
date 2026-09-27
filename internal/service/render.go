@@ -27,7 +27,7 @@ const defaultProductSmokeTimeoutS = 3
 // productSmokeConfig keeps the compatibility fallback in one place. A
 // project may give the gate a headless/test-safe command without changing the
 // command a person launches.
-func productSmokeConfig(run config.RunApp) (command, source string, timeoutS int) {
+func productSmokeConfig(run config.RunApp) (command, source, expectation string, timeoutS int) {
 	command = strings.TrimSpace(run.Smoke)
 	source = "run.smoke"
 	if command == "" {
@@ -38,7 +38,16 @@ func productSmokeConfig(run config.RunApp) (command, source string, timeoutS int
 	if timeoutS <= 0 {
 		timeoutS = defaultProductSmokeTimeoutS
 	}
-	return command, source, timeoutS
+	expectation = strings.TrimSpace(run.SmokeExpect)
+	if expectation == "" {
+		switch {
+		case strings.TrimSpace(run.URL) != "", strings.TrimSpace(run.Health) != "", source == "run.command":
+			expectation = "live"
+		default:
+			expectation = "exit"
+		}
+	}
+	return command, source, expectation, timeoutS
 }
 
 // smokeRunCommand closes the gap between "compiled" and "runs". A command
@@ -46,7 +55,7 @@ func productSmokeConfig(run config.RunApp) (command, source string, timeoutS int
 // survives the observation window is stopped and counted as live. Because the
 // command is the human-approved run.smoke (or its documented run.command
 // fallback), so this adds no inferred executable authority to the gate.
-func smokeRunCommand(ctx context.Context, root, command, source string, timeoutS int, runID, projectID string) (string, error) {
+func smokeRunCommand(ctx context.Context, root, command, source, expectation string, timeoutS int, runID, projectID string) (string, error) {
 	if strings.TrimSpace(command) == "" {
 		return "", nil
 	}
@@ -55,6 +64,9 @@ func smokeRunCommand(ctx context.Context, root, command, source string, timeoutS
 	}
 	if timeoutS <= 0 {
 		timeoutS = defaultProductSmokeTimeoutS
+	}
+	if expectation == "" {
+		expectation = "exit"
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -66,16 +78,26 @@ func smokeRunCommand(ctx context.Context, root, command, source string, timeoutS
 	env := append(os.Environ(), "DUCKLAB_RUN_ID="+runID, "DUCKLAB_PROJECT_ID="+projectID)
 	out, commandErr := xplat.ShellContext(smokeCtx, root, env, command).CombinedOutput()
 	if commandErr == nil {
-		return source + " exited successfully", nil
+		if expectation == "live" {
+			detail := fmt.Sprintf("%s expected live for %s but exited early with status 0", source, window)
+			if output := renderNoteOutput(out); output != "" {
+				detail += "; output: " + output
+			}
+			return "", fmt.Errorf("%s", detail)
+		}
+		return source + " met expectation exit: exited successfully", nil
 	}
 	if smokeCtx.Err() == context.DeadlineExceeded && parentCtx.Err() == nil {
-		note := fmt.Sprintf("%s stayed alive for %s; stopped after the product-smoke observation window", source, window)
+		if expectation == "exit" {
+			return "", fmt.Errorf("%s expected exit within %s but stayed alive", source, window)
+		}
+		note := fmt.Sprintf("%s met expectation live: stayed alive for %s; stopped after the product-smoke observation window", source, window)
 		if output := renderNoteOutput(out); output != "" {
 			note += "; output: " + output
 		}
 		return note, nil
 	}
-	return "", fmt.Errorf("%s: %s: %w", source, strings.TrimSpace(string(out)), commandErr)
+	return "", fmt.Errorf("%s expected %s: %s: %w", source, expectation, strings.TrimSpace(string(out)), commandErr)
 }
 
 func captureRender(ctx context.Context, root string, contract config.RenderContract, writer *runlog.Writer, runID, projectID string) (renderOutcome, error) {

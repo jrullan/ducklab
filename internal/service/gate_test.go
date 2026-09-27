@@ -47,7 +47,7 @@ func TestOnDemandGateUsesSmokeInsteadOfLaunchingTheInteractiveCommand(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Green || !strings.Contains(result.Output, "run.smoke exited successfully") || strings.Contains(result.Output, "interactive command must not run") {
+	if !result.Green || !strings.Contains(result.Output, "run.smoke met expectation exit: exited successfully") || strings.Contains(result.Output, "interactive command must not run") {
 		t.Fatalf("gate did not use the explicit headless smoke: %+v", result)
 	}
 }

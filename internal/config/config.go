@@ -544,6 +544,10 @@ type RunApp struct {
 	// products whose normal Command opens an interactive UI. When absent, the
 	// gate falls back to Command for backwards compatibility.
 	Smoke string `toml:"smoke" json:"smoke"`
+	// SmokeExpect says what success means: "exit" requires exit 0 inside the
+	// window; "live" requires the process to remain alive for the whole window.
+	// Empty derives a safe default from the command and app shape.
+	SmokeExpect string `toml:"smoke_expect" json:"smoke_expect"`
 	// SmokeTimeoutS is the observation window for a long-lived smoke command.
 	// Zero selects the engine default.
 	SmokeTimeoutS int `toml:"smoke_timeout_s" json:"smoke_timeout_s"`
@@ -904,6 +908,9 @@ func (p *Project) Validate(path string) error {
 	}
 	if p.Run.SmokeTimeoutS < 0 {
 		return &Error{File: path, Key: "run.smoke_timeout_s", Msg: "must be zero (default) or positive"}
+	}
+	if p.Run.SmokeExpect != "" && p.Run.SmokeExpect != "exit" && p.Run.SmokeExpect != "live" {
+		return &Error{File: path, Key: "run.smoke_expect", Msg: "must be exit | live (or empty for derived default)"}
 	}
 	if p.Lanes.Enforce != "write" && p.Lanes.Enforce != "accept" {
 		return &Error{File: path, Key: "lanes.enforce", Msg: "must be write | accept"}
