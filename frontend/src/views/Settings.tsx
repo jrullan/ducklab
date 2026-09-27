@@ -396,6 +396,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [smallSeatPairReserve, setSmallSeatPairReserve] = useState("");
   const [httpTimeoutS, setHTTPTimeoutS] = useState("");
   const [narratedToolLimit, setNarratedToolLimit] = useState("");
+  const [reasoningContentRatioWarning, setReasoningContentRatioWarning] = useState("");
   const [buildMode, setBuildMode] = useState("");
   const [testMode, setTestMode] = useState("");
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: unknown }>({
@@ -478,6 +479,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     setSmallSeatPairReserve(String(v.small_seat_pair_reserve ?? 24));
     setHTTPTimeoutS(String(v.http_timeout_s ?? 300));
     setNarratedToolLimit(String(v.narrated_tool_limit ?? 2));
+    setReasoningContentRatioWarning(String(v.reasoning_content_ratio_warning ?? 50));
     setBuildMode(v.build_mode ?? "");
     setTestMode(v.test_mode ?? "");
   };
@@ -566,6 +568,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         small_seat_pair_reserve: Number(smallSeatPairReserve) || 0,
         http_timeout_s: Number(httpTimeoutS) || 0,
         narrated_tool_limit: Number(narratedToolLimit) || 0,
+        reasoning_content_ratio_warning: Number(reasoningContentRatioWarning) || 0,
         // Empty seats are UI scaffolding, not preferences.
         build_mode: buildMode,
         test_mode: testMode,
@@ -849,11 +852,12 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
       <h3 className="mt-4 text-xs text-ink-muted">model recovery</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
-        {num(httpTimeoutS, setHTTPTimeoutS, "contract repair seconds", "contract-repair-timeout", "300", "w-44")}
+        {num(httpTimeoutS, setHTTPTimeoutS, "non-stream/repair seconds", "contract-repair-timeout", "300", "w-48")}
         {num(narratedToolLimit, setNarratedToolLimit, "narrated tool limit", "narrated-tool-limit", "2", "w-40")}
+        {num(reasoningContentRatioWarning, setReasoningContentRatioWarning, "thinking/content warning ratio", "reasoning-content-ratio-warning", "50", "w-52")}
       </div>
       <p className="mt-2 text-xs text-ink-muted">
-        Repair gets at least this long and automatically grows to 1.5× the seat&apos;s slowest call in the turn. A no-tools seat that narrates this many tool calls is asked once for its final contract instead of entering generic repair.
+        Repair and other non-streaming calls get at least this long and automatically grow to 1.5× the seat&apos;s slowest call in the turn. A no-tools seat that narrates this many tool calls is asked once for its final contract instead of entering generic repair. The ratio controls when the run calls out hidden reasoning that dwarfs visible output.
       </p>
 
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>

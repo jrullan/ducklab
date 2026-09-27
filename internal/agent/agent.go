@@ -155,6 +155,11 @@ type Loop struct {
 	// actual deadline grows to 1.5x the turn's slowest observed model latency so a
 	// repair is never given less time than the seat demonstrably needs.
 	ContractRepairTimeout time.Duration
+	// NonStreamingTimeout is the configured floor for ordinary calls that do
+	// not stream. Their effective stall bound grows to 1.5x the slowest
+	// successful call observed in the turn, but never inherits an hours-long
+	// run wallclock as its only timeout.
+	NonStreamingTimeout time.Duration
 	// NarratedToolLimit bounds tool-call syntax emitted as prose by a no-tools
 	// seat before Ducklab asks once for the final answer directly.
 	NarratedToolLimit int
@@ -201,6 +206,9 @@ type Loop struct {
 	// which a person watching an idle run had every reason to abort healthy
 	// work, and did, three times (T-075).
 	OnRetry func(turn *Turn, attempt int, err error)
+	// OnProviderStall records that Ducklab's local non-streaming stall bound,
+	// rather than the run wallclock, ended a silent provider call.
+	OnProviderStall func(turn *Turn, bound time.Duration)
 	// OnRecovery records a malformed-but-recoverable model response. These are
 	// neither provider failures nor completed tool calls; their own events keep
 	// salvaged actions and rejected arguments visible without replaying them.
@@ -416,7 +424,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		var salvagedReasoningCall *TextToolCall
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
-			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
+			resp, err = chatMaybeStreaming(ctx, loop, turn, req, slowestCallLatency)
 			callLatency := time.Since(start)
 			if err == nil && callLatency > slowestCallLatency {
 				slowestCallLatency = callLatency
@@ -440,7 +448,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				extra := 1
 				err = provider.Retry(ctx, retryPolicy, func() error {
 					var rerr error
-					resp, rerr = loop.Provider.Chat(ctx, req)
+					resp, rerr = chatNonStreaming(ctx, loop, turn, req, slowestCallLatency)
 					if rerr != nil && provider.IsTransient(rerr) && loop.OnRetry != nil {
 						extra++
 						loop.OnRetry(turn, extra, rerr)
@@ -711,7 +719,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					"a few sentences. If you have concluded that the task needs no change, " +
 					"say exactly that and stop.",
 			})
-			resp2, err2 := loop.Provider.Chat(ctx, retry)
+			resp2, err2 := chatNonStreaming(ctx, loop, turn, retry, slowestCallLatency)
 			if err2 != nil || len(resp2.Choices) == 0 {
 				return outcome, ErrTruncated
 			}
@@ -902,7 +910,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		if loop.Duckling.Params.DisableThinking {
 			applyThinkingSuppression(&final, loop.Duckling.Caps)
 		}
-		if resp, cost, err := chatForcedConclusion(ctx, loop, turn, final, 1); err != nil {
+		if resp, cost, err := chatForcedConclusion(ctx, loop, turn, final, 1, slowestCallLatency); err != nil {
 			return outcome, err
 		} else if len(resp.Choices) > 0 {
 			outcome.TokensIn += resp.Usage.PromptTokens
@@ -923,7 +931,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 							"Rewrite the intended result as ordinary prose or the requested JSON contract only. " +
 							"Do not mention or spell any tool name, arguments, fence, or call syntax.",
 					})
-					if second, secondCost, secondErr := chatForcedConclusion(ctx, loop, turn, retry, 2); secondErr != nil {
+					if second, secondCost, secondErr := chatForcedConclusion(ctx, loop, turn, retry, 2, slowestCallLatency); secondErr != nil {
 						return outcome, secondErr
 					} else if len(second.Choices) > 0 {
 						outcome.TokensIn += second.Usage.PromptTokens
@@ -1011,14 +1019,14 @@ func providerCallError(tracker *budget.Tracker, err error) error {
 // a seat exhausts its tool-call allowance. Fledge P4 showed the budget charging
 // this call while llm.jsonl jumped directly from the last tool call to the next
 // actor, because this path bypassed the ordinary per-call recorder.
-func chatForcedConclusion(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, attempt int) (provider.ChatResponse, float64, error) {
+func chatForcedConclusion(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, attempt int, slowestCallLatency time.Duration) (provider.ChatResponse, float64, error) {
 	if loop.Budget != nil {
 		if msg, exceeded := loop.Budget.Check(); exceeded {
 			return provider.ChatResponse{}, 0, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
 		}
 	}
 	start := time.Now()
-	resp, err := loop.Provider.Chat(ctx, req)
+	resp, err := chatNonStreaming(ctx, loop, turn, req, slowestCallLatency)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		if loop.RunWriter != nil {
@@ -1091,15 +1099,41 @@ func repetitionLoopText(err error) string {
 	return "repeated output"
 }
 
+// chatNonStreaming keeps an ordinary, silent provider call bounded even when
+// its parent is the run wallclock context. context.WithTimeout automatically
+// chooses the earlier parent deadline, so a real budget expiry remains a
+// budget expiry; only this local bound is reported as provider weather.
+// Contract repair deliberately does not use this helper: repairContract owns
+// its explicit adaptive deadline and passes it to chatContractRepair.
+func chatNonStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, slowestCallLatency time.Duration) (provider.ChatResponse, error) {
+	// Zero is the compatibility/unconfigured state used by embedders and unit
+	// fixtures. Adaptation needs a real configured floor; deriving a timeout
+	// from a nanosecond fake-provider response would manufacture instant stalls.
+	if loop.NonStreamingTimeout <= 0 {
+		return loop.Provider.Chat(ctx, req)
+	}
+	bound := adaptiveRepairTimeout(loop.NonStreamingTimeout, slowestCallLatency)
+	callCtx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	resp, err := loop.Provider.Chat(callCtx, req)
+	if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		if loop.OnProviderStall != nil {
+			loop.OnProviderStall(turn, bound)
+		}
+		return resp, fmt.Errorf("%w: provider sent nothing for %s (stalled non-streaming call)", provider.ErrProviderUnavailable, bound)
+	}
+	return resp, err
+}
+
 // chatMaybeStreaming streams when the caller asked for it and the provider can,
 // and falls back to a plain call otherwise.
 //
 // Streaming is a DISPLAY concern only (01 §5.2): contract parsing, tool
 // dispatch and logging always operate on the assembled final response, never
 // on deltas. A dropped subscriber therefore cannot affect a run.
-func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest) (provider.ChatResponse, error) {
+func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, slowestCallLatency time.Duration) (provider.ChatResponse, error) {
 	if loop.OnDelta == nil && loop.OnReasoning == nil {
-		resp, err := loop.Provider.Chat(ctx, req)
+		resp, err := chatNonStreaming(ctx, loop, turn, req, slowestCallLatency)
 		if err == nil && len(resp.Choices) > 0 {
 			d := newRepetitionDetector()
 			if d.Add(resp.Choices[0].Message.Content) {
@@ -1154,7 +1188,7 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		// The endpoint cannot stream. Emit the assembled text as a single
 		// delta so a watching client still sees output appear, rather than
 		// silently showing nothing for the whole turn.
-		resp, err = loop.Provider.Chat(ctx, req)
+		resp, err = chatNonStreaming(ctx, loop, turn, req, slowestCallLatency)
 		if err == nil && len(resp.Choices) > 0 {
 			d := newRepetitionDetector()
 			if d.Add(resp.Choices[0].Message.Content) {

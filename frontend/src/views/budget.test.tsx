@@ -424,6 +424,27 @@ describe("calls/reply precedence in Settings", () => {
   });
 });
 
+describe("model recovery limits in Settings", () => {
+  it("shows and saves the reasoning/content warning ratio", async () => {
+    const client = clientWith({
+      modeDefaults: vi.fn(() => Promise.resolve({
+        rounds: {}, agent_max_turns: 24, script_rounds: {}, role_turns: {},
+        script_role_turns: {}, reasoning_content_ratio_warning: 75,
+      })),
+    });
+    render(settings(client));
+
+    const input = await screen.findByTestId("reasoning-content-ratio-warning") as HTMLInputElement;
+    expect(input.value).toBe("75");
+    fireEvent.change(input, { target: { value: "90" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
+    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(body).toMatchObject({ reasoning_content_ratio_warning: 90 });
+  });
+});
+
 // Two sections with a Save each, and the second one's button sat in the middle
 // of its own fields — so the controls below it looked like they belonged to
 // nothing, and a person who changed one and pressed the button they could see

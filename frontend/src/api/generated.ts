@@ -871,6 +871,7 @@ export interface ServiceModeDefaultsView {
   mode_seats?: Record<string, Record<string, string[]>>;
   narrated_tool_limit?: number;
   phase_turns?: Record<string, number>;
+  reasoning_content_ratio_warning?: number;
   role_pins?: Record<string, string[]>;
   role_turns?: Record<string, number>;
   rounds?: Record<string, number>;
