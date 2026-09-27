@@ -151,6 +151,13 @@ type Loop struct {
 	Budget         *budget.Tracker
 	MaxTurns       int
 	RepairAttempts int
+	// ContractRepairTimeout is the configured floor for one repair call. The
+	// actual deadline grows to 1.5x the turn's slowest observed model latency so a
+	// repair is never given less time than the seat demonstrably needs.
+	ContractRepairTimeout time.Duration
+	// NarratedToolLimit bounds tool-call syntax emitted as prose by a no-tools
+	// seat before Ducklab asks once for the final answer directly.
+	NarratedToolLimit int
 	// OnDelta, if set, receives streamed text as it arrives. Display only.
 	OnDelta func(turn *Turn, text string)
 	// OnReasoning, if set, receives streamed thinking as it arrives. Display
@@ -244,6 +251,8 @@ type DucklingConfig struct {
 // RunTurn executes a single conversation turn.
 func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContext) (*Outcome, error) {
 	outcome := &Outcome{}
+	var slowestCallLatency time.Duration
+	narrationRecoveries := 0
 	// A budget is a deadline, not merely a checkpoint between calls. The local
 	// Qwen plan crossed its 30-minute cap inside one 139-second generation;
 	// every provider path in this turn inherits the remaining run deadline.
@@ -408,6 +417,10 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
+			callLatency := time.Since(start)
+			if err == nil && callLatency > slowestCallLatency {
+				slowestCallLatency = callLatency
+			}
 			if errors.Is(err, ErrRepetitionLoop) && attempt == 1 {
 				if loop.OnRepetitionLoop != nil {
 					loop.OnRepetitionLoop(turn, repetitionLoopText(err))
@@ -605,6 +618,32 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// that response, then stop before tools, repairs, or another model call.
 		if msg, exceeded := loop.Budget.CheckWallclock(); exceeded {
 			return outcome, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+
+		// A no-tools reviewer can still narrate an imaginary tool transcript in
+		// ordinary content. Letting that prose fall through to generic contract
+		// repair costs another full reasoning pass and hides the actual mistake.
+		// At the configured boundary, ask exactly once for the role's final
+		// contract; a second violation fails explicitly instead of circling.
+		if len(turn.Toolbelt) == 0 {
+			limit := loop.NarratedToolLimit
+			if limit <= 0 {
+				limit = 2
+			}
+			if count := narratedToolCalls(choice.Message.Content); count >= limit {
+				narrationRecoveries++
+				if loop.OnRecovery != nil {
+					loop.OnRecovery(turn, "narrated_tool_calls_bounded", map[string]interface{}{
+						"count": count, "limit": limit,
+					})
+				}
+				if narrationRecoveries > 1 {
+					return outcome, fmt.Errorf("%w: %s narrated %d unavailable tool calls again after the direct-answer instruction", ErrNoAnswer, turn.Role, count)
+				}
+				conversation = append(conversation, provider.Message{Role: "assistant", Content: choice.Message.Content})
+				conversation = append(conversation, provider.Message{Role: "user", Content: noToolsConclusionInstruction(turn.Contract)})
+				continue
+			}
 		}
 
 		// Never replay malformed native arguments. vLLM validates every prior
@@ -927,7 +966,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 	}
 	if err != nil {
-		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx)
+		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx, adaptiveRepairTimeout(loop.ContractRepairTimeout, slowestCallLatency))
 		outcome.Repairs = attempts
 		if rerr != nil {
 			// Preserve both layers. The original failure explains why repair
@@ -1235,6 +1274,25 @@ func substantiveAnswer(text string) bool {
 	return false
 }
 
+func narratedToolCalls(text string) int {
+	lower := strings.ToLower(text)
+	return strings.Count(lower, "<tool_call") + strings.Count(lower, "```ducklab")
+}
+
+func noToolsConclusionInstruction(contract string) string {
+	return "TOOLS ARE UNAVAILABLE FOR THIS TURN. The previous response narrated tool calls that cannot execute. " +
+		"Do not mention, simulate, or emit another tool call. Answer the original task now.\n\n" +
+		repairInstruction(contract, fmt.Errorf("tool-call narration is not a valid final answer"))
+}
+
+func adaptiveRepairTimeout(configured, observed time.Duration) time.Duration {
+	adaptive := observed + observed/2
+	if adaptive > configured {
+		return adaptive
+	}
+	return configured
+}
+
 // BuildMessages builds the message list for a turn.
 func BuildMessages(turn *Turn, ectx *tools.ExecContext, useNative bool) []provider.Message {
 	var messages []provider.Message
@@ -1362,6 +1420,11 @@ func main() {}
 		system += toolCatalogue(turn, ectx)
 	} else if !useNative {
 		system += toolCatalogue(turn, ectx)
+	} else if len(turn.Toolbelt) == 0 {
+		// Native schemas are the catalogue when tools exist. An empty native
+		// request, however, is visually ambiguous to some reasoning models; say
+		// the absence explicitly so they do not invent an observation phase.
+		system += "\n\nYou have no tools for this turn. Do not narrate or simulate tool calls; answer from the candidate and context you were given."
 	}
 	messages = append(messages, provider.Message{Role: "system", Content: system})
 
@@ -2076,14 +2139,14 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 }
 
 // repairContract attempts to repair a contract violation.
-func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, text string, parseErr error, ectx *tools.ExecContext) (string, interface{}, int, error) {
+func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, text string, parseErr error, ectx *tools.ExecContext, timeout time.Duration) (string, interface{}, int, error) {
 	repairs := loop.RepairAttempts
 	if repairs <= 0 {
 		repairs = 2
 	}
 	if strings.HasPrefix(turn.Contract, "verdict:plan_manifest:") && repairs >= 2 {
 		if baseVerdict, baseErr := parseVerdict(text, false); baseErr == nil {
-			return repairManifestAuditFragments(ctx, loop, turn, msgs, text, baseVerdict, ectx)
+			return repairManifestAuditFragments(ctx, loop, turn, msgs, text, baseVerdict, ectx, timeout)
 		}
 	}
 
@@ -2109,7 +2172,13 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 		}
 		applySampling(&req, loop.Duckling, turn.Contract)
 
-		resp, err := chatContractRepair(ctx, loop, turn, req, attempts)
+		callCtx := ctx
+		cancel := func() {}
+		if timeout > 0 {
+			callCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		resp, err := chatContractRepair(callCtx, loop, turn, req, attempts)
+		cancel()
 		if err != nil {
 			// A transport failure is not the model failing the contract.
 			// Burning a repair attempt on it would spend the budget the
@@ -2205,7 +2274,7 @@ func chatContractRepair(ctx context.Context, loop *Loop, turn *Turn, req provide
 	return resp, nil
 }
 
-func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, original string, verdict *Verdict, ectx *tools.ExecContext) (string, interface{}, int, error) {
+func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, original string, verdict *Verdict, ectx *tools.ExecContext, timeout time.Duration) (string, interface{}, int, error) {
 	specs, tasks, err := manifestAuditIDs(turn.Contract)
 	if err != nil {
 		return "", nil, 0, err
@@ -2270,7 +2339,13 @@ Reply with ONLY this JSON object: {"%s":[%s]}
 				attempts++
 				req := provider.ChatRequest{Model: loop.Duckling.Model, Messages: conv}
 				applySampling(&req, loop.Duckling, turn.Contract)
-				resp, callErr := chatContractRepair(ctx, loop, turn, req, attempts)
+				callCtx := ctx
+				cancel := func() {}
+				if timeout > 0 {
+					callCtx, cancel = context.WithTimeout(ctx, timeout)
+				}
+				resp, callErr := chatContractRepair(callCtx, loop, turn, req, attempts)
+				cancel()
 				if callErr != nil {
 					return "", nil, attempts, fmt.Errorf("manifest audit %s fragment %s: %w", part.kind, strings.Join(group, ","), callErr)
 				}

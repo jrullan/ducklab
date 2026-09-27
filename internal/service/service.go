@@ -257,7 +257,7 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 
 	// Register providers
 	for id, p := range cfg.Providers {
-		prov, err := createProvider(id, p)
+		prov, err := createProvider(id, p, time.Duration(cfg.Defaults.HTTPTimeoutS)*time.Second)
 		if err != nil {
 			return nil, fmt.Errorf("create provider %s: %w", id, err)
 		}
@@ -275,7 +275,7 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 	return s, nil
 }
 
-func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provider, error) {
+func createProvider(id config.ProviderID, cfg config.Provider, requestTimeout time.Duration) (provider.Provider, error) {
 	apiKey, _ := cfg.APIKey() // keyless is OK
 	// Special case: fake provider for testing
 	if cfg.BaseURL == "http://127.0.0.1:1/v1" || cfg.BaseURL == "fake://" {
@@ -466,7 +466,8 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 	switch cfg.Kind {
 	case config.ProviderKindOpenAI:
 		return provider.NewOpenAICompat(string(id), cfg.BaseURL, apiKey,
-			provider.WithHeaders(cfg.Headers)), nil
+			provider.WithHeaders(cfg.Headers),
+			provider.WithRequestTimeout(requestTimeout)), nil
 	case config.ProviderKindAnthropic:
 		return provider.NewAnthropic(string(id), cfg.BaseURL, apiKey), nil
 	default:
@@ -1689,6 +1690,9 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 		d := a.run.Spend[call.Duckling]
 		d.Calls++
 		d.Tokens += callTokens(call.Usage)
+		reasoning, content := callCompletionSplit(call.Usage)
+		d.ReasoningTokens += reasoning
+		d.ContentTokens += content
 		d.CostUSD += call.CostUSD
 		if call.Estimated {
 			d.Estimated = true
@@ -1725,6 +1729,31 @@ func callTokens(usage map[string]interface{}) int64 {
 		return total
 	}
 	return num("prompt_tokens", "input_tokens") + num("completion_tokens", "output_tokens")
+}
+
+func callCompletionSplit(usage map[string]interface{}) (reasoning, content int64) {
+	num := func(values map[string]interface{}, key string) int64 {
+		switch v := values[key].(type) {
+		case float64:
+			return int64(v)
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		}
+		return 0
+	}
+	if split, ok := usage["completion_breakdown"].(map[string]interface{}); ok {
+		return num(split, "reasoning_tokens"), num(split, "content_tokens")
+	}
+	// Older call logs may have the provider's reasoning count but predate the
+	// richer breakdown. The visible share is the completion remainder.
+	reasoning = num(usage, "reasoning_tokens")
+	completion := num(usage, "completion_tokens")
+	if completion > reasoning {
+		content = completion - reasoning
+	}
+	return reasoning, content
 }
 
 // executeRun executes a run in the background.
@@ -4974,7 +5003,8 @@ func (s *Service) publishSpend(rs *runState, tracker *budget.Tracker) {
 	for id, d := range rs.run.Spend {
 		ducklings[id] = map[string]interface{}{
 			"calls": d.Calls, "tokens": d.Tokens, "cost_usd": d.CostUSD,
-			"estimated": d.Estimated,
+			"estimated": d.Estimated, "reasoning_tokens": d.ReasoningTokens,
+			"content_tokens": d.ContentTokens,
 		}
 	}
 	limit := rs.run.Budget.Limit

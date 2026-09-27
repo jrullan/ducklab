@@ -35,8 +35,9 @@ app are clients. This document is the contract between them.
 - CORS: the engine sets `Access-Control-Allow-Origin` to the Wails app origin
   (`wails://…` / `http://wails.localhost`) and nothing else. There is no
   wildcard.
-- Requests time out server-side at `http_timeout_s`; long work never happens
-  inside a request (§3).
+- Non-streaming provider calls made outside a run fall back to
+  `http_timeout_s`. Run deadlines remain authoritative, and contract repair
+  may extend that floor to 1.5 times the seat latency it just observed.
 
 ## 2. Conventions
 

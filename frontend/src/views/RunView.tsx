@@ -633,7 +633,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const spenders = Object.keys(spend)
     .filter((id) => (spend[id]?.calls ?? 0) > 0)
     .sort((a, b) => (spend[b]?.tokens ?? 0) - (spend[a]?.tokens ?? 0));
-  const perDuckling: [string, { calls: number; tokens: number; cost_usd: number } | undefined][] = [
+  const perDuckling: [string, { calls: number; tokens: number; cost_usd: number; estimated?: boolean; reasoning_tokens?: number; content_tokens?: number } | undefined][] = [
     ...spenders,
     ...seatsFromRoster(run.mode, run.roster).filter((id) => id && !spenders.includes(id)),
   ].map((id) => [id, spend[id]]);
@@ -2584,6 +2584,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                         <dd className="shrink-0 tabular-nums text-ink-secondary">
                           {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
                           {d.calls === 1 ? "" : "s"}
+                          {(d.reasoning_tokens ?? 0) > 0 && (d.content_tokens ?? 0) === 0 && (
+                            <span className="ml-1 text-warning" data-testid={`reasoning-ratio-${id}`} title={`${tokens(d.reasoning_tokens ?? 0)} reasoning tokens and no visible-content tokens`}>
+                              · thinking-only
+                            </span>
+                          )}
+                          {(d.content_tokens ?? 0) > 0 && (d.reasoning_tokens ?? 0) >= 50 * (d.content_tokens ?? 0) && (
+                            <span className="ml-1 text-warning" data-testid={`reasoning-ratio-${id}`} title={`${tokens(d.reasoning_tokens ?? 0)} reasoning tokens vs ${tokens(d.content_tokens ?? 0)} visible-content tokens`}>
+                              · {Math.round((d.reasoning_tokens ?? 0) / (d.content_tokens ?? 1))}× thinking/content
+                            </span>
+                          )}
                         </dd>
                       ) : (
                         <dd className="shrink-0 text-ink-muted">

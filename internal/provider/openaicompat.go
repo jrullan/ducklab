@@ -24,6 +24,11 @@ type OpenAICompat struct {
 	// stallTimeout bounds silence WITHIN a streaming call: first byte and
 	// every gap between chunks. Zero means defaultStallTimeout.
 	stallTimeout time.Duration
+	// requestTimeout is the fallback for a non-streaming call made without a
+	// caller deadline. Agent turns carry the run deadline (and contract repair
+	// carries its adaptive deadline), so the transport must not silently replace
+	// either one with a shorter fixed five-minute ceiling.
+	requestTimeout time.Duration
 }
 
 // OpenAICompatOption configures an OpenAICompat provider.
@@ -54,6 +59,12 @@ func WithStallTimeout(d time.Duration) OpenAICompatOption {
 	return func(p *OpenAICompat) { p.stallTimeout = d }
 }
 
+// WithRequestTimeout configures the non-streaming fallback deadline. A caller
+// deadline remains authoritative when present.
+func WithRequestTimeout(d time.Duration) OpenAICompatOption {
+	return func(p *OpenAICompat) { p.requestTimeout = d }
+}
+
 // NewOpenAICompat creates a new OpenAI-compatible provider.
 func NewOpenAICompat(id, baseURL, apiKey string, opts ...OpenAICompatOption) *OpenAICompat {
 	p := &OpenAICompat{
@@ -71,6 +82,7 @@ func NewOpenAICompat(id, baseURL, apiKey string, opts ...OpenAICompatOption) *Op
 			// watchdog, carry their own per-request deadline in Chat.
 			Timeout: 0,
 		},
+		requestTimeout: 300 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -87,10 +99,14 @@ func (p *OpenAICompat) ID() string {
 func (p *OpenAICompat) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	req.Stream = false
 	p.askForBilledCost(&req)
-	// A non-streaming call has no stall watchdog: its deadline lives here,
-	// bounding this one exchange rather than every stream the client makes.
-	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
-	defer cancel()
+	// A non-streaming call has no stall watchdog. Use the configured fallback
+	// only for callers that supplied no deadline. Runs and adaptive contract
+	// repairs already carry the more accurate boundary in their context.
+	if _, ok := ctx.Deadline(); !ok && p.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.requestTimeout)
+		defer cancel()
+	}
 	return p.doChat(ctx, req)
 }
 

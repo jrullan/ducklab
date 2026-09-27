@@ -126,11 +126,13 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 			ID: id, Provider: d.Provider, Model: d.Model,
 			Params: d.Params, Caps: duckling.ProviderCaps(caps), Cost: d.Cost,
 		},
-		Registry:       tools.NewRegistry(),
-		Budget:         tracker,
-		MaxTurns:       s.cfg.Defaults.AgentMaxTurns,
-		RepairAttempts: s.cfg.Defaults.RepairAttempts,
-		RunWriter:      writer,
+		Registry:              tools.NewRegistry(),
+		Budget:                tracker,
+		MaxTurns:              s.cfg.Defaults.AgentMaxTurns,
+		RepairAttempts:        s.cfg.Defaults.RepairAttempts,
+		ContractRepairTimeout: time.Duration(s.cfg.Defaults.HTTPTimeoutS) * time.Second,
+		NarratedToolLimit:     s.cfg.Defaults.NarratedToolLimit,
+		RunWriter:             writer,
 	}
 	return loop, nil
 }

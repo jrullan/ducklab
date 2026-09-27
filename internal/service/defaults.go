@@ -277,6 +277,12 @@ type ModeDefaultsView struct {
 	Rounds map[string]int `json:"rounds"`
 	// AgentMaxTurns caps the model calls a single turn may chain.
 	AgentMaxTurns int `json:"agent_max_turns"`
+	// HTTPTimeoutS is the configured floor for a non-streaming contract repair.
+	// A seat observed taking longer gets 1.5x its slowest call instead.
+	HTTPTimeoutS int `json:"http_timeout_s"`
+	// NarratedToolLimit bounds imaginary in-band tool calls before the engine
+	// asks a no-tools seat once for its final answer.
+	NarratedToolLimit int `json:"narrated_tool_limit"`
 	// SmallSeatPairReserve is pair's contextual implementer default for a
 	// small seat. It is not included in TurnCeilings because explicit role/run
 	// choices and a live lift may cross it.
@@ -357,6 +363,8 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 	out := ModeDefaultsView{
 		Rounds:               map[string]int{},
 		AgentMaxTurns:        s.cfg.Defaults.AgentMaxTurns,
+		HTTPTimeoutS:         s.cfg.Defaults.HTTPTimeoutS,
+		NarratedToolLimit:    s.cfg.Defaults.NarratedToolLimit,
 		SmallSeatPairReserve: effectiveSmallSeatPairReserve(s.cfg.Defaults.SmallSeatPairReserve),
 		ScriptRounds:         ModeRounds,
 		Ducklings:            map[string][]string{},
@@ -418,6 +426,12 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 	if v.AgentMaxTurns <= 0 {
 		return fmt.Errorf("agent_max_turns must be greater than zero; got %d", v.AgentMaxTurns)
+	}
+	if v.HTTPTimeoutS < 0 || v.HTTPTimeoutS > 7200 {
+		return fmt.Errorf("http_timeout_s: 0 keeps the current value; otherwise it must be 1 to 7200; got %d", v.HTTPTimeoutS)
+	}
+	if v.NarratedToolLimit < 0 || v.NarratedToolLimit > 20 {
+		return fmt.Errorf("narrated_tool_limit: 0 keeps the current value; otherwise it must be 1 to 20; got %d", v.NarratedToolLimit)
 	}
 	if v.SmallSeatPairReserve < 0 || v.SmallSeatPairReserve > 200 {
 		return fmt.Errorf("small_seat_pair_reserve: 0 keeps the current value; otherwise it must be 1 to 200; got %d", v.SmallSeatPairReserve)
@@ -535,6 +549,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
+	prevHTTPTimeoutS, prevNarratedToolLimit := s.cfg.Defaults.HTTPTimeoutS, s.cfg.Defaults.NarratedToolLimit
 	prevSmallSeatPairReserve := s.cfg.Defaults.SmallSeatPairReserve
 	prevModeSeats, prevRoleTurns := s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns
 	prevPhaseTurns := s.cfg.Defaults.PhaseTurns
@@ -554,6 +569,12 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 	s.cfg.Defaults.Rounds = rounds
 	s.cfg.Defaults.AgentMaxTurns = v.AgentMaxTurns
+	if v.HTTPTimeoutS > 0 {
+		s.cfg.Defaults.HTTPTimeoutS = v.HTTPTimeoutS
+	}
+	if v.NarratedToolLimit > 0 {
+		s.cfg.Defaults.NarratedToolLimit = v.NarratedToolLimit
+	}
 	// Zero comes only from an older client that does not know this field. Keep
 	// the existing/default value instead of turning a partial Settings save
 	// into an accidental removal of the reserve.
@@ -602,6 +623,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
+		s.cfg.Defaults.HTTPTimeoutS, s.cfg.Defaults.NarratedToolLimit = prevHTTPTimeoutS, prevNarratedToolLimit
 		s.cfg.Defaults.SmallSeatPairReserve = prevSmallSeatPairReserve
 		s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns = prevModeSeats, prevRoleTurns
 		s.cfg.Defaults.PhaseTurns = prevPhaseTurns
