@@ -1242,22 +1242,15 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		})
 	}
 	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
-	if req.Stage == "plan" && strings.TrimSpace(req.Extend) != "" {
-		if approved, loadErr := artifact.Load(projectRoot, artifact.KindPlan); loadErr == nil {
-			blockers, notices := strategy.ProposalStructureFindingsForAmendment(approved, result.Proposed)
-			proposalBlockers = append(proposalBlockers, blockers...)
-			if len(notices) > 0 {
-				rs.run.PendingData["proposal_structure_notices"] = notices
-				rs.writer.AppendEvent("proposal_structure_notices", map[string]interface{}{
-					"notices": notices,
-					"detail":  "inherited structure debt remains visible but does not block this amendment",
-				})
-			}
-		} else {
-			proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
-		}
-	} else {
-		proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	isAmendment := strings.TrimSpace(req.Revise) != "" || strings.TrimSpace(req.Extend) != "" || strings.TrimSpace(req.SplitTask) != ""
+	structureBlockers, structureNotices := proposalStructureGateFindings(projectRoot, result, isAmendment)
+	proposalBlockers = append(proposalBlockers, structureBlockers...)
+	if len(structureNotices) > 0 {
+		rs.run.PendingData["proposal_structure_notices"] = structureNotices
+		rs.writer.AppendEvent("proposal_structure_notices", map[string]interface{}{
+			"notices": structureNotices,
+			"detail":  "inherited structure debt remains visible but does not block this amendment",
+		})
 	}
 	if len(result.CompositionMechanical) > 0 {
 		proposalBlockers = append(proposalBlockers, result.CompositionMechanical...)
@@ -1338,6 +1331,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	})
 	rs.writer.WriteState()
 	rs.wmu.Unlock()
+}
+
+func proposalStructureGateFindings(projectRoot string, result *stage.Result, amendment bool) (blockers, notices []string) {
+	if result == nil || result.Proposed == nil {
+		return nil, nil
+	}
+	if amendment {
+		if approved, err := artifact.Load(projectRoot, result.Kind); err == nil {
+			return strategy.ProposalStructureFindingsForAmendment(approved, result.Proposed)
+		}
+	}
+	return strategy.ProposalStructureFindings(result.Proposed), nil
 }
 
 // stageResultText applies the response contract at the service boundary. A

@@ -15,6 +15,7 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -1014,6 +1015,30 @@ func TestCandidateSyntaxLintDoesNotDescribeZeroAcceptanceSlices(t *testing.T) {
 	message := strings.Join(joined, "\n")
 	if strings.Contains(message, "each of the 0 Acceptance slices") || !strings.Contains(message, "define Acceptance slices first") {
 		t.Fatalf("missing-slices diagnostic is not actionable:\n%s", message)
+	}
+}
+
+func TestSpecAmendmentGateKeepsUntouchedContractDebtAsNotice(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(artifact.DocsDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baseRaw := "---\nkind: spec\ngrammar: 2\nversion: 1\n---\n\n" +
+		"## SPEC-001 — Legacy\n\n**UI Layer:** inherited\n\n" +
+		"## SPEC-002 — Current\n\n**Implements:** REQ-002\nold\n"
+	if err := os.WriteFile(artifact.Path(root, artifact.KindSpec), []byte(baseRaw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := artifact.Parse(strings.Replace(baseRaw, "old\n", "new\n", 1), artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockers, notices := proposalStructureGateFindings(root, &stage.Result{Kind: artifact.KindSpec, Proposed: proposed}, true)
+	if len(blockers) != 0 {
+		t.Fatalf("untouched accepted debt blocked spec amendment: %v", blockers)
+	}
+	if joined := strings.Join(notices, "\n"); !strings.Contains(joined, "UI Layer") {
+		t.Fatalf("inherited debt disappeared instead of becoming a notice: %v", notices)
 	}
 }
 

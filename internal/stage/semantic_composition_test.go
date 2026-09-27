@@ -339,6 +339,56 @@ func TestCompositionReviewSubtractsInheritedGrammarTwoContractDebt(t *testing.T)
 	}
 }
 
+func TestCompositionReviewSubtractsUntouchedSpecContractDebt(t *testing.T) {
+	baseRaw := "---\nkind: spec\nversion: 4\n---\n\n" +
+		"## SPEC-001 — Legacy UI\n\n- **UI Layer:** old label style\n\n" +
+		"## SPEC-002 — Capture\n\n**Implements:** REQ-002\nOld behavior.\n"
+	base, err := artifact.Parse(baseRaw, artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposedRaw := strings.Replace(baseRaw, "Old behavior.", "New behavior.", 1)
+	proposed, err := artifact.Parse(proposedRaw, artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	mechanical, semantic, err := reviewComposition(context.Background(), Params{
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			calls++
+			return `{"verdict":"approve","findings":[]}`, nil
+		},
+	}, artifact.KindSpec, "update capture", base, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || semantic == nil || semantic.Verdict != "approve" {
+		t.Fatalf("inherited spec debt blocked review: calls=%d verdict=%+v mechanical=%v", calls, semantic, mechanical)
+	}
+	if joined := strings.Join(mechanical, "\n"); strings.Contains(joined, "UI Layer") {
+		t.Fatalf("untouched legacy spec field remained a blocker: %v", mechanical)
+	}
+}
+
+func TestCompositionReviewBlocksDebtRetainedInATouchedSpecSection(t *testing.T) {
+	baseRaw := "---\nkind: spec\ngrammar: 2\nversion: 4\n---\n\n## SPEC-001 — UI\n\n**UI Layer:** old\nOld behavior.\n"
+	base, _ := artifact.Parse(baseRaw, artifact.KindSpec)
+	proposed, _ := artifact.Parse(strings.Replace(baseRaw, "Old behavior.", "New behavior.", 1), artifact.KindSpec)
+	calls := 0
+	mechanical, semantic, err := reviewComposition(context.Background(), Params{
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			calls++
+			return `{"verdict":"approve","findings":[]}`, nil
+		},
+	}, artifact.KindSpec, "update UI", base, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || semantic != nil || !strings.Contains(strings.Join(mechanical, "\n"), "UI Layer") {
+		t.Fatalf("touched contract debt was not blocked: calls=%d semantic=%+v mechanical=%v", calls, semantic, mechanical)
+	}
+}
+
 func TestReferenceContractCheckerStillRejectsAnInvalidUnmaterializedBlock(t *testing.T) {
 	contract := capability.ReferenceContract{
 		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",

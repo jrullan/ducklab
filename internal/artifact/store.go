@@ -85,10 +85,25 @@ func WriteProposalProvenance(projectRoot string, kind Kind, doc *Document, runID
 	// A proposal is never pre-approved. Approval is the human's act.
 	doc.Front.ApprovedBy = ""
 
+	rendered := Render(doc)
+	// The proposal pointer remains in the run record after this write. Reparse
+	// the exact bytes we persist so its diagnostics describe the stamped
+	// grammar-2 candidate, not the accepted document's inherited parse state.
+	normalized, err := Parse(rendered, kind)
+	if err != nil {
+		return err
+	}
+	// Keep authored/allocated ids exactly as the stage produced them. Parsing
+	// normalizes milestone width (M-002 -> M-02), which is appropriate when
+	// reading from disk but would mutate the proposal object returned to the
+	// active run. Only diagnostics and Raw need refreshing here.
+	doc.FieldErrors = append([]FieldError(nil), normalized.FieldErrors...)
+	doc.Raw = rendered
+
 	if err := os.MkdirAll(DocsDir(projectRoot), 0o755); err != nil {
 		return err
 	}
-	return xplat.AtomicWrite(ProposedPath(projectRoot, kind), []byte(Render(doc)), 0o644)
+	return xplat.AtomicWrite(ProposedPath(projectRoot, kind), []byte(rendered), 0o644)
 }
 
 func stableNames(names []string) []string {

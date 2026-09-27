@@ -97,7 +97,7 @@ func artifactContractFindings(kind artifact.Kind, base, proposed *artifact.Docum
 		return []string{"artifact contract could not parse the composed candidate: " + err.Error()}
 	}
 	baseline := map[string]bool{}
-	if kind == artifact.KindPlan && base != nil {
+	if base != nil {
 		if baseDiagnostics, baseErr := artifact.ContractLint(artifact.Render(base), kind); baseErr == nil {
 			for _, diagnostic := range baseDiagnostics {
 				baseline[diagnostic.Error()] = true
@@ -110,12 +110,20 @@ func artifactContractFindings(kind artifact.Kind, base, proposed *artifact.Docum
 			continue
 		}
 		finding := diagnostic.Error()
-		if baseline[finding] {
+		if baseline[finding] && (diagnostic.ID == "" || artifactSectionUnchanged(base, proposed, diagnostic.ID)) {
 			continue
 		}
 		findings = append(findings, finding)
 	}
 	return findings
+}
+
+func artifactSectionUnchanged(base, proposed *artifact.Document, id string) bool {
+	if base == nil || proposed == nil {
+		return false
+	}
+	before, after := base.Section(id), proposed.Section(id)
+	return before != nil && after != nil && before.Title == after.Title && before.Body == after.Body
 }
 
 func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, contracts []capability.ReferenceContract) []string {

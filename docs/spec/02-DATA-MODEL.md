@@ -595,6 +595,12 @@ approved_by: human         # or "" while unapproved
 ---
 ```
 
+Machine fields use a colon inside the bold marker: `**Field:** value`.
+Descriptive prose labels such as `- **UI layer**: GTK4` are not fields and do
+not enter syntax lint. During a section-fragment amendment, `**Delete:** yes`
+is the engine control field that removes the named section; the tombstone is
+consumed during composition and is never persisted in the proposal.
+
 ### 5.2 `intent.md`
 
 An engine-maintained, append-only journal of the person's briefs. The Council

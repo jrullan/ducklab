@@ -568,6 +568,19 @@ func TestPlanAmendmentStructureTreatsInheritedDefectsAsNotices(t *testing.T) {
 	}
 }
 
+func TestAmendmentReportsAcceptedLegacyGrammarAsANonBlockingNotice(t *testing.T) {
+	base := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec}}
+	proposed := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec, Grammar: artifact.CurrentGrammar}}
+	blockers, notices := ProposalStructureFindingsForAmendment(base, proposed)
+	if len(blockers) != 0 {
+		t.Fatalf("legacy accepted grammar blocked a current proposal: %v", blockers)
+	}
+	joined := strings.Join(notices, "\n")
+	if !strings.Contains(joined, "accepted spec") || !strings.Contains(joined, "grammar: 2") {
+		t.Fatalf("legacy grammar notice is not actionable: %v", notices)
+	}
+}
+
 func TestManifestRendersDistinctAuthoredProbesWithoutCloningVerification(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{ID: "M-01", Title: "Core", Tasks: []agent.ManifestTask{{
 		ID: "T-001", Title: "Compose", Implements: []string{"SPEC-001"}, WorkUnit: "Compose results",

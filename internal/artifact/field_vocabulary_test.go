@@ -62,6 +62,53 @@ func TestSyntaxLintReportsUnknownBoldFields(t *testing.T) {
 	}
 }
 
+func TestSyntaxLintTreatsBoldBulletLabelsAsProse(t *testing.T) {
+	content := "## SPEC-001 — Capture\n\n- **UI Layer**: GTK4 overlay\n- **Wayland**: portal capture\n\n**Implements:** REQ-001\n"
+	errs, err := SyntaxLint(content, KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("prose labels were parsed as machine fields: %v", errs)
+	}
+	doc, err := Parse(content, KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Section("SPEC-001").Field("ui layer") != "" {
+		t.Fatal("a prose bullet label entered the machine-readable field map")
+	}
+}
+
+func TestDeleteIsAControlFieldForEveryArtifactSectionShape(t *testing.T) {
+	cases := []struct {
+		name, content string
+		kind          Kind
+		id            string
+	}{
+		{"intent", "## INT-001 — Remove\n\n**Delete:** yes\n", KindIntent, "INT-001"},
+		{"requirements", "## REQ-001 — Remove\n\n**Delete:** yes\n", KindRequirements, "REQ-001"},
+		{"spec", "## SPEC-001 — Remove\n\n**Delete:** yes\n", KindSpec, "SPEC-001"},
+		{"plan milestone", "## M-01 — Remove\n\n**Delete:** yes\n", KindPlan, "M-01"},
+		{"plan task", "## M-01 — Core\n\n### T-001 — Remove\n\n**Delete:** yes\n", KindPlan, "T-001"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := Parse(tc.content, tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			section := doc.Section(tc.id)
+			if section == nil || section.Field("delete") != "yes" {
+				t.Fatalf("delete field was not parsed: section=%+v", section)
+			}
+			if len(section.FieldErrors) != 0 {
+				t.Fatalf("delete control produced diagnostics: %v", section.FieldErrors)
+			}
+		})
+	}
+}
+
 func TestSyntaxLintAcceptsPlanBoundaryFields(t *testing.T) {
 	content := "## M-01 — Core\n\n### T-001 — Task\n\n**Out of scope:** no migration\n**Assumption:** storage is available\n"
 	errs, err := SyntaxLint(content, KindPlan)

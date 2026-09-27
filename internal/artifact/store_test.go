@@ -60,6 +60,26 @@ func TestProposalWritesCurrentGrammarWithoutOverloadingRevision(t *testing.T) {
 	}
 }
 
+func TestProposalRefreshesDiagnosticsAfterStampingCurrentGrammar(t *testing.T) {
+	root := emptyProject(t)
+	if err := os.WriteFile(Path(root, KindSpec), []byte("## SPEC-001 — Existing\n\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	draft := doc(Section{ID: "SPEC-001", Title: "Existing", Body: "new"})
+	draft.FieldErrors = []FieldError{{Code: "legacy_grammar"}}
+	if err := WriteProposal(root, KindSpec, draft, "r-normalize", nil); err != nil {
+		t.Fatal(err)
+	}
+	if draft.Front.Grammar != CurrentGrammar {
+		t.Fatalf("in-memory proposal grammar = %d", draft.Front.Grammar)
+	}
+	for _, diagnostic := range draft.FieldErrors {
+		if diagnostic.Code == "legacy_grammar" {
+			t.Fatalf("stamped proposal retained inherited grammar debt: %v", draft.FieldErrors)
+		}
+	}
+}
+
 func TestProposalSeparatesParticipantsFromConfiguredRoster(t *testing.T) {
 	root := emptyProject(t)
 	err := WriteProposalProvenance(root, KindSpec, doc(Section{ID: "SPEC-001", Title: "Audit"}), "r-p",
