@@ -579,6 +579,44 @@ describe("RunView — asking a stage for changes", () => {
     expect(note.placeholder).not.toContain("locking an angle");
     expect(screen.queryByTestId("run-warning")).toBeNull();
     expect(screen.queryByTestId("cycle-accept")).toBeNull();
+    // The consequence line describes the actions on offer, never the
+    // effect of an Accept that the engine did not offer.
+    const consequence = within(card).getByTestId("decision-consequence").textContent ?? "";
+    expect(consequence).toContain("Request changes");
+    expect(consequence).toContain("Discard draft");
+    expect(consequence).not.toContain("replaces the approved");
+    expect(consequence).not.toContain("closes the run");
+  });
+
+  // App reuses one RunView across runs without remounting. A note typed for
+  // run A (or A's prefilled findings) must not ride into run B's request.
+  it("does not carry a typed note or another run's findings across runs", async () => {
+    const dissent = (id: string, issue: string) => ({
+      type: "message", run_id: id,
+      data: { role: "reviewer", verdict: "request-changes", findings: [{ severity: "major", issue }] },
+    });
+    show({ id: "r-1", stage: "spec", project_id: "p", verdict: "FAILED", next: ["request_changes", "reject"] });
+    useRuns.getState().setRun({ ...run, id: "r-2", stage: "plan", verdict: "FAILED", next: ["request_changes", "reject"] });
+    useRuns.setState((state) => ({
+      ...state,
+      events: { ...state.events, "r-1": [dissent("r-1", "spec finding only")], "r-2": [dissent("r-2", "plan finding only")] },
+    }));
+    const sent: { path?: string; body?: string } = {};
+    const { rerender } = render(<RunView runId="r-1" client={recording(sent)} />);
+
+    const first = (await screen.findByTestId("change-note")) as HTMLTextAreaElement;
+    expect(first.value).toContain("spec finding only");
+    fireEvent.change(first, { target: { value: "typed for the spec run" } });
+
+    rerender(<RunView runId="r-2" client={recording(sent)} />);
+    const second = (await screen.findByTestId("change-note")) as HTMLTextAreaElement;
+    await waitFor(() => expect(second.value).toContain("plan finding only"));
+    expect(second.value).not.toContain("typed for the spec run");
+    expect(second.value).not.toContain("spec finding only");
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+    await waitFor(() => expect(sent.body).toContain("plan finding only"));
+    expect(sent.path).toBe("/v1/projects/p/stages/plan");
+    expect(sent.body).not.toContain("typed for the spec run");
   });
 
   it("composes the mechanical-blocker seed and the reviewer's findings in one note", async () => {

@@ -166,5 +166,8 @@ describe("DecisionCard — a document draft the reviewer sent back", () => {
 
   it("formats an empty finding list as an empty note", () => {
     expect(documentDissentNote([])).toBe("");
+    // Every field of the finding contract rides along; invariant included.
+    expect(documentDissentNote([{ severity: "minor", file: "SPEC-003", issue: "x", invariant: "no capture leaves the overlay mapped", fix: "y" }]))
+      .toBe("- [minor] x (SPEC-003) Invariant: no capture leaves the overlay mapped Fix: y");
   });
 });

@@ -866,6 +866,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
     : materializedRebaseConflict
       ? "retries the same acceptance only after the rebase has been completed in the shown worktree; unresolved conflicts remain paused"
+    : documentProposal && !next.includes("accept")
+      // B-435: the reviewer blocked acceptance, so the line must describe
+      // the two actions actually offered, not the effect of one that is not.
+      ? `Request changes sends this ${run.stage} draft back for revision with your note; Discard draft keeps the approved ${run.stage} as it is`
     : documentProposal
       ? `replaces the approved ${run.stage} and closes the run`
       : run.stage === "triage"
@@ -1056,6 +1060,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </div>
       )}
       <DecisionCard
+        // The note editor and its seed belong to one run. App reuses this
+        // view across runs without remounting, so the key scopes the card's
+        // state to the run: navigating from a paused spec to a paused plan
+        // must never carry the first run's text (or its prefilled findings)
+        // into the second run's request. Late seeds within the same run
+        // still compose without touching a human edit (B-430).
+        key={runId}
         next={next}
         title={
           run.pending_kind === "error"

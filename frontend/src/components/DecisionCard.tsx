@@ -76,7 +76,7 @@ export function DecisionCard({
    * the note they are meant to travel in — not in a sibling card pointing at
    * a control that is somewhere else. */
   documentDissent?: {
-    findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[];
+    findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string; invariant?: string }[];
     /** True when the engine withholds Accept while the dissent stands. */
     blocking: boolean;
   } | null;
@@ -362,17 +362,18 @@ export function DecisionCard({
  * of it. Empty when there is nothing to carry. */
 export function composeRequestChangesSeed(
   draft: string | undefined,
-  findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[],
+  findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string; invariant?: string }[],
 ): string {
   return [draft ?? "", documentDissentNote(findings)].filter((part) => part.trim()).join("\n\n");
 }
 
-export function documentDissentNote(findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string }[]): string {
+export function documentDissentNote(findings: { severity?: string; file?: string; line?: number; issue: string; fix?: string; invariant?: string }[]): string {
   return findings
     .map((f) => {
       const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
       const fix = f.fix ? ` Fix: ${f.fix}` : "";
-      return `- ${f.severity ? `[${f.severity}] ` : ""}${f.issue}${where}${fix}`;
+      const invariant = f.invariant ? ` Invariant: ${f.invariant}` : "";
+      return `- ${f.severity ? `[${f.severity}] ` : ""}${f.issue}${where}${invariant}${fix}`;
     })
     .join("\n");
 }
