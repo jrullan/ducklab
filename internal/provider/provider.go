@@ -28,15 +28,47 @@ type ChatRequest struct {
 	// StreamOptions asks the server for usage on a streamed response. Without
 	// it an OpenAI-compatible endpoint sends no usage at all, and a streamed
 	// run records zero tokens — which silently disables every budget.
-	StreamOptions *StreamOptions         `json:"stream_options,omitempty"`
-	JSONMode      bool                   `json:"json_mode,omitempty"`
-	Extra         map[string]interface{} `json:"extra,omitempty"`
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	JSONMode      bool           `json:"json_mode,omitempty"`
+	// Extra holds provider-specific top-level request fields. MarshalJSON
+	// flattens them into the wire object; "extra" is not an OpenAI field.
+	Extra map[string]interface{} `json:"-"`
 	// UsageDetail asks OpenRouter to include the billed cost in usage. Only
 	// sent to OpenRouter: OpenAI proper rejects unknown top-level params.
 	UsageDetail *UsageDetail `json:"usage,omitempty"`
 	// Provider pins one of OpenRouter's concrete upstream endpoints. It stays
 	// absent for every other OpenAI-compatible server.
 	Provider *ProviderPreferences `json:"provider,omitempty"`
+}
+
+// MarshalJSON emits provider-specific extras as real top-level API fields.
+// SDKs often call this option extra_body, but the HTTP API does not accept an
+// object literally named "extra". Refuse collisions so an extension cannot
+// silently replace a canonical request control.
+func (r ChatRequest) MarshalJSON() ([]byte, error) {
+	type requestAlias ChatRequest
+	base, err := json.Marshal(requestAlias(r))
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]interface{}
+	if err := json.Unmarshal(base, &object); err != nil {
+		return nil, err
+	}
+	for key, value := range r.Extra {
+		if _, reserved := chatRequestWireFields[key]; reserved {
+			return nil, fmt.Errorf("provider extra %q collides with a canonical chat request field", key)
+		}
+		object[key] = value
+	}
+	return json.Marshal(object)
+}
+
+var chatRequestWireFields = map[string]struct{}{
+	"model": {}, "messages": {}, "tools": {}, "tool_choice": {},
+	"temperature": {}, "top_p": {}, "max_tokens": {}, "stop": {},
+	"stream": {}, "stream_options": {}, "json_mode": {}, "usage": {},
+	"provider": {},
 }
 
 // ProviderPreferences is the OpenRouter provider-routing object. Only is used
@@ -203,6 +235,10 @@ type Capabilities struct {
 	JSONMode      bool `json:"json_mode"`
 	ContextTokens int  `json:"context_tokens"`
 	Vision        bool `json:"vision"`
+	// ThinkingControl records the result of an endpoint probe. Empty means the
+	// endpoint has not been asked; "disabled" means reasoning.enabled=false was
+	// accepted; "mandatory" means the endpoint explicitly refused it.
+	ThinkingControl string `json:"thinking_control,omitempty"`
 }
 
 // Provider is the interface every model endpoint implements.

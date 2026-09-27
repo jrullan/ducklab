@@ -216,6 +216,8 @@ export interface DucklingCapabilities {
   json_mode?: boolean;
   native_tools?: boolean;
   probed_at?: string;
+  thinking_control?: string;
+  thinking_control_note?: string;
   vision?: boolean;
 }
 

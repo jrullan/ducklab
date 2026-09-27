@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -36,7 +35,13 @@ func TestOpenRouterEndpointPinsOneUpstreamWithoutFallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(wire), `"provider":{"only":["deepinfra/fp4"],"allow_fallbacks":false}`) {
+	var decoded struct {
+		Provider ProviderPreferences `json:"provider"`
+	}
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Provider.Only) != 1 || decoded.Provider.Only[0] != "deepinfra/fp4" || decoded.Provider.AllowFallbacks == nil || *decoded.Provider.AllowFallbacks {
 		t.Fatalf("OpenRouter wire contract = %s", wire)
 	}
 }

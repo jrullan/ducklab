@@ -293,7 +293,18 @@ function DucklingCard({
         </div>
         <div className="flex justify-between">
           <dt>thinking</dt>
-          <dd>{d.params?.disable_thinking ? "suppressed" : "as the model sends it"}</dd>
+          <dd
+            className={d.params?.disable_thinking && d.caps?.thinking_control === "mandatory" ? "text-critical" : undefined}
+            title={d.caps?.thinking_control_note}
+          >
+            {!d.params?.disable_thinking
+              ? "as the model sends it"
+              : d.caps?.thinking_control === "disabled"
+                ? "disabled (verified)"
+                : d.caps?.thinking_control === "mandatory"
+                  ? "mandatory — kept visible"
+                  : "disable requested — unverified"}
+          </dd>
         </div>
       </dl>
       {/* The person's own knowledge about this model — "fabricates gate

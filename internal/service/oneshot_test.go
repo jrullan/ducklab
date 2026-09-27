@@ -34,8 +34,11 @@ func TestOneShotChatAppliesTheDucklingParams(t *testing.T) {
 	if _, err := oneShotChat(context.Background(), p, d, "sys", "user", 2000); err != nil {
 		t.Fatal(err)
 	}
-	if p.got.Extra["chat_template_kwargs"] == nil || p.got.Extra["reasoning"] == nil {
+	if p.got.Extra["chat_template_kwargs"] == nil {
 		t.Errorf("thinking suppression missing from the request: %+v", p.got.Extra)
+	}
+	if p.got.Extra["reasoning"] != nil {
+		t.Errorf("unverified one-shot hid OpenRouter reasoning: %+v", p.got.Extra)
 	}
 	if p.got.Temperature == nil || *p.got.Temperature != 0.2 {
 		t.Errorf("sampling params not applied: %+v", p.got.Temperature)

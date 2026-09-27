@@ -49,4 +49,20 @@ describe("launcher seat resolution", () => {
     expect(chips[1]).toHaveTextContent("Settings");
     expect(chips[2]).toHaveTextContent("picked now");
   });
+
+  it("warns in the run roster when thinking cannot be disabled", () => {
+    render(
+      <SeatChips
+        fleet={[{
+          id: "reasoner",
+          provider: "openrouter",
+          model: "m",
+          params: { disable_thinking: true },
+          caps: { native_tools: false, context_tokens: 1000, thinking_control: "mandatory" },
+        }] as Duckling[]}
+        entries={[{ role: "reviewer", duckling: "reasoner" }]}
+      />,
+    );
+    expect(screen.getByTestId("chip-thinking-mandatory")).toHaveTextContent("thinking");
+  });
 });

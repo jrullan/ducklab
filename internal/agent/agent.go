@@ -422,6 +422,8 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		var calc provider.CostCalculator
 		var cost float64
 		var salvagedReasoningCall *TextToolCall
+		emptyCompletionAttempts := 0
+		reasoningOnlyAttempts := 0
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req, slowestCallLatency)
@@ -532,8 +534,17 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			// stochastic empty reply (a handful of tokens — retrying is the
 			// whole fix). Each gets its own advice, and neither escapes the
 			// record.
-			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 && salvagedReasoningCall == nil &&
-				resp.Usage.CompletionTokens > 0 {
+			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 && salvagedReasoningCall == nil {
+				reasoningOnly := strings.TrimSpace(c.Message.Reasoning) != ""
+				kind := "empty_completion"
+				message := "empty completion: no content, reasoning, or tool calls"
+				if reasoningOnly {
+					kind = "reasoning_only"
+					message = "reasoning-only reply: no content or tool calls"
+					reasoningOnlyAttempts++
+				} else {
+					emptyCompletionAttempts++
+				}
 				if loop.RunWriter != nil {
 					loop.RunWriter.AppendLLM(&LLMCallRecord{
 						Duckling: string(loop.Duckling.ID),
@@ -546,37 +557,47 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 						// just the error cannot be diagnosed (Neocapture, a
 						// 373 s thought-only revision turn, 2026-08-29).
 						Response: map[string]interface{}{
-							"error":           "thought-only reply: no content, no tool calls",
-							"reasoning_chars": len(c.Message.Reasoning),
-							"reasoning_head":  firstChars(c.Message.Reasoning, 2000),
-							"reasoning_tail":  lastChars(c.Message.Reasoning, 1000),
+							"error":            message,
+							"completion_class": kind,
+							"reasoning_chars":  len(c.Message.Reasoning),
+							"reasoning_head":   firstChars(c.Message.Reasoning, 2000),
+							"reasoning_tail":   lastChars(c.Message.Reasoning, 1000),
 						},
 						Usage:        usageMap(resp.Usage, c.Message),
 						LatencyMs:    time.Since(start).Milliseconds(),
 						Attempt:      attempt,
-						FinishReason: "thought_only",
+						FinishReason: kind,
 					})
 				}
 				exhausted := 2000
 				if req.MaxTokens != nil {
 					exhausted = *req.MaxTokens * 9 / 10
 				}
-				if resp.Usage.CompletionTokens >= exhausted {
+				if reasoningOnly && resp.Usage.CompletionTokens >= exhausted {
 					return outcome, fmt.Errorf("%w: %s spent %d tokens on hidden reasoning and returned no answer; "+
 						"raise max_tokens for this duckling, or disable thinking at the endpoint",
 						ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens)
 				}
 				if attempt < thoughtOnlyAttempts {
+					previous := "an empty completion"
+					if reasoningOnly {
+						previous = "reasoning but no visible answer"
+					}
 					req.Messages = append(append([]provider.Message{}, req.Messages...), provider.Message{
 						Role: "user",
-						Content: fmt.Sprintf("Attempt %d had no visible answer or tool call. ", attempt) +
+						Content: fmt.Sprintf("Attempt %d returned %s. ", attempt, previous) +
 							"Put the tool call or final message outside the thinking block.",
 					})
 					continue
 				}
-				return outcome, fmt.Errorf("%w: %s returned an empty answer with only %d hidden reasoning tokens, "+
-					"%d times in a row; the last reasoning began %q. Relaunch the run, or disable thinking for this duckling",
-					ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens, attempt, firstChars(strings.TrimSpace(c.Message.Reasoning), 160))
+				if reasoningOnlyAttempts == 0 {
+					return outcome, fmt.Errorf("%w: %s returned %d empty completions (no content, reasoning, or tool calls); retry the endpoint or use its fallback",
+						ErrEmptyCompletion, loop.Duckling.ID, emptyCompletionAttempts)
+				}
+				return outcome, fmt.Errorf("%w: %s returned %d empty completion(s) and %d reasoning-only completion(s) across %d attempts; "+
+					"the last reasoning began %q",
+					ErrThoughtOnly, loop.Duckling.ID, emptyCompletionAttempts, reasoningOnlyAttempts, attempt,
+					firstChars(strings.TrimSpace(c.Message.Reasoning), 160))
 			}
 			break
 		}
@@ -1842,17 +1863,22 @@ func ApplyThinkingSuppression(req *provider.ChatRequest, caps provider.Capabilit
 }
 
 func applyThinkingSuppression(req *provider.ChatRequest, caps provider.Capabilities) {
+	if caps.ThinkingControl == "mandatory" {
+		// Do not lie by hiding mandatory reasoning. Keeping it on the wire lets
+		// the transcript, guards, and token accounting explain what happened.
+		return
+	}
 	if req.Extra == nil {
 		req.Extra = make(map[string]interface{})
 	}
-	// vLLM and the Qwen family.
-	req.Extra["chat_template_kwargs"] = map[string]interface{}{
-		"enable_thinking": false,
+	if caps.ThinkingControl == "disabled" {
+		// The OpenRouter probe verified this exact control. Never substitute
+		// exclude:true: exclude hides reasoning but does not stop or unbill it.
+		req.Extra["reasoning"] = map[string]interface{}{"enabled": false}
+		return
 	}
-	// OpenRouter.
-	req.Extra["reasoning"] = map[string]interface{}{
-		"exclude": true,
-	}
+	// Local OpenAI-compatible servers (vLLM/llama.cpp Qwen templates).
+	req.Extra["chat_template_kwargs"] = map[string]interface{}{"enable_thinking": false}
 }
 
 var thinkBlockRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -1944,6 +1970,10 @@ var ErrNoAnswer = errors.New("turn ended without an answer")
 // transport fault, when the cause is a token budget consumed before the answer
 // began and the fix is to raise max_tokens or turn thinking off at the server.
 var ErrThoughtOnly = errors.New("model returned only hidden reasoning")
+
+// ErrEmptyCompletion is an endpoint response with neither an answer, thinking,
+// nor a tool call. It is transport/provider behaviour, not hidden reasoning.
+var ErrEmptyCompletion = errors.New("provider returned an empty completion")
 
 // TextToolCall is a parsed text-protocol tool call.
 type TextToolCall struct {
@@ -2693,6 +2723,43 @@ func requestMap(req provider.ChatRequest) map[string]interface{} {
 	}
 	if len(req.Tools) > 0 {
 		out["tools"] = req.Tools
+	}
+	if req.ToolChoice != nil {
+		out["tool_choice"] = req.ToolChoice
+	}
+	if req.Temperature != nil {
+		out["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		out["top_p"] = *req.TopP
+	}
+	if req.MaxTokens != nil {
+		out["max_tokens"] = *req.MaxTokens
+	}
+	if len(req.Stop) > 0 {
+		out["stop"] = req.Stop
+	}
+	if req.Stream {
+		out["stream"] = true
+	}
+	if req.StreamOptions != nil {
+		out["stream_options"] = req.StreamOptions
+	}
+	if req.JSONMode {
+		out["json_mode"] = true
+	}
+	for key, value := range req.Extra {
+		// ChatRequest.MarshalJSON applies the same collision rule, so the log is
+		// the actual top-level wire shape rather than an invented `extra` box.
+		if _, exists := out[key]; !exists {
+			out[key] = value
+		}
+	}
+	if req.UsageDetail != nil {
+		out["usage"] = req.UsageDetail
+	}
+	if req.Provider != nil {
+		out["provider"] = req.Provider
 	}
 	return out
 }

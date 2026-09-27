@@ -360,7 +360,15 @@ export interface Duckling {
    * the fleet order decide. A slot number and never a hex, so the palette keeps
    * its light and dark variants. */
   color?: number;
-  caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number; vision?: boolean };
+  caps?: {
+    native_tools: boolean;
+    json_mode?: boolean;
+    context_tokens: number;
+    vision?: boolean;
+    /** Observed endpoint answer to reasoning.enabled=false. */
+    thinking_control?: "disabled" | "mandatory" | "unknown";
+    thinking_control_note?: string;
+  };
   cost?: { input_per_mtok: number; output_per_mtok: number };
   /** The declared stand-in for provider weather, or `auto` to select from
    * the Flock criteria at reseat time. */

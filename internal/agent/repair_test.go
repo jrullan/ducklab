@@ -20,11 +20,12 @@ import (
 
 // countingProvider records every request and replies with a scripted sequence.
 type countingProvider struct {
-	mu       sync.Mutex
-	requests []provider.ChatRequest
-	replies  []string
-	fallback string
-	err      error
+	mu        sync.Mutex
+	requests  []provider.ChatRequest
+	replies   []string
+	reasoning []string
+	fallback  string
+	err       error
 }
 
 func (p *countingProvider) ID() string { return "counting" }
@@ -41,9 +42,13 @@ func (p *countingProvider) Chat(ctx context.Context, req provider.ChatRequest) (
 	if n < len(p.replies) {
 		text = p.replies[n]
 	}
+	reasoning := ""
+	if n < len(p.reasoning) {
+		reasoning = p.reasoning[n]
+	}
 	return provider.ChatResponse{
 		Choices: []provider.Choice{{
-			Message:      provider.Message{Role: "assistant", Content: text},
+			Message:      provider.Message{Role: "assistant", Content: text, Reasoning: reasoning},
 			FinishReason: provider.FinishStop,
 		}},
 		Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 5},
@@ -436,8 +441,31 @@ func TestThinkingSuppressionDoesNotTruncateTheAnswer(t *testing.T) {
 			t.Errorf("a think marker is used as a stop sequence (%q); it truncates the answer", s)
 		}
 	}
-	if req.Extra["chat_template_kwargs"] == nil || req.Extra["reasoning"] == nil {
-		t.Error("suppression no longer asks the provider to skip reasoning")
+	if req.Extra["chat_template_kwargs"] == nil {
+		t.Error("local suppression no longer asks the template to skip reasoning")
+	}
+	if req.Extra["reasoning"] != nil {
+		t.Error("unprobed suppression must not hide OpenRouter reasoning with exclude:true")
+	}
+}
+
+func TestThinkingSuppressionUsesVerifiedOpenRouterControl(t *testing.T) {
+	req := provider.ChatRequest{}
+	applyThinkingSuppression(&req, provider.Capabilities{ThinkingControl: "disabled"})
+	reasoning, _ := req.Extra["reasoning"].(map[string]interface{})
+	if enabled, ok := reasoning["enabled"].(bool); !ok || enabled {
+		t.Fatalf("reasoning control = %#v, want enabled:false", reasoning)
+	}
+	if _, exists := reasoning["exclude"]; exists {
+		t.Fatal("exclude hides billed reasoning instead of disabling it")
+	}
+}
+
+func TestMandatoryThinkingStaysVisible(t *testing.T) {
+	req := provider.ChatRequest{}
+	applyThinkingSuppression(&req, provider.Capabilities{ThinkingControl: "mandatory"})
+	if len(req.Extra) != 0 {
+		t.Fatalf("mandatory endpoint received dishonest suppression: %#v", req.Extra)
 	}
 }
 
@@ -460,7 +488,7 @@ func TestStripThinkingRemovesTheBlockNotTheAnswer(t *testing.T) {
 // place, because one bad sample among fifty good calls used to kill the whole
 // run — and only when it persists does the run fail, blaming the endpoint
 // rather than max_tokens, which was never the problem at 72 tokens.
-func TestThoughtOnlyResponseIsRetriedThenDiagnosed(t *testing.T) {
+func TestEmptyResponseIsRetriedThenDiagnosed(t *testing.T) {
 	p := &countingProvider{fallback: ""}
 	p.replies = []string{""}
 	loop := testLoop(p, 2)
@@ -470,10 +498,10 @@ func TestThoughtOnlyResponseIsRetriedThenDiagnosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a failure")
 	}
-	if !errors.Is(err, ErrThoughtOnly) {
-		t.Fatalf("err = %v; want it identified as a thought-only response", err)
+	if !errors.Is(err, ErrEmptyCompletion) {
+		t.Fatalf("err = %v; want it identified as an empty completion", err)
 	}
-	for _, want := range []string{"hidden reasoning", "times in a row", "disable thinking"} {
+	for _, want := range []string{"3 empty completions", "no content, reasoning, or tool calls"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not say what happened (%q): %v", want, err)
 		}
@@ -484,6 +512,25 @@ func TestThoughtOnlyResponseIsRetriedThenDiagnosed(t *testing.T) {
 	p.mu.Unlock()
 	if calls != 3 {
 		t.Errorf("the model was called %d times, want 3 — one glitch must not be terminal", calls)
+	}
+}
+
+func TestMixedEmptyAndReasoningOnlyAttemptsReportActualCounts(t *testing.T) {
+	p := &countingProvider{
+		replies:   []string{"", "", ""},
+		reasoning: []string{"", "", "considering the answer"},
+	}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 2}
+
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if !errors.Is(err, ErrThoughtOnly) {
+		t.Fatalf("err = %v; want mixed attempt diagnosis", err)
+	}
+	for _, want := range []string{"2 empty completion(s)", "1 reasoning-only completion(s)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
 	}
 }
 

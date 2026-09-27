@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -39,11 +40,13 @@ type Duckling struct {
 
 // Capabilities describes what a duckling can do.
 type Capabilities struct {
-	NativeTools   bool   `json:"native_tools"`
-	JSONMode      bool   `json:"json_mode"`
-	ContextTokens int    `json:"context_tokens"`
-	Vision        bool   `json:"vision"`
-	ProbedAt      string `json:"probed_at,omitempty"` // RFC3339; empty means never probed
+	NativeTools         bool   `json:"native_tools"`
+	JSONMode            bool   `json:"json_mode"`
+	ContextTokens       int    `json:"context_tokens"`
+	Vision              bool   `json:"vision"`
+	ThinkingControl     string `json:"thinking_control,omitempty"`
+	ThinkingControlNote string `json:"thinking_control_note,omitempty"`
+	ProbedAt            string `json:"probed_at,omitempty"` // RFC3339; empty means never probed
 }
 
 // HealthStatus is the health of a duckling.
@@ -142,7 +145,11 @@ func (r *Registry) Get(id config.DucklingID) (*Duckling, error) {
 func (r *Registry) List() []*Duckling {
 	result := make([]*Duckling, 0, len(r.ducklings))
 	for _, d := range r.ducklings {
-		result = append(result, d)
+		copy := *d
+		if cached, ok := r.CachedCaps(d.ID); ok {
+			copy.Caps = *cached
+		}
+		result = append(result, &copy)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
@@ -220,7 +227,7 @@ func (r *Registry) VerifyVision(ctx context.Context, id config.DucklingID) (bool
 	}
 	caps := d.Caps
 	caps.Vision = vision
-	_ = r.caps.Put(d.Provider, d.Model, &caps)
+	_ = r.caps.Put(d.Provider, capabilityCacheModel(d), &caps)
 	return vision, nil
 }
 
@@ -230,7 +237,7 @@ func (r *Registry) CachedCaps(id config.DucklingID) (*Capabilities, bool) {
 	if err != nil || r.caps == nil {
 		return nil, false
 	}
-	return r.caps.Get(d.Provider, d.Model)
+	return r.caps.Get(d.Provider, capabilityCacheModel(d))
 }
 
 func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) (*Capabilities, error) {
@@ -242,7 +249,7 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		r.caps = LoadCapsCache()
 	}
 	if !force {
-		if cached, ok := r.caps.Get(d.Provider, d.Model); ok {
+		if cached, ok := r.caps.Get(d.Provider, capabilityCacheModel(d)); ok {
 			return cached, nil
 		}
 	}
@@ -255,6 +262,34 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		NativeTools:   false,
 		JSONMode:      false,
 		ContextTokens: 32768,
+	}
+
+	// OpenRouter has two materially different answers to "disable thinking":
+	// some endpoints accept reasoning.enabled=false, while mandatory-reasoning
+	// endpoints reject it. `exclude:true` is not suppression — it only hides the
+	// paid reasoning from Ducklab — so probe the actual control and preserve the
+	// endpoint's answer for the card, roster, and agent loop.
+	if d.Params.DisableThinking && isOpenRouterDuckling(d) {
+		thinkingReq := provider.ChatRequest{
+			Model:     d.Model,
+			Messages:  []provider.Message{{Role: "user", Content: "Reply with ok."}},
+			MaxTokens: intPtr(4),
+			Extra: map[string]interface{}{
+				"reasoning": map[string]interface{}{"enabled": false},
+			},
+		}
+		_, thinkingErr := p.Chat(ctx, thinkingReq)
+		switch {
+		case thinkingErr == nil:
+			caps.ThinkingControl = "disabled"
+			caps.ThinkingControlNote = "endpoint accepted reasoning.enabled=false"
+		case strings.Contains(strings.ToLower(thinkingErr.Error()), "reasoning is mandatory"):
+			caps.ThinkingControl = "mandatory"
+			caps.ThinkingControlNote = "endpoint requires reasoning; Ducklab will keep it visible"
+		default:
+			caps.ThinkingControl = "unknown"
+			caps.ThinkingControlNote = "thinking control probe failed: " + thinkingErr.Error()
+		}
 	}
 
 	// Check if the model supports native tool calling
@@ -332,7 +367,7 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 	// Cache the result so the next run does not pay for these calls again.
 	// A cache write failure must not fail the probe: the answer is correct,
 	// it just will not be remembered.
-	_ = r.caps.Put(d.Provider, d.Model, caps)
+	_ = r.caps.Put(d.Provider, capabilityCacheModel(d), caps)
 	caps.ProbedAt = time.Now().UTC().Format(time.RFC3339)
 
 	return caps, nil
@@ -465,9 +500,27 @@ func ProviderCaps(c *Capabilities) provider.Capabilities {
 		return provider.Capabilities{ContextTokens: 32768}
 	}
 	return provider.Capabilities{
-		NativeTools:   c.NativeTools,
-		JSONMode:      c.JSONMode,
-		ContextTokens: c.ContextTokens,
-		Vision:        c.Vision,
+		NativeTools:     c.NativeTools,
+		JSONMode:        c.JSONMode,
+		ContextTokens:   c.ContextTokens,
+		Vision:          c.Vision,
+		ThinkingControl: c.ThinkingControl,
 	}
+}
+
+func isOpenRouterDuckling(d *Duckling) bool {
+	return d != nil && (d.OpenRouterProvider != "" || strings.Contains(strings.ToLower(string(d.Provider)), "openrouter"))
+}
+
+// OpenRouter capabilities belong to a concrete upstream, not merely to the
+// public model slug. Two ducklings can select endpoints with different
+// mandatory-reasoning policies, prices, and quantizations.
+func capabilityCacheModel(d *Duckling) string {
+	if d == nil || d.OpenRouterProvider == "" {
+		if d == nil {
+			return ""
+		}
+		return d.Model
+	}
+	return d.Model + "@" + d.OpenRouterProvider
 }
