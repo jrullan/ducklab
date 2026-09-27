@@ -2748,8 +2748,12 @@ func requestMap(req provider.ChatRequest) map[string]interface{} {
 	if req.JSONMode {
 		out["json_mode"] = true
 	}
-	if len(req.Extra) > 0 {
-		out["extra"] = req.Extra
+	for key, value := range req.Extra {
+		// ChatRequest.MarshalJSON applies the same collision rule, so the log is
+		// the actual top-level wire shape rather than an invented `extra` box.
+		if _, exists := out[key]; !exists {
+			out[key] = value
+		}
 	}
 	if req.UsageDetail != nil {
 		out["usage"] = req.UsageDetail

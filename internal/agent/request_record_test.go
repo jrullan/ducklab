@@ -28,12 +28,12 @@ func TestRequestMapRecordsEveryWireControl(t *testing.T) {
 	}
 
 	got := requestMap(req)
-	for _, key := range []string{"model", "messages", "tools", "tool_choice", "temperature", "top_p", "max_tokens", "stop", "stream", "stream_options", "json_mode", "extra", "usage", "provider"} {
+	for _, key := range []string{"model", "messages", "tools", "tool_choice", "temperature", "top_p", "max_tokens", "stop", "stream", "stream_options", "json_mode", "reasoning", "usage", "provider"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("request record omitted %q: %#v", key, got)
 		}
 	}
-	if !reflect.DeepEqual(got["extra"], req.Extra) {
-		t.Errorf("extra = %#v, want %#v", got["extra"], req.Extra)
+	if !reflect.DeepEqual(got["reasoning"], req.Extra["reasoning"]) {
+		t.Errorf("reasoning = %#v, want %#v", got["reasoning"], req.Extra["reasoning"])
 	}
 }
