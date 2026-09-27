@@ -539,6 +539,14 @@ type RunApp struct {
 	// Command starts the application, run through the platform shell from the
 	// project root. The engine manages the process: start, stop, logs.
 	Command string `toml:"command" json:"command"`
+	// Smoke is the bounded command the verification gate executes after a
+	// green build. It may be a headless or otherwise test-safe entry point for
+	// products whose normal Command opens an interactive UI. When absent, the
+	// gate falls back to Command for backwards compatibility.
+	Smoke string `toml:"smoke" json:"smoke"`
+	// SmokeTimeoutS is the observation window for a long-lived smoke command.
+	// Zero selects the engine default.
+	SmokeTimeoutS int `toml:"smoke_timeout_s" json:"smoke_timeout_s"`
 	// URL is where a person opens the running app.
 	URL string `toml:"url" json:"url"`
 	// Health is a URL the engine probes to report whether the running app is
@@ -893,6 +901,9 @@ func (p *Project) Validate(path string) error {
 	}
 	if p.Render.TimeoutS < 0 {
 		return &Error{File: path, Key: "render.timeout_s", Msg: "must be zero (default) or positive"}
+	}
+	if p.Run.SmokeTimeoutS < 0 {
+		return &Error{File: path, Key: "run.smoke_timeout_s", Msg: "must be zero (default) or positive"}
 	}
 	if p.Lanes.Enforce != "write" && p.Lanes.Enforce != "accept" {
 		return &Error{File: path, Key: "lanes.enforce", Msg: "must be write | accept"}

@@ -98,6 +98,14 @@ func TestDefaultProject(t *testing.T) {
 	}
 }
 
+func TestProjectRejectsNegativeSmokeTimeout(t *testing.T) {
+	p := DefaultProject("demo", "Demo")
+	p.Run.SmokeTimeoutS = -1
+	if err := p.Validate("project.toml"); err == nil || !strings.Contains(err.Error(), "run.smoke_timeout_s") {
+		t.Fatalf("negative smoke timeout error = %v", err)
+	}
+}
+
 func TestLoadGlobal(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")

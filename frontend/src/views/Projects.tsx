@@ -332,10 +332,11 @@ export function Projects({
                 <div className="mt-2 space-y-1 border-t border-hairline pt-2">
                   <AppChip
                     status={apps[p.id]}
-                    onSet={async (command, url, health, preflight, requires) => {
+                    onSet={async (command, smoke, smokeTimeoutS, url, health, preflight, requires) => {
                       try {
                         await client.projectUpdate(p.id, {
                           "run.command": command, "run.url": url, "run.health": health,
+                          "run.smoke": smoke, "run.smoke_timeout_s": smokeTimeoutS,
                           "run.preflight": preflight, "run.requires": requires,
                         });
                         const a = await client.appStatus(p.id);
@@ -384,10 +385,12 @@ function AppChip({
   onSet,
 }: {
   status?: AppStatus;
-  onSet: (command: string, url: string, health: string, preflight: string, requires: string) => Promise<void>;
+  onSet: (command: string, smoke: string, smokeTimeoutS: string, url: string, health: string, preflight: string, requires: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [command, setCommand] = useState("");
+  const [smoke, setSmoke] = useState("");
+  const [smokeTimeoutS, setSmokeTimeoutS] = useState("");
   const [url, setUrl] = useState("");
   const [health, setHealth] = useState("");
   const [preflight, setPreflight] = useState("");
@@ -415,6 +418,8 @@ function AppChip({
   const editor = editing && (
     <div className="mt-1 w-full max-w-xl space-y-1" data-testid="app-editor">
       {field("command", command, setCommand, "python app.py — starts the app", "app-command")}
+      {field("smoke", smoke, setSmoke, "python app.py --headless — gate command (optional)", "app-smoke")}
+      {field("smoke wait", smokeTimeoutS, setSmokeTimeoutS, "3 — seconds before a live process passes", "app-smoke-timeout")}
       {field("url", url, setUrl, "http://localhost:8000", "app-url")}
       {field("health", health, setHealth, "http://localhost:8000/health (optional)", "app-health")}
       {field("preflight", preflight, setPreflight, "pg_isready -p 5432 — checked before every launch (optional)", "app-preflight")}
@@ -422,8 +427,8 @@ function AppChip({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={command.trim() === ""}
-          onClick={() => void onSet(command.trim(), url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
+          disabled={command.trim() === "" && smoke.trim() === ""}
+          onClick={() => void onSet(command.trim(), smoke.trim(), smokeTimeoutS.trim() || "0", url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
           data-testid="app-save"
           className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
         >
@@ -451,6 +456,8 @@ function AppChip({
             type="button"
             onClick={() => {
               setCommand(status.command ?? "");
+              setSmoke(status.smoke ?? "");
+              setSmokeTimeoutS(String(status.smoke_timeout_s ?? 3));
               setUrl(status.url ?? "");
               setHealth("");
               setPreflight(status.preflight ?? "");
@@ -464,7 +471,39 @@ function AppChip({
           </button>
         )}
       </div>
+      {status.smoke_command && (
+        <div className="ml-12 mt-1 flex min-w-0 items-center gap-1 text-xs text-ink-muted" data-testid="app-smoke-effective">
+          <span className="shrink-0">gate smoke ({status.smoke_source === "run.smoke" ? "run.smoke" : "run.command fallback"}, {status.smoke_timeout_s ?? 3}s):</span>
+          <ShellCmd cmd={status.smoke_command} className="min-w-0 truncate font-mono text-ink-secondary" />
+        </div>
+      )}
       {editor}
+      {!status.configured && !editing && (status.suggestions?.length ?? 0) > 0 && (
+        <div className="ml-12 mt-1 space-y-1" data-testid="app-suggestions">
+          <div className="text-xs text-ink-muted">Detected from the build system:</div>
+          {status.suggestions!.map((suggestion) => (
+            <button
+              type="button"
+              key={`${suggestion.capability}:${suggestion.command}`}
+              title={suggestion.evidence}
+              onClick={() => {
+                setCommand(suggestion.command);
+                setSmoke("");
+                setSmokeTimeoutS("3");
+                setUrl("");
+                setHealth("");
+                setPreflight("");
+                setRequires("");
+                setEditing(true);
+              }}
+              className="block text-left font-mono text-xs text-ink underline"
+              data-testid="app-use-suggestion"
+            >
+              use {suggestion.command} <span className="font-sans text-ink-muted">· {suggestion.capability}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -620,6 +620,12 @@
           "requires": {
             "type": "string"
           },
+          "smoke": {
+            "type": "string"
+          },
+          "smoke_timeout_s": {
+            "type": "integer"
+          },
           "url": {
             "type": "string"
           }
@@ -629,6 +635,8 @@
           "health",
           "preflight",
           "requires",
+          "smoke",
+          "smoke_timeout_s",
           "url"
         ],
         "type": "object"
@@ -2207,8 +2215,26 @@
           "running": {
             "type": "boolean"
           },
+          "smoke": {
+            "type": "string"
+          },
+          "smoke_command": {
+            "type": "string"
+          },
+          "smoke_source": {
+            "type": "string"
+          },
+          "smoke_timeout_s": {
+            "type": "integer"
+          },
           "started_at": {
             "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAppSuggestion"
+            },
+            "type": "array"
           },
           "url": {
             "type": "string"
@@ -2216,7 +2242,27 @@
         },
         "required": [
           "configured",
-          "running"
+          "running",
+          "smoke_timeout_s"
+        ],
+        "type": "object"
+      },
+      "ServiceAppSuggestion": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "command",
+          "evidence"
         ],
         "type": "object"
       },

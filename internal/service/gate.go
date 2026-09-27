@@ -175,10 +175,22 @@ func (s *Service) GateRun(ctx context.Context, projectID string) (*GateResult, e
 	if err != nil {
 		return nil, err
 	}
-	return &GateResult{
+	result := &GateResult{
 		Gate: string(res.Gate), Command: res.Command,
 		ExitCode: res.ExitCode, Output: res.Output, Duration: res.Duration,
 		// A gate that could not run is not green, whatever its exit code says.
 		Green: res.ExitCode == 0 && res.Gate != verify.GateNone,
-	}, nil
+	}
+	smokeCommand, smokeSource, smokeTimeoutS := productSmokeConfig(projCfg.Run)
+	if result.Green && smokeCommand != "" {
+		note, smokeErr := smokeRunCommand(ctx, entry.Path, smokeCommand, smokeSource, smokeTimeoutS, "gate-run", projectID)
+		if smokeErr != nil {
+			result.Green = false
+			result.ExitCode = 1
+			result.Output = "blocking product smoke: " + smokeErr.Error() + "\n\nprior successful verification evidence:\n" + result.Output
+		} else {
+			result.Output += "\nproduct smoke: " + note
+		}
+	}
+	return result, nil
 }

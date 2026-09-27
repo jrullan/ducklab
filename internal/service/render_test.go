@@ -148,3 +148,41 @@ func TestCaptureRenderReportsSmokeCrashBeforeTimeout(t *testing.T) {
 		t.Fatalf("early crash error = %v", err)
 	}
 }
+
+func TestConfiguredRunCommandIsAnExecutableProductSmoke(t *testing.T) {
+	root := t.TempDir()
+	writer, err := runlog.NewWriter(root, &runlog.Run{ID: "product-smoke", ProjectID: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+
+	note, err := smokeRunCommand(context.Background(), root, "printf 'started product\\n'", "run.smoke", 8, "product-smoke", "demo")
+	if err != nil || note != "run.smoke exited successfully" {
+		t.Fatalf("successful product smoke = %q, %v", note, err)
+	}
+	if _, err := smokeRunCommand(context.Background(), root, "printf 'startup failed\\n' >&2; exit 9", "run.smoke", 8, "product-smoke", "demo"); err == nil || !strings.Contains(err.Error(), "run.smoke: startup failed") {
+		t.Fatalf("crashing product smoke = %v", err)
+	}
+}
+
+func TestProductSmokeConfigPrefersExplicitSmokeAndDefaultsTheWindow(t *testing.T) {
+	command, source, timeoutS := productSmokeConfig(config.RunApp{Command: "./ui", Smoke: "./ui --headless"})
+	if command != "./ui --headless" || source != "run.smoke" || timeoutS != 3 {
+		t.Fatalf("explicit smoke = %q, %q, %d", command, source, timeoutS)
+	}
+	command, source, timeoutS = productSmokeConfig(config.RunApp{Command: "./ui", SmokeTimeoutS: 9})
+	if command != "./ui" || source != "run.command" || timeoutS != 9 {
+		t.Fatalf("command fallback = %q, %q, %d", command, source, timeoutS)
+	}
+}
+
+func TestProductSmokeNoteUsesTheConfiguredObservationWindow(t *testing.T) {
+	note, err := smokeRunCommand(context.Background(), t.TempDir(), "printf 'warming up\\n'; sleep 30", "run.smoke", 1, "product-smoke", "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(note, "run.smoke stayed alive for 1s") || !strings.Contains(note, "warming up") {
+		t.Fatalf("configured smoke note = %q", note)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/vcs"
 	"github.com/jrullan/ducklab/internal/verify"
@@ -40,10 +41,16 @@ type appState struct {
 type AppStatus struct {
 	Configured bool   `json:"configured"`
 	Command    string `json:"command,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Running    bool   `json:"running"`
-	PID        int    `json:"pid,omitempty"`
-	StartedAt  string `json:"started_at,omitempty"`
+	Smoke      string `json:"smoke,omitempty"`
+	// SmokeCommand and SmokeSource state exactly what the gate will execute;
+	// the former may be Command when the explicit Smoke field is absent.
+	SmokeCommand  string `json:"smoke_command,omitempty"`
+	SmokeSource   string `json:"smoke_source,omitempty"`
+	SmokeTimeoutS int    `json:"smoke_timeout_s"`
+	URL           string `json:"url,omitempty"`
+	Running       bool   `json:"running"`
+	PID           int    `json:"pid,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
 	// Health is "healthy", "unhealthy", or empty when no health URL is
 	// configured or the app is not running. A process alive and a service
 	// answering are different claims, and only the second one is the app.
@@ -62,6 +69,16 @@ type AppStatus struct {
 	// configured, so the UI never implies freshness it did not establish.
 	BuiltSHA string `json:"built_sha,omitempty"`
 	BuiltAt  string `json:"built_at,omitempty"`
+	// Suggestions are inferred by stack providers from authoritative build
+	// metadata. They are proposals only; choosing run.command remains a human
+	// configuration decision.
+	Suggestions []AppSuggestion `json:"suggestions,omitempty"`
+}
+
+type AppSuggestion struct {
+	Command    string `json:"command"`
+	Capability string `json:"capability"`
+	Evidence   string `json:"evidence"`
 }
 
 // AppStart launches the project's configured run.command as a managed
@@ -205,18 +222,40 @@ func (s *Service) AppStatus(ctx context.Context, projectID string) (*AppStatus, 
 		return nil, err
 	}
 	s.appMu.Lock()
-	defer s.appMu.Unlock()
-	return s.appStatusLocked(projectID, cfg), nil
+	out := s.appStatusLocked(projectID, cfg)
+	s.appMu.Unlock()
+	if !out.Configured {
+		candidates, _ := capability.DefaultRegistry().ResolveRunCommands(
+			capability.Context{ProjectRoot: entry.Path, Policies: cfg.Capabilities.Policy},
+			cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled,
+		)
+		seen := map[string]bool{}
+		for _, candidate := range candidates {
+			if candidate.Command == "" || seen[candidate.Command] {
+				continue
+			}
+			seen[candidate.Command] = true
+			out.Suggestions = append(out.Suggestions, AppSuggestion{
+				Command: candidate.Command, Capability: candidate.Capability, Evidence: candidate.Evidence,
+			})
+		}
+	}
+	return out, nil
 }
 
 // appStatusLocked assembles the status. Callers hold appMu.
 func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppStatus {
+	smokeCommand, smokeSource, smokeTimeoutS := productSmokeConfig(cfg.Run)
 	out := &AppStatus{
-		Configured: cfg.Run.Command != "",
-		Command:    cfg.Run.Command,
-		URL:        cfg.Run.URL,
-		Preflight:  cfg.Run.Preflight,
-		Requires:   cfg.Run.Requires,
+		Configured:    cfg.Run.Command != "",
+		Command:       cfg.Run.Command,
+		Smoke:         cfg.Run.Smoke,
+		SmokeCommand:  smokeCommand,
+		SmokeSource:   smokeSource,
+		SmokeTimeoutS: smokeTimeoutS,
+		URL:           cfg.Run.URL,
+		Preflight:     cfg.Run.Preflight,
+		Requires:      cfg.Run.Requires,
 	}
 	st := s.apps[projectID]
 	if st == nil {
