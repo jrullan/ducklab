@@ -178,12 +178,12 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 		return nil, err
 	}
 	if next == bug.Fixed && rec.Proposal != "" {
-		all, err := bugProposalTasksAccepted(db, rec.ID)
+		all, pending, err := bugProposalTasksAccepted(db, rec.ID, rec.TaskID)
 		if err != nil {
 			return nil, err
 		}
 		if !all {
-			return nil, fmt.Errorf("bug %s cannot become fixed until every proposed task is accepted", rec.ID)
+			return nil, fmt.Errorf("bug %s cannot become fixed until proposed task(s) %s are accepted", rec.ID, strings.Join(pending, ", "))
 		}
 	}
 	from := rec.Status
@@ -1243,14 +1243,14 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		return "", err
 	}
 	for _, rec := range recs {
-		if rec.TaskID != taskID && !bugProposalContainsTask(db, rec.ID, taskID) {
+		if rec.TaskID != taskID && !bugActiveProposalContainsTask(db, rec.ID, rec.TaskID, taskID) {
 			continue
 		}
 		if rec.Proposal != "" {
 			if err := db.SetTaskStatus(taskID, "accepted"); err != nil {
 				return "", err
 			}
-			all, err := bugProposalTasksAccepted(db, rec.ID)
+			all, _, err := bugProposalTasksAccepted(db, rec.ID, rec.TaskID)
 			if err != nil {
 				return "", err
 			}
@@ -1292,44 +1292,71 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 	return "", nil
 }
 
-func bugProposalContainsTask(db *store.DB, bugID, taskID string) bool {
+func bugActiveProposalContainsTask(db *store.DB, bugID, activeFirstTask, taskID string) bool {
+	if activeFirstTask == "" {
+		return false
+	}
 	traces, err := db.TracesFrom("bug", bugID)
 	if err != nil {
 		return false
 	}
+	active := false
 	for _, trace := range traces {
-		if trace == "task:"+taskID {
+		if trace == "task:"+activeFirstTask {
+			active = true
+		}
+		if active && trace == "task:"+taskID {
 			return true
 		}
 	}
 	return false
 }
 
-func bugProposalTasksAccepted(db *store.DB, bugID string) (bool, error) {
+func bugProposalTasksAccepted(db *store.DB, bugID, activeFirstTask string) (bool, []string, error) {
+	// Trace edges are permanent provenance, while TaskID names the first task
+	// in the current promotion. A reopened bug keeps its old edges so history
+	// remains navigable, but those consumed (or abandoned) tasks must not enter
+	// the fixed gate of the new attempt. Promotions allocate monotonically
+	// increasing IDs and add each split portion in order, so the current
+	// generation begins at activeFirstTask in the bug's ordered trace list.
+	if activeFirstTask == "" {
+		return true, nil, nil
+	}
 	traces, err := db.TracesFrom("bug", bugID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	tasks := 0
+	active := false
+	var pending []string
 	for _, trace := range traces {
 		id, ok := strings.CutPrefix(trace, "task:")
 		if !ok {
 			continue
 		}
+		if id == activeFirstTask {
+			active = true
+		}
+		if !active {
+			continue
+		}
 		task, err := db.GetTask(id)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		tasks++
 		if task.Status != "accepted" {
-			return false, nil
+			pending = append(pending, fmt.Sprintf("%s (%s)", id, task.Status))
 		}
+	}
+	if !active {
+		return false, []string{activeFirstTask + " (missing trace)"}, nil
 	}
 	// A proposal with no promoted task has no portion in flight: nothing can
 	// land, so nothing blocks. Refusing here stranded every bug the triager
 	// had read but a person then fixed by hand (B-286, 2026-08-29): the gate
 	// is "every portion landed", not "a proposal exists".
-	return true, nil
+	return tasks == 0 || len(pending) == 0, pending, nil
 }
 
 // promotedTaskTitle prefers what the triager proposed.
