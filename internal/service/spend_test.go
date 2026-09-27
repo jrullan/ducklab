@@ -132,3 +132,41 @@ func TestCallTokensReadsTheUsualNames(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletionSplitReadsTheRecordedBreakdown(t *testing.T) {
+	usage := map[string]interface{}{
+		"completion_tokens": float64(20212),
+		"completion_breakdown": map[string]interface{}{
+			"reasoning_tokens": float64(20043),
+			"content_tokens":   float64(169),
+		},
+	}
+	reasoning, content := callCompletionSplit(usage)
+	if reasoning != 20043 || content != 169 {
+		t.Fatalf("split = %d/%d, want 20043/169", reasoning, content)
+	}
+}
+
+func TestBackfillAddsReasoningShapeWithoutReplacingRecordedTotals(t *testing.T) {
+	root := t.TempDir()
+	writeCallLog(t, root, "r-1", []runlog.LLMCall{{
+		Duckling: "glm53",
+		Usage: map[string]interface{}{
+			"prompt_tokens": float64(100), "completion_tokens": float64(1010),
+			"completion_breakdown": map[string]interface{}{
+				"reasoning_tokens": float64(1000), "content_tokens": float64(10),
+			},
+		},
+	}})
+	run := &runlog.Run{ID: "r-1", Spend: map[string]runlog.DucklingSpend{
+		"glm53": {Calls: 7, Tokens: 9999, CostUSD: 1.25},
+	}}
+	backfillSpend(root, run)
+	got := run.Spend["glm53"]
+	if got.Calls != 7 || got.Tokens != 9999 || got.CostUSD != 1.25 {
+		t.Fatalf("recorded totals changed: %+v", got)
+	}
+	if got.ReasoningTokens != 1000 || got.ContentTokens != 10 {
+		t.Fatalf("completion shape = %+v", got)
+	}
+}

@@ -444,8 +444,10 @@ export interface RunlogContextScope {
 
 export interface RunlogDucklingSpend {
   calls?: number;
+  content_tokens?: number;
   cost_usd?: number;
   estimated?: boolean;
+  reasoning_tokens?: number;
   tokens?: number;
 }
 
@@ -865,7 +867,9 @@ export interface ServiceModeDefaultsView {
   agent_max_turns?: number;
   build_mode?: string;
   ducklings?: Record<string, string[]>;
+  http_timeout_s?: number;
   mode_seats?: Record<string, Record<string, string[]>>;
+  narrated_tool_limit?: number;
   phase_turns?: Record<string, number>;
   role_pins?: Record<string, string[]>;
   role_turns?: Record<string, number>;

@@ -150,7 +150,7 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 	// Built before it is saved. A provider whose base URL cannot produce a
 	// client is a provider that will fail on the first run instead of here,
 	// where the person is looking at the form they just filled in.
-	prov, err := createProvider(config.ProviderID(id), p)
+	prov, err := createProvider(config.ProviderID(id), p, time.Duration(s.cfg.Defaults.HTTPTimeoutS)*time.Second)
 	if err != nil {
 		s.cfgMu.Unlock()
 		return fmt.Errorf("provider %q: %w", id, err)

@@ -354,9 +354,11 @@ type RedoNote struct {
 
 // DucklingSpend is one model's share of a run.
 type DucklingSpend struct {
-	Calls   int     `json:"calls"`
-	Tokens  int64   `json:"tokens"`
-	CostUSD float64 `json:"cost_usd"`
+	Calls           int     `json:"calls"`
+	Tokens          int64   `json:"tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+	ReasoningTokens int64   `json:"reasoning_tokens,omitempty"`
+	ContentTokens   int64   `json:"content_tokens,omitempty"`
 	// Estimated is true when any of those calls reported no usage and its
 	// tokens were counted by estimate.
 	Estimated bool `json:"estimated,omitempty"`

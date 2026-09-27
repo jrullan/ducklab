@@ -119,6 +119,10 @@ type Defaults struct {
 	RepairAttempts     int      `toml:"repair_attempts" json:"repair_attempts"`
 	ToolResultMaxBytes int      `toml:"tool_result_max_bytes" json:"tool_result_max_bytes"`
 	AgentMaxTurns      int      `toml:"agent_max_turns" json:"agent_max_turns"`
+	// NarratedToolLimit bounds tool-call syntax emitted as prose by a seat
+	// that has no tools. At the limit Ducklab asks once for the final contract
+	// instead of letting the model narrate an imaginary tool session.
+	NarratedToolLimit int `toml:"narrated_tool_limit" json:"narrated_tool_limit"`
 	// SmallSeatPairReserve is the default calls/reply portion for a small
 	// implementer in pair mode. It protects time for independent review, but
 	// remains a default: role/run overrides and a live no-cap lift may cross it.
@@ -713,6 +717,9 @@ func (g *Global) Validate(path string) error {
 	if g.Defaults.SmallSeatPairReserve <= 0 || g.Defaults.SmallSeatPairReserve > 200 {
 		return &Error{File: path, Key: "defaults.small_seat_pair_reserve", Msg: "must be 1 to 200"}
 	}
+	if g.Defaults.NarratedToolLimit <= 0 || g.Defaults.NarratedToolLimit > 20 {
+		return &Error{File: path, Key: "defaults.narrated_tool_limit", Msg: "must be 1 to 20"}
+	}
 	if g.Defaults.Budget.MaxUSD <= 0 {
 		return &Error{File: path, Key: "defaults.budget.max_usd", Msg: "must be positive"}
 	}
@@ -781,6 +788,7 @@ func DefaultGlobal() *Global {
 			RepairAttempts:       2,
 			ToolResultMaxBytes:   32768,
 			AgentMaxTurns:        24,
+			NarratedToolLimit:    2,
 			SmallSeatPairReserve: DefaultSmallSeatPairReserve,
 			HTTPTimeoutS:         300,
 			TransientRetries:     3,

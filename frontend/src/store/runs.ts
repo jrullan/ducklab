@@ -13,7 +13,7 @@ export type LiveSpend = {
    * model to change. */
   ducklings: Record<
     string,
-    { calls: number; tokens: number; cost_usd: number; estimated?: boolean }
+    { calls: number; tokens: number; cost_usd: number; estimated?: boolean; reasoning_tokens?: number; content_tokens?: number }
   >;
 };
 

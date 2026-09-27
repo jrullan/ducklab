@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
@@ -137,6 +138,84 @@ func TestRepairSucceedsAndReturnsTheParsedValue(t *testing.T) {
 	choice, ok := out.Parsed.(*Choice)
 	if !ok || choice.Choice != "A" {
 		t.Fatalf("Parsed = %+v, want *Choice{A}", out.Parsed)
+	}
+}
+
+func TestNoToolsNarrationGetsOneDirectVerdictRetry(t *testing.T) {
+	p := &countingProvider{replies: []string{
+		`I need to inspect it.<tool_call>fs_list(path=".")</tool_call>Then read it.<tool_call>artifact_read(name="spec")</tool_call>`,
+		`{"verdict":"approve","findings":[]}`,
+	}}
+	loop := testLoop(p, 2)
+	loop.NarratedToolLimit = 2
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 4}
+
+	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
+	if err != nil {
+		t.Fatalf("direct verdict recovery failed: %v", err)
+	}
+	if verdict, ok := out.Parsed.(*Verdict); !ok || verdict.Verdict != "approve" {
+		t.Fatalf("parsed = %+v, want approval", out.Parsed)
+	}
+	if p.calls() != 2 {
+		t.Fatalf("calls = %d, want narration plus one bounded direct retry", p.calls())
+	}
+	last := p.requests[len(p.requests)-1]
+	if got := last.Messages[len(last.Messages)-1].Content; !strings.Contains(got, "TOOLS ARE UNAVAILABLE") || !strings.Contains(got, "ONLY") {
+		t.Fatalf("direct retry does not close tools and demand the contract:\n%s", got)
+	}
+}
+
+func TestRepeatedNoToolsNarrationStopsAfterDirectRetry(t *testing.T) {
+	p := &countingProvider{fallback: `<tool_call>artifact_read(name="spec")</tool_call><tool_call>fs_list(path=".")</tool_call>`}
+	loop := testLoop(p, 2)
+	loop.NarratedToolLimit = 2
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 4}
+
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
+	if !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("error = %v, want bounded no-answer failure", err)
+	}
+	if p.calls() != 2 {
+		t.Fatalf("calls = %d, want initial narration plus one direct retry", p.calls())
+	}
+}
+
+type repairDeadlineProvider struct {
+	calls     int
+	remaining time.Duration
+}
+
+func (p *repairDeadlineProvider) ID() string { return "deadline" }
+func (p *repairDeadlineProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	p.calls++
+	if p.calls == 1 {
+		time.Sleep(40 * time.Millisecond)
+		return provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Content: "prose"}, FinishReason: provider.FinishStop}}}, nil
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		p.remaining = time.Until(deadline)
+	}
+	return provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Content: `{"choice":"A","reason":"repaired"}`}, FinishReason: provider.FinishStop}}}, nil
+}
+func (p *repairDeadlineProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, provider.ErrUnsupported
+}
+func (p *repairDeadlineProvider) Models(context.Context) ([]string, error) { return nil, nil }
+
+func TestContractRepairDeadlineAdaptsToObservedSeatLatency(t *testing.T) {
+	p := &repairDeadlineProvider{}
+	loop := testLoop(p, 1)
+	loop.ContractRepairTimeout = 10 * time.Millisecond
+	turn := &Turn{Role: config.RoleJudge, Prompt: "choose", Contract: "choice", MaxTurns: 1}
+
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	// The 40ms first call yields a roughly 60ms adaptive repair deadline. A
+	// fixed 10ms repair floor would leave less than that before Chat starts.
+	if p.remaining < 45*time.Millisecond {
+		t.Fatalf("repair deadline remaining = %s, want adaptive allowance from the 40ms seat call", p.remaining)
 	}
 }
 
@@ -639,20 +718,22 @@ func TestSubstantiveAnswerKeepsOneLineFencedContent(t *testing.T) {
 // A turn with no tools that is not told so spends its budget trying to call
 // one.
 func TestATurnWithNoToolsIsToldSo(t *testing.T) {
-	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "x"},
-		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, false)
-	var system string
-	for _, m := range msgs {
-		if m.Role == "system" {
-			system += m.Content
+	for _, native := range []bool{false, true} {
+		msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "x"},
+			&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, native)
+		var system string
+		for _, m := range msgs {
+			if m.Role == "system" {
+				system += m.Content
+			}
 		}
-	}
-	if !strings.Contains(system, "no tools") {
-		t.Error("a turn with an empty toolbelt is not told it has none")
-	}
-	for _, forbidden := range []string{"## How to use tools", "```ducklab", "@payload:"} {
-		if strings.Contains(system, forbidden) {
-			t.Errorf("a turn with an empty toolbelt was taught the competing tool dialect %q", forbidden)
+		if !strings.Contains(system, "no tools") {
+			t.Errorf("native=%v: a turn with an empty toolbelt is not told it has none", native)
+		}
+		for _, forbidden := range []string{"## How to use tools", "```ducklab", "@payload:"} {
+			if strings.Contains(system, forbidden) {
+				t.Errorf("native=%v: a turn with an empty toolbelt was taught the competing tool dialect %q", native, forbidden)
+			}
 		}
 	}
 }

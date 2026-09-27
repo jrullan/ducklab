@@ -84,3 +84,23 @@ func TestASlowButAliveStreamIsNotAStall(t *testing.T) {
 		t.Errorf("the response lost content: %+v", resp.Choices)
 	}
 }
+
+func TestNonStreamingFallbackDoesNotShortenCallerDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat("test", srv.URL, "", WithRequestTimeout(10*time.Millisecond))
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	resp, err := p.Chat(ctx, ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("configured fallback shortened the caller's adaptive deadline: %v", err)
+	}
+	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("response = %+v", resp)
+	}
+}

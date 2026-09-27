@@ -25,7 +25,20 @@ import (
 // missing log means the numbers cannot be reconstructed, and inventing them
 // would be worse than the row being absent.
 func backfillSpend(projectRoot string, run *runlog.Run) {
-	if run == nil || len(run.Spend) > 0 {
+	if run == nil {
+		return
+	}
+	needsTotals := len(run.Spend) == 0
+	needsSplit := needsTotals
+	if !needsSplit {
+		for _, d := range run.Spend {
+			if d.ReasoningTokens == 0 && d.ContentTokens == 0 {
+				needsSplit = true
+				break
+			}
+		}
+	}
+	if !needsSplit {
 		return
 	}
 	f, err := os.Open(filepath.Join(projectRoot, ".ducklab", "runs", run.ID, "llm.jsonl"))
@@ -49,13 +62,26 @@ func backfillSpend(projectRoot string, run *runlog.Run) {
 		d := spend[call.Duckling]
 		d.Calls++
 		d.Tokens += callTokens(call.Usage)
+		reasoning, content := callCompletionSplit(call.Usage)
+		d.ReasoningTokens += reasoning
+		d.ContentTokens += content
 		d.CostUSD += call.CostUSD
 		if call.Estimated {
 			d.Estimated = true
 		}
 		spend[call.Duckling] = d
 	}
-	if len(spend) > 0 {
+	if needsTotals && len(spend) > 0 {
 		run.Spend = spend
+	} else {
+		for id, parsed := range spend {
+			d, ok := run.Spend[id]
+			if !ok {
+				continue
+			}
+			d.ReasoningTokens = parsed.ReasoningTokens
+			d.ContentTokens = parsed.ContentTokens
+			run.Spend[id] = d
+		}
 	}
 }

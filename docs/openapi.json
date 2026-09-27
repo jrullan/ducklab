@@ -1522,11 +1522,17 @@
           "calls": {
             "type": "integer"
           },
+          "content_tokens": {
+            "type": "integer"
+          },
           "cost_usd": {
             "type": "number"
           },
           "estimated": {
             "type": "boolean"
+          },
+          "reasoning_tokens": {
+            "type": "integer"
           },
           "tokens": {
             "type": "integer"
@@ -2955,6 +2961,9 @@
             },
             "type": "object"
           },
+          "http_timeout_s": {
+            "type": "integer"
+          },
           "mode_seats": {
             "additionalProperties": {
               "additionalProperties": {
@@ -2966,6 +2975,9 @@
               "type": "object"
             },
             "type": "object"
+          },
+          "narrated_tool_limit": {
+            "type": "integer"
           },
           "phase_turns": {
             "additionalProperties": {
@@ -3028,6 +3040,8 @@
         "required": [
           "agent_max_turns",
           "ducklings",
+          "http_timeout_s",
+          "narrated_tool_limit",
           "phase_turns",
           "role_turns",
           "rounds",

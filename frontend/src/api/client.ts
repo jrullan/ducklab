@@ -243,7 +243,7 @@ export interface Run {
   /** Per-duckling spend, attributed as each call lands. Served live for an
    * active run, so a view opened mid-run starts from the truth instead of
    * zeros. */
-  spend?: Record<string, { calls: number; tokens: number; cost_usd: number; estimated?: boolean }>;
+  spend?: Record<string, { calls: number; tokens: number; cost_usd: number; estimated?: boolean; reasoning_tokens?: number; content_tokens?: number }>;
   budget?: {
     usd: number;
     tokens: number;
@@ -303,6 +303,10 @@ export interface BudgetView {
 export interface ModeDefaultsView {
   rounds: Record<string, number>;
   agent_max_turns: number;
+  /** Configured floor for one non-streaming contract-repair call. */
+  http_timeout_s?: number;
+  /** In-band tool calls tolerated from a no-tools seat before direct conclusion. */
+  narrated_tool_limit?: number;
   /** Contextual implementer default for a small seat in pair mode. More-specific role/run choices may cross it. */
   small_seat_pair_reserve?: number;
   /** What each mode does when nothing overrides it, so a client can show the
