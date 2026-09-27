@@ -102,6 +102,11 @@ function plainFailure(failure: string, run: Run): string {
   return "Ducklab stopped this run before it could finish.";
 }
 
+function pendingStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))];
+}
+
 // The task endpoint returns the canonical section, including immutable fields.
 // The editor accepts prose only, so never feed those fields back into its PUT.
 function taskProse(body: string | undefined): string {
@@ -813,6 +818,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     (run.status === "paused" && next.includes("abort"))
   );
   const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
+  // Composition findings are deterministic engine output, not another
+  // reviewer opinion. Historical records did not always copy them into
+  // proposal_blockers, so take the union and keep inherited debt separate.
+  const inheritedProposalDebt = pendingStrings(run.pending_data?.proposal_structure_notices);
+  const inheritedProposalDebtSet = new Set(inheritedProposalDebt);
+  const proposalBlockers = pendingStrings([
+    ...pendingStrings(run.pending_data?.proposal_blockers),
+    ...pendingStrings(run.pending_data?.composition_mechanical_findings),
+  ]).filter((finding) => !inheritedProposalDebtSet.has(finding));
+  const requestChangesDraft = proposalBlockers.length > 0
+    ? `Fix these deterministic proposal blockers:\n${proposalBlockers.map((finding) => `- ${finding}`).join("\n")}`
+    : undefined;
   // Rejection deliberately keeps a stage proposal as the record of the
   // failed attempt. The Documents view already knows that fact and offers
   // its two doors; the run that produced the draft used to look terminal
@@ -995,6 +1012,35 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // header; transcript evidence and recovery suggestions follow it.
   const decisionSurface = decisionOpen ? (
     <section className="m-2 rounded-card border border-serious p-3" data-testid="run-decision">
+      {(proposalBlockers.length > 0 || inheritedProposalDebt.length > 0) && (
+        <div className="mb-3 rounded border border-warn p-2" data-testid="proposal-mechanical-findings">
+          <div className="text-xs font-medium text-warn">Deterministic proposal checks</div>
+          <p className="mt-1 text-sm text-ink">
+            These findings come from Ducklab's mechanical checks, not from the reviewer's opinion.
+          </p>
+          {proposalBlockers.length > 0 && (
+            <div className="mt-2" data-testid="proposal-blockers-introduced">
+              <div className="text-xs font-medium text-ink">Introduced by this proposal — must be corrected</div>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-secondary">
+                {proposalBlockers.map((finding) => <li key={finding}>{finding}</li>)}
+              </ul>
+            </div>
+          )}
+          {inheritedProposalDebt.length > 0 && (
+            <div className="mt-2" data-testid="proposal-blockers-inherited">
+              <div className="text-xs font-medium text-ink">Inherited from the accepted document</div>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-secondary">
+                {inheritedProposalDebt.map((finding) => <li key={finding}>{finding}</li>)}
+              </ul>
+              {proposalBlockers.length === 0 && (
+                <p className="mt-1 text-xs text-ink-muted">
+                  Requesting the same proposal again cannot remove inherited debt. Repair or migrate the accepted document first; these notices do not describe reviewer dissent.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <DecisionCard
         next={next}
         title={
@@ -1027,6 +1073,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
         }}
         onRequestChanges={stageToRevise || run.stage === "release" ? requestChanges : undefined}
+        requestChangesDraft={requestChangesDraft}
         onResume={() => {
           setActionError(null);
           void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));

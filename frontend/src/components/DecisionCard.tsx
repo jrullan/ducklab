@@ -14,7 +14,7 @@
  * do. What accepting does is part of the question being asked.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function DecisionCard({
   next,
@@ -37,6 +37,7 @@ export function DecisionCard({
   dissent,
   acceptAndFix,
   fileFindings,
+  requestChangesDraft,
 }: {
   /** The engine's list of legal actions. Buttons render from this and only
    * this. */
@@ -82,10 +83,23 @@ export function DecisionCard({
     onFile: () => void;
     boardHref: string;
   };
+  /** An engine-derived correction note. It seeds an empty editor but never
+   * overwrites text the person has already entered. */
+  requestChangesDraft?: string;
 }) {
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(requestChangesDraft ?? "");
+  const seededRequestChangesDraft = useRef(requestChangesDraft);
   const [redoDraft, setRedoDraft] = useState(redoNote?.draft ?? "");
   const [asking, setAsking] = useState(false);
+
+  useEffect(() => {
+    if (!requestChangesDraft || requestChangesDraft === seededRequestChangesDraft.current) return;
+    setNote((current) => {
+      if (current.trim() && current !== seededRequestChangesDraft.current) return current;
+      seededRequestChangesDraft.current = requestChangesDraft;
+      return requestChangesDraft;
+    });
+  }, [requestChangesDraft]);
 
   const offers = (verb: string) => next.includes(verb);
 

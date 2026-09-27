@@ -533,6 +533,44 @@ describe("RunView — asking a stage for changes", () => {
     expect(screen.getByTestId("request-changes-button")).toBeInTheDocument();
   });
 
+  it("separates deterministic proposal blockers from inherited debt and drafts the actionable correction", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      pending_data: {
+        proposal_blockers: ["unknown field Implementa; use Implements", "SPEC-004 has no implementing task"],
+        composition_mechanical_findings: ["SPEC-004 has no implementing task"],
+        proposal_structure_notices: ["accepted SPEC-001 uses legacy grammar"],
+      },
+    });
+    render(<RunView runId="r-1" client={recording({})} />);
+
+    const checks = await screen.findByTestId("proposal-mechanical-findings");
+    expect(checks).toHaveTextContent("mechanical checks, not from the reviewer's opinion");
+    expect(screen.getByTestId("proposal-blockers-introduced")).toHaveTextContent("unknown field Implementa");
+    expect(screen.getByTestId("proposal-blockers-inherited")).toHaveTextContent("accepted SPEC-001 uses legacy grammar");
+    const draft = screen.getByTestId("change-note") as HTMLTextAreaElement;
+    expect(draft.value).toContain("unknown field Implementa; use Implements");
+    expect(draft.value).toContain("SPEC-004 has no implementing task");
+    expect(draft.value).not.toContain("accepted SPEC-001 uses legacy grammar");
+  });
+
+  it("explains why an inherited-only notice cannot be fixed by resubmitting the proposal", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      pending_data: { proposal_structure_notices: ["accepted SPEC-001 uses legacy grammar"] },
+    });
+    render(<RunView runId="r-1" client={recording({})} />);
+
+    expect(await screen.findByTestId("proposal-blockers-inherited")).toHaveTextContent("Repair or migrate the accepted document first");
+    expect(screen.getByTestId("change-note")).toHaveValue("");
+  });
+
   // A build run produces code. There is no draft to send back to anyone.
   it("offers nothing to revise on a build run", async () => {
     show({ stage: "build", project_id: "p" });

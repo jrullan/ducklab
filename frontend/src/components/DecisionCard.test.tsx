@@ -20,6 +20,25 @@ describe("DecisionCard document gates", () => {
     expect(screen.getByTestId("request-changes-button").className).toContain("bg-good");
     expect(screen.getByTestId("reject-button")).toHaveTextContent("Discard draft");
   });
+
+  it("seeds an engine-derived correction note and submits it", async () => {
+    const onRequestChanges = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DecisionCard
+        next={["request_changes"]}
+        title="Proposal awaiting your decision"
+        consequence="revises the draft"
+        onAccept={() => {}}
+        onReject={() => {}}
+        onRequestChanges={onRequestChanges}
+        requestChangesDraft={"Fix these deterministic proposal blockers:\n- unknown field Implementa"}
+      />,
+    );
+
+    expect(screen.getByTestId("change-note")).toHaveValue("Fix these deterministic proposal blockers:\n- unknown field Implementa");
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+    expect(onRequestChanges).toHaveBeenCalledWith("Fix these deterministic proposal blockers:\n- unknown field Implementa");
+  });
 });
 
 // B-261: one decision card per gate state. The reviewer's dissent, the
