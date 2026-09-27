@@ -236,6 +236,7 @@ func (s *Service) autopilotAdvance(projectID string) {
 		}
 		return
 	}
+	first = s.autopilotPreferredTaskPath(first)
 	// A no-changes run is the tree answering the task's question. Do not ask
 	// again automatically: a person may relaunch with a note, but the loop
 	// must not spend another task slot trying to get a different answer.
@@ -306,6 +307,26 @@ func (s *Service) autopilotAdvance(projectID string) {
 		// person what it needs, and their action refuels the loop.
 		s.autopilotNote(projectID, "needs you: "+first.Action)
 	}
+}
+
+// autopilotPreferredTaskPath applies the unattended loop's own front-door
+// choice only to an ordinary test-first recommendation. A build recommendation
+// from triage (build-only) or from an already-landed red test remains build:
+// those are evidence, not a preference to override.
+func (s *Service) autopilotPreferredTaskPath(step NextStep) NextStep {
+	if step.ID != "test-first" {
+		return step
+	}
+	s.cfgMu.RLock()
+	path := s.cfg.Defaults.AutopilotPath
+	s.cfgMu.RUnlock()
+	if path != "build" {
+		return step
+	}
+	step.ID = "build"
+	step.Action = fmt.Sprintf("Build %s directly — unattended path is build", step.Ref)
+	step.Reason = "the autopilot is configured to build without a test-first phase"
+	return step
 }
 
 func (s *Service) autopilotNote(projectID, note string) {

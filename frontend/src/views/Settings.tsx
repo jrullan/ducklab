@@ -411,7 +411,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   // included in the save only once actually loaded. Declared HERE, above the
   // loading early-return: a hook below a conditional return renders a
   // different hook count per pass, which React rejects wholesale.
-  const [ap, setAp] = useState<{ max_tasks: string; max_fails: string; autonomy: string } | null>(null);
+  const [ap, setAp] = useState<{ max_tasks: string; max_fails: string; autonomy: string; path: "test-first" | "build" } | null>(null);
   // The project's own autonomy — the level runs and triage consult FIRST.
   // It had no control anywhere; the guidance was "edit the TOML".
   const [projAutonomy, setProjAutonomy] = useState<string | null>(null);
@@ -434,7 +434,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   useEffect(() => {
     Promise.resolve()
       .then(() => client.autopilotDefaults())
-      .then((d) => setAp({ max_tasks: String(d.max_tasks), max_fails: String(d.max_fails), autonomy: d.autonomy }))
+      .then((d) => setAp({ max_tasks: String(d.max_tasks), max_fails: String(d.max_fails), autonomy: d.autonomy, path: d.path ?? "test-first" }))
       .catch(() => {});
   }, [client]);
 
@@ -550,6 +550,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
             max_tasks: Number(ap.max_tasks) || 0,
             max_fails: Number(ap.max_fails) || 0,
             autonomy: ap.autonomy,
+            path: ap.path,
           })
         : Promise.resolve(null),
       client.budgetDefaultsSet({
@@ -581,7 +582,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     ])
       .then(([savedAp, savedBudget, savedEngine, savedModes, savedDiagnostics]) => {
         if (savedAp) {
-          setAp({ max_tasks: String(savedAp.max_tasks), max_fails: String(savedAp.max_fails), autonomy: savedAp.autonomy });
+          setAp({ max_tasks: String(savedAp.max_tasks), max_fails: String(savedAp.max_fails), autonomy: savedAp.autonomy, path: savedAp.path ?? "test-first" });
         }
         applyBudget(savedBudget);
         if (savedEngine) applyEngine(savedEngine);
@@ -671,7 +672,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       <div className={section === "autopilot" ? "" : "hidden"}>
         <SettingsCard
           title="autopilot & autonomy"
-          desc="the unattended loop's leash, and what autonomy a run gets when nothing names one"
+          desc="the unattended loop's path, phase modes, leash, and default autonomy"
           testid="autopilot-defaults"
         >
           {ap ? (
@@ -696,6 +697,55 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
                 />
               </label>
             </div>
+
+            <h4 className="mt-4 text-xs text-ink-muted">unattended task path</h4>
+            <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary">
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                start ordinary tasks with
+                <select
+                  data-testid="ap-path"
+                  value={ap.path}
+                  onChange={(e) => { setAp({ ...ap, path: e.target.value as "test-first" | "build" }); touched(); }}
+                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                >
+                  <option value="test-first">test-first, then build</option>
+                  <option value="build">build directly</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                test phase mode
+                <select
+                  data-testid="default-test-mode"
+                  value={testMode}
+                  onChange={(e) => { setTestMode(e.target.value); touched(); }}
+                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                >
+                  <option value="">solo (fallback)</option>
+                  <option value="solo">solo</option>
+                  <option value="pair">pair</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                build phase mode
+                <select
+                  data-testid="default-build-mode"
+                  value={buildMode}
+                  onChange={(e) => { setBuildMode(e.target.value); touched(); }}
+                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                >
+                  <option value="">project habit, then solo</option>
+                  {['solo', 'pair', 'tournament', 'split'].map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-sm text-ink-secondary" data-testid="ap-path-summary">
+              {ap.path === "test-first"
+                ? `Next ordinary task: test-first in ${testMode || "solo (fallback)"}, then build in ${buildMode || "the project habit, then solo"}.`
+                : `Next ordinary task: build directly in ${buildMode || "the project habit, then solo"}.`}
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">
+              A triage decision of build-only, or a committed failing test waiting for implementation, still takes the build door.
+            </p>
 
             {/* One question — how much may a run decide alone — answered at
                 two scopes, chips saying which, exactly like who-does-what.
@@ -792,36 +842,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
           <p className="mt-1 text-xs text-ink-muted">Figures cover finished runs in the last 30 days.</p>
         </div>
       )}
-
-      <h3 className="mt-4 text-xs text-ink-muted">default phase modes</h3>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
-        {[
-          ["build runs open in", buildMode, setBuildMode],
-          ["test runs open in", testMode, setTestMode],
-        ].map(([label, value, setter]) => (
-          <label key={label as string} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-            {label as string}
-            <select
-              aria-label={label as string}
-              data-testid={`default-${(label as string).split(" ")[0]}-mode`}
-              value={value as string}
-              onChange={(e) => {
-                (setter as (value: string) => void)(e.target.value);
-                touched();
-              }}
-              className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-            >
-              <option value="">project habit, then solo</option>
-              {["solo", "pair", "tournament", "split"].map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
-              ))}
-            </select>
-          </label>
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-ink-muted">
-        Leave blank to use the project's [modes] habit, then solo. The per-project [modes] table stays config.toml-only for now.
-      </p>
 
       <h3 className="mt-4 text-xs text-ink-muted">calls per reply — phase defaults</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">

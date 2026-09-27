@@ -37,3 +37,19 @@ func TestModeDefaultsSurviveTheConfigFile(t *testing.T) {
 		}
 	}
 }
+
+func TestAutopilotPathSurvivesTheConfigFile(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.AutopilotDefaultsSet(AutopilotDefaultsView{
+		MaxTasks: 10, MaxFails: 2, Autonomy: "guarded", Path: "build",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `autopilot_path = "build"`) {
+		t.Fatalf("config omitted autopilot path:\n%s", raw)
+	}
+}

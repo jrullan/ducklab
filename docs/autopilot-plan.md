@@ -8,6 +8,20 @@ automatically (advice_taken on the record); triage auto-applies under
 auto/yolo except duplicate proposals, which always wait for a person; the
 driver runs triage itself when the project's autonomy allows it.*
 
+## Current task-path contract
+
+`defaults.autopilot_path` is `test-first` (the compatibility default) or
+`build`. It chooses the front door only when the guide would otherwise offer
+an ordinary test-first task. A triage decision of build-only and a committed
+failing test waiting for implementation remain authoritative build doors.
+
+The test and build phases resolve their modes independently from
+`defaults.test_mode` and `defaults.build_mode`. Test runs persist the same
+`mode_source` vocabulary as builds (`request`, `settings`, `fallback`), so the
+record can explain why an unattended task ran solo or pair. Settings keeps the
+path and both phase-mode selectors together on the Autopilot card and states
+the effective sequence in one line.
+
 ## What already exists (per-run autonomy)
 
 - Four levels in `internal/config/config.go:55-58`: `manual`, `guarded`

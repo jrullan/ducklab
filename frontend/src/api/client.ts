@@ -706,6 +706,7 @@ export interface AutopilotDefaultsView {
   max_tasks: number;
   max_fails: number;
   autonomy: string;
+  path: "test-first" | "build";
 }
 
 export interface AutopilotState {

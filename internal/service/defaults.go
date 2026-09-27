@@ -654,6 +654,7 @@ type AutopilotDefaultsView struct {
 	MaxTasks int    `json:"max_tasks"`
 	MaxFails int    `json:"max_fails"`
 	Autonomy string `json:"autonomy"`
+	Path     string `json:"path"`
 }
 
 // AutopilotDefaults reports them, built-ins filled in.
@@ -664,6 +665,7 @@ func (s *Service) AutopilotDefaults() AutopilotDefaultsView {
 		MaxTasks: s.cfg.Defaults.AutopilotMaxTasks,
 		MaxFails: s.cfg.Defaults.AutopilotMaxFails,
 		Autonomy: string(s.cfg.Defaults.Autonomy),
+		Path:     s.cfg.Defaults.AutopilotPath,
 	}
 	if v.MaxTasks <= 0 {
 		v.MaxTasks = autopilotDefaultMaxTasks
@@ -673,6 +675,9 @@ func (s *Service) AutopilotDefaults() AutopilotDefaultsView {
 	}
 	if v.Autonomy == "" {
 		v.Autonomy = string(config.AutonomyGuarded)
+	}
+	if v.Path == "" {
+		v.Path = "test-first"
 	}
 	return v
 }
@@ -691,6 +696,16 @@ func (s *Service) AutopilotDefaultsSet(v AutopilotDefaultsView) error {
 	if v.MaxFails < 1 || v.MaxFails > 10 {
 		return fmt.Errorf("autopilot max_fails must be 1 to 10; got %d", v.MaxFails)
 	}
+	// Older clients do not know path yet. An omitted field must preserve the
+	// person's current policy rather than silently resetting it.
+	if v.Path == "" {
+		s.cfgMu.RLock()
+		v.Path = s.cfg.Defaults.AutopilotPath
+		s.cfgMu.RUnlock()
+		if v.Path == "" {
+			v.Path = "test-first"
+		}
+	}
 	valid := false
 	for _, a := range config.ValidAutonomies() {
 		if string(a) == v.Autonomy {
@@ -700,17 +715,23 @@ func (s *Service) AutopilotDefaultsSet(v AutopilotDefaultsView) error {
 	if !valid {
 		return fmt.Errorf("unknown autonomy %q", v.Autonomy)
 	}
+	if v.Path != "test-first" && v.Path != "build" {
+		return fmt.Errorf("autopilot path must be test-first or build; got %q", v.Path)
+	}
 
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	prevTasks, prevFails := s.cfg.Defaults.AutopilotMaxTasks, s.cfg.Defaults.AutopilotMaxFails
 	prevAutonomy := s.cfg.Defaults.Autonomy
+	prevPath := s.cfg.Defaults.AutopilotPath
 	s.cfg.Defaults.AutopilotMaxTasks = v.MaxTasks
 	s.cfg.Defaults.AutopilotMaxFails = v.MaxFails
+	s.cfg.Defaults.AutopilotPath = v.Path
 	s.cfg.Defaults.Autonomy = config.Autonomy(v.Autonomy)
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.AutopilotMaxTasks, s.cfg.Defaults.AutopilotMaxFails = prevTasks, prevFails
 		s.cfg.Defaults.Autonomy = prevAutonomy
+		s.cfg.Defaults.AutopilotPath = prevPath
 		return err
 	}
 	return nil

@@ -192,6 +192,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		projCfg.Verify = verifyOverride(projCfg.Verify, req.Verify)
 	}
 
+	resolvedMode, modeSource := s.resolveTestMode(req.Mode)
 	run := &runlog.Run{
 		ID:        runlog.GenerateRunID(),
 		ProjectID: projectID,
@@ -200,7 +201,8 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		// read an accepted test-first as a finished task and offered
 		// "build again" for work that had never been built once.
 		Stage:            "test",
-		Mode:             testMode(s.testModeDefault(req.Mode)),
+		Mode:             resolvedMode,
+		ModeSource:       modeSource,
 		AgentTurns:       req.AgentTurns,
 		TaskID:           req.TaskID,
 		TaskBodyHash:     taskBodyHashForTask(ctx, s, projectID, req.TaskID),
@@ -860,16 +862,19 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 	}
 }
 
-// testMode normalises the test phase's mode: pair is the one alternative.
-// testModeDefault fills an empty request from the configured default, so a
-// launcher-less caller (CLI, autopilot) tests the way the person chose.
-func (s *Service) testModeDefault(m string) string {
-	if m != "" {
-		return m
+// resolveTestMode mirrors build-mode provenance: a run record must explain
+// whether solo/pair was picked by the request, Settings, or the fallback.
+func (s *Service) resolveTestMode(requested string) (string, string) {
+	if requested != "" {
+		return testMode(requested), "request"
 	}
 	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	return s.cfg.Defaults.TestMode
+	settings := s.cfg.Defaults.TestMode
+	s.cfgMu.RUnlock()
+	if settings != "" {
+		return testMode(settings), "settings"
+	}
+	return "solo", "fallback"
 }
 
 func testMode(m string) string {

@@ -688,6 +688,7 @@ export interface ServiceAutopilotDefaultsView {
   autonomy?: string;
   max_fails?: number;
   max_tasks?: number;
+  path?: string;
 }
 
 export interface ServiceBenchEvidence {

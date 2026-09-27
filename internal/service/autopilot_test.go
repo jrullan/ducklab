@@ -227,15 +227,15 @@ func TestAutopilotDefaultsRoundTripAndBounds(t *testing.T) {
 	s := writableService(t, "pato-uno")
 
 	d := s.AutopilotDefaults()
-	if d.MaxTasks != autopilotDefaultMaxTasks || d.MaxFails != autopilotDefaultMaxFails {
+	if d.MaxTasks != autopilotDefaultMaxTasks || d.MaxFails != autopilotDefaultMaxFails || d.Path != "test-first" {
 		t.Fatalf("built-ins = %+v", d)
 	}
 
-	if err := s.AutopilotDefaultsSet(AutopilotDefaultsView{MaxTasks: 3, MaxFails: 1, Autonomy: "auto"}); err != nil {
+	if err := s.AutopilotDefaultsSet(AutopilotDefaultsView{MaxTasks: 3, MaxFails: 1, Autonomy: "auto", Path: "build"}); err != nil {
 		t.Fatal(err)
 	}
 	d = s.AutopilotDefaults()
-	if d.MaxTasks != 3 || d.MaxFails != 1 || d.Autonomy != "auto" {
+	if d.MaxTasks != 3 || d.MaxFails != 1 || d.Autonomy != "auto" || d.Path != "build" {
 		t.Errorf("after set = %+v", d)
 	}
 	if s.autopilotConfigMaxFails() != 1 {
@@ -247,6 +247,7 @@ func TestAutopilotDefaultsRoundTripAndBounds(t *testing.T) {
 		{MaxTasks: 1000, MaxFails: 2, Autonomy: "guarded"},
 		{MaxTasks: 5, MaxFails: 0, Autonomy: "guarded"},
 		{MaxTasks: 5, MaxFails: 2, Autonomy: "cowboy"},
+		{MaxTasks: 5, MaxFails: 2, Autonomy: "guarded", Path: "surprise-me"},
 	} {
 		if err := s.AutopilotDefaultsSet(bad); err == nil {
 			t.Errorf("accepted %+v", bad)
@@ -266,17 +267,56 @@ func TestAnEmptyModeTakesTheConfiguredDefault(t *testing.T) {
 	if err := s.ModeDefaultsSet(v); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.testModeDefault(""); got != "pair" {
-		t.Errorf("empty test mode resolved to %q, want the configured pair", got)
+	if got, source := s.resolveTestMode(""); got != "pair" || source != "settings" {
+		t.Errorf("empty test mode resolved to %q/%q, want pair/settings", got, source)
 	}
-	if got := s.testModeDefault("solo"); got != "solo" {
-		t.Errorf("an explicit mode was overridden: %q", got)
+	if got, source := s.resolveTestMode("solo"); got != "solo" || source != "request" {
+		t.Errorf("explicit test mode resolved to %q/%q, want solo/request", got, source)
 	}
 	s.cfgMu.RLock()
 	buildDefault := s.cfg.Defaults.BuildMode
 	s.cfgMu.RUnlock()
 	if buildDefault != "pair" {
 		t.Errorf("build default = %q", buildDefault)
+	}
+}
+
+func TestTestStartPersistsItsModeProvenance(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "mode-source", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.mode": "tests", "verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Defaults.TestMode = "pair"
+	run, err := s.TestStart(context.Background(), p.ID, TestFirstRequest{TaskID: "T-045"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.RunAbort(context.Background(), run.ID)
+		_, _ = s.waitForRun(context.Background(), run.ID)
+	})
+	if run.Mode != "pair" || run.ModeSource != "settings" {
+		t.Fatalf("test run mode = %q, source = %q; want pair/settings", run.Mode, run.ModeSource)
+	}
+}
+
+func TestAutopilotPathOnlyOverridesAnOrdinaryTestFirstDoor(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	s.cfg.Defaults.AutopilotPath = "build"
+	ordinary := s.autopilotPreferredTaskPath(NextStep{ID: "test-first", Ref: "T-045"})
+	if ordinary.ID != "build" || !strings.Contains(ordinary.Action, "T-045") {
+		t.Fatalf("ordinary task path = %+v", ordinary)
+	}
+	triaged := NextStep{ID: "build", Ref: "T-046", Reason: "triage recommends no gate test"}
+	if got := s.autopilotPreferredTaskPath(triaged); got.ID != triaged.ID || got.Ref != triaged.Ref || got.Reason != triaged.Reason {
+		t.Fatalf("triage decision was overwritten: %+v", got)
 	}
 }
 
