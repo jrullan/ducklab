@@ -44,13 +44,14 @@ type AppStatus struct {
 	Smoke      string `json:"smoke,omitempty"`
 	// SmokeCommand and SmokeSource state exactly what the gate will execute;
 	// the former may be Command when the explicit Smoke field is absent.
-	SmokeCommand  string `json:"smoke_command,omitempty"`
-	SmokeSource   string `json:"smoke_source,omitempty"`
-	SmokeTimeoutS int    `json:"smoke_timeout_s"`
-	URL           string `json:"url,omitempty"`
-	Running       bool   `json:"running"`
-	PID           int    `json:"pid,omitempty"`
-	StartedAt     string `json:"started_at,omitempty"`
+	SmokeCommand     string `json:"smoke_command,omitempty"`
+	SmokeSource      string `json:"smoke_source,omitempty"`
+	SmokeTimeoutS    int    `json:"smoke_timeout_s"`
+	SmokeExpectation string `json:"smoke_expectation"`
+	URL              string `json:"url,omitempty"`
+	Running          bool   `json:"running"`
+	PID              int    `json:"pid,omitempty"`
+	StartedAt        string `json:"started_at,omitempty"`
 	// Health is "healthy", "unhealthy", or empty when no health URL is
 	// configured or the app is not running. A process alive and a service
 	// answering are different claims, and only the second one is the app.
@@ -245,17 +246,18 @@ func (s *Service) AppStatus(ctx context.Context, projectID string) (*AppStatus, 
 
 // appStatusLocked assembles the status. Callers hold appMu.
 func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppStatus {
-	smokeCommand, smokeSource, smokeTimeoutS := productSmokeConfig(cfg.Run)
+	smokeCommand, smokeSource, smokeExpectation, smokeTimeoutS := productSmokeConfig(cfg.Run)
 	out := &AppStatus{
-		Configured:    cfg.Run.Command != "",
-		Command:       cfg.Run.Command,
-		Smoke:         cfg.Run.Smoke,
-		SmokeCommand:  smokeCommand,
-		SmokeSource:   smokeSource,
-		SmokeTimeoutS: smokeTimeoutS,
-		URL:           cfg.Run.URL,
-		Preflight:     cfg.Run.Preflight,
-		Requires:      cfg.Run.Requires,
+		Configured:       cfg.Run.Command != "",
+		Command:          cfg.Run.Command,
+		Smoke:            cfg.Run.Smoke,
+		SmokeCommand:     smokeCommand,
+		SmokeSource:      smokeSource,
+		SmokeTimeoutS:    smokeTimeoutS,
+		SmokeExpectation: smokeExpectation,
+		URL:              cfg.Run.URL,
+		Preflight:        cfg.Run.Preflight,
+		Requires:         cfg.Run.Requires,
 	}
 	st := s.apps[projectID]
 	if st == nil {

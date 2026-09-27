@@ -126,6 +126,8 @@ export interface AppStatus {
   /** Effective post-gate smoke command and the field that supplied it. */
   smoke_command?: string;
   smoke_source?: "run.smoke" | "run.command";
+  /** Whether success means clean exit or surviving the observation window. */
+  smoke_expectation: "exit" | "live";
   smoke_timeout_s: number;
   url?: string;
   running: boolean;

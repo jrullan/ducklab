@@ -157,32 +157,62 @@ func TestConfiguredRunCommandIsAnExecutableProductSmoke(t *testing.T) {
 	}
 	defer writer.Close()
 
-	note, err := smokeRunCommand(context.Background(), root, "printf 'started product\\n'", "run.smoke", 8, "product-smoke", "demo")
-	if err != nil || note != "run.smoke exited successfully" {
+	note, err := smokeRunCommand(context.Background(), root, "printf 'started product\\n'", "run.smoke", "exit", 8, "product-smoke", "demo")
+	if err != nil || note != "run.smoke met expectation exit: exited successfully" {
 		t.Fatalf("successful product smoke = %q, %v", note, err)
 	}
-	if _, err := smokeRunCommand(context.Background(), root, "printf 'startup failed\\n' >&2; exit 9", "run.smoke", 8, "product-smoke", "demo"); err == nil || !strings.Contains(err.Error(), "run.smoke: startup failed") {
+	if _, err := smokeRunCommand(context.Background(), root, "printf 'startup failed\\n' >&2; exit 9", "run.smoke", "exit", 8, "product-smoke", "demo"); err == nil || !strings.Contains(err.Error(), "run.smoke expected exit: startup failed") {
 		t.Fatalf("crashing product smoke = %v", err)
 	}
 }
 
 func TestProductSmokeConfigPrefersExplicitSmokeAndDefaultsTheWindow(t *testing.T) {
-	command, source, timeoutS := productSmokeConfig(config.RunApp{Command: "./ui", Smoke: "./ui --headless"})
-	if command != "./ui --headless" || source != "run.smoke" || timeoutS != 3 {
-		t.Fatalf("explicit smoke = %q, %q, %d", command, source, timeoutS)
+	command, source, expectation, timeoutS := productSmokeConfig(config.RunApp{Command: "./ui", Smoke: "./ui --headless"})
+	if command != "./ui --headless" || source != "run.smoke" || expectation != "exit" || timeoutS != 3 {
+		t.Fatalf("explicit smoke = %q, %q, %q, %d", command, source, expectation, timeoutS)
 	}
-	command, source, timeoutS = productSmokeConfig(config.RunApp{Command: "./ui", SmokeTimeoutS: 9})
-	if command != "./ui" || source != "run.command" || timeoutS != 9 {
-		t.Fatalf("command fallback = %q, %q, %d", command, source, timeoutS)
+	command, source, expectation, timeoutS = productSmokeConfig(config.RunApp{Command: "./ui", SmokeTimeoutS: 9})
+	if command != "./ui" || source != "run.command" || expectation != "live" || timeoutS != 9 {
+		t.Fatalf("command fallback = %q, %q, %q, %d", command, source, expectation, timeoutS)
 	}
 }
 
 func TestProductSmokeNoteUsesTheConfiguredObservationWindow(t *testing.T) {
-	note, err := smokeRunCommand(context.Background(), t.TempDir(), "printf 'warming up\\n'; sleep 30", "run.smoke", 1, "product-smoke", "demo")
+	note, err := smokeRunCommand(context.Background(), t.TempDir(), "printf 'warming up\\n'; sleep 30", "run.smoke", "live", 1, "product-smoke", "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(note, "run.smoke stayed alive for 1s") || !strings.Contains(note, "warming up") {
+	if !strings.Contains(note, "run.smoke met expectation live: stayed alive for 1s") || !strings.Contains(note, "warming up") {
 		t.Fatalf("configured smoke note = %q", note)
+	}
+}
+
+func TestLiveProductSmokeRejectsCleanEarlyExit(t *testing.T) {
+	_, err := smokeRunCommand(context.Background(), t.TempDir(), "printf 'gui could not open display\\n'; exit 0", "run.command", "live", 2, "product-smoke", "demo")
+	if err == nil {
+		t.Fatal("interactive command exited immediately with status 0 but passed liveness")
+	}
+	for _, want := range []string{"expected live", "exited early with status 0", "gui could not open display"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestExitProductSmokeRejectsLongLivedProcess(t *testing.T) {
+	_, err := smokeRunCommand(context.Background(), t.TempDir(), "sleep 30", "run.smoke", "exit", 1, "product-smoke", "demo")
+	if err == nil || !strings.Contains(err.Error(), "expected exit within 1s but stayed alive") {
+		t.Fatalf("exit expectation = %v", err)
+	}
+}
+
+func TestProductSmokeExpectationCanOverrideDerivedDefault(t *testing.T) {
+	_, _, expectation, _ := productSmokeConfig(config.RunApp{Command: "./ui", SmokeExpect: "exit"})
+	if expectation != "exit" {
+		t.Fatalf("explicit expectation = %q", expectation)
+	}
+	_, _, expectation, _ = productSmokeConfig(config.RunApp{Smoke: "./check", URL: "http://localhost", SmokeExpect: "live"})
+	if expectation != "live" {
+		t.Fatalf("explicit expectation = %q", expectation)
 	}
 }

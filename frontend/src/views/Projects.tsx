@@ -332,11 +332,12 @@ export function Projects({
                 <div className="mt-2 space-y-1 border-t border-hairline pt-2">
                   <AppChip
                     status={apps[p.id]}
-                    onSet={async (command, smoke, smokeTimeoutS, url, health, preflight, requires) => {
+                    onSet={async (command, smoke, smokeExpectation, smokeTimeoutS, url, health, preflight, requires) => {
                       try {
                         await client.projectUpdate(p.id, {
                           "run.command": command, "run.url": url, "run.health": health,
                           "run.smoke": smoke, "run.smoke_timeout_s": smokeTimeoutS,
+                          "run.smoke_expect": smokeExpectation,
                           "run.preflight": preflight, "run.requires": requires,
                         });
                         const a = await client.appStatus(p.id);
@@ -385,11 +386,12 @@ function AppChip({
   onSet,
 }: {
   status?: AppStatus;
-  onSet: (command: string, smoke: string, smokeTimeoutS: string, url: string, health: string, preflight: string, requires: string) => Promise<void>;
+  onSet: (command: string, smoke: string, smokeExpectation: string, smokeTimeoutS: string, url: string, health: string, preflight: string, requires: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [command, setCommand] = useState("");
   const [smoke, setSmoke] = useState("");
+  const [smokeExpectation, setSmokeExpectation] = useState("");
   const [smokeTimeoutS, setSmokeTimeoutS] = useState("");
   const [url, setUrl] = useState("");
   const [health, setHealth] = useState("");
@@ -419,6 +421,19 @@ function AppChip({
     <div className="mt-1 w-full max-w-xl space-y-1" data-testid="app-editor">
       {field("command", command, setCommand, "python app.py — starts the app", "app-command")}
       {field("smoke", smoke, setSmoke, "python app.py --headless — gate command (optional)", "app-smoke")}
+      <label className="flex items-center gap-2 text-xs text-ink-muted">
+        <span className="w-16 shrink-0">expects</span>
+        <select
+          value={smokeExpectation}
+          onChange={(e) => setSmokeExpectation(e.target.value)}
+          data-testid="app-smoke-expect"
+          className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
+        >
+          <option value="">auto (derived)</option>
+          <option value="exit">exit 0</option>
+          <option value="live">stays live</option>
+        </select>
+      </label>
       {field("smoke wait", smokeTimeoutS, setSmokeTimeoutS, "3 — seconds before a live process passes", "app-smoke-timeout")}
       {field("url", url, setUrl, "http://localhost:8000", "app-url")}
       {field("health", health, setHealth, "http://localhost:8000/health (optional)", "app-health")}
@@ -428,7 +443,7 @@ function AppChip({
         <button
           type="button"
           disabled={command.trim() === "" && smoke.trim() === ""}
-          onClick={() => void onSet(command.trim(), smoke.trim(), smokeTimeoutS.trim() || "0", url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
+          onClick={() => void onSet(command.trim(), smoke.trim(), smokeExpectation, smokeTimeoutS.trim() || "0", url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
           data-testid="app-save"
           className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
         >
@@ -457,6 +472,7 @@ function AppChip({
             onClick={() => {
               setCommand(status.command ?? "");
               setSmoke(status.smoke ?? "");
+              setSmokeExpectation(status.smoke_expectation ?? "");
               setSmokeTimeoutS(String(status.smoke_timeout_s ?? 3));
               setUrl(status.url ?? "");
               setHealth("");
@@ -473,7 +489,7 @@ function AppChip({
       </div>
       {status.smoke_command && (
         <div className="ml-12 mt-1 flex min-w-0 items-center gap-1 text-xs text-ink-muted" data-testid="app-smoke-effective">
-          <span className="shrink-0">gate smoke ({status.smoke_source === "run.smoke" ? "run.smoke" : "run.command fallback"}, {status.smoke_timeout_s ?? 3}s):</span>
+          <span className="shrink-0">gate smoke ({status.smoke_source === "run.smoke" ? "run.smoke" : "run.command fallback"}, expects {status.smoke_expectation}, {status.smoke_timeout_s ?? 3}s):</span>
           <ShellCmd cmd={status.smoke_command} className="min-w-0 truncate font-mono text-ink-secondary" />
         </div>
       )}
@@ -489,6 +505,7 @@ function AppChip({
               onClick={() => {
                 setCommand(suggestion.command);
                 setSmoke("");
+                setSmokeExpectation("");
                 setSmokeTimeoutS("3");
                 setUrl("");
                 setHealth("");

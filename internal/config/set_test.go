@@ -24,6 +24,7 @@ func TestSetKeyWritesNestedValues(t *testing.T) {
 		{"render.timeout_s", "9", func() bool { return cfg.Render.TimeoutS == 9 }},
 		{"render.artifacts", "captures/*.png", func() bool { return cfg.Render.Artifacts == "captures/*.png" }},
 		{"run.smoke", "./app --headless", func() bool { return cfg.Run.Smoke == "./app --headless" }},
+		{"run.smoke_expect", "live", func() bool { return cfg.Run.SmokeExpect == "live" }},
 		{"run.smoke_timeout_s", "8", func() bool { return cfg.Run.SmokeTimeoutS == 8 }},
 	} {
 		if err := SetKey(cfg, tc.key, tc.val); err != nil {

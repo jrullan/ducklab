@@ -76,6 +76,7 @@ describe("Projects", () => {
     fireEvent.click(screen.getByTestId("app-save"));
     await waitFor(() => expect(client.projectUpdate).toHaveBeenCalledWith("alpha", {
       "run.command": "./build/capture-ui", "run.smoke": "", "run.smoke_timeout_s": "3",
+      "run.smoke_expect": "",
       "run.url": "", "run.health": "", "run.preflight": "", "run.requires": "",
     }));
   });
@@ -88,16 +89,18 @@ describe("Projects", () => {
       smoke: "./capture-ui --headless",
       smoke_command: "./capture-ui --headless",
       smoke_source: "run.smoke",
+      smoke_expectation: "exit",
       smoke_timeout_s: 8,
       running: false,
     });
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
 
-    expect(await screen.findByTestId("app-smoke-effective")).toHaveTextContent("run.smoke, 8s");
+    expect(await screen.findByTestId("app-smoke-effective")).toHaveTextContent("run.smoke, expects exit, 8s");
     expect(screen.getByTestId("app-smoke-effective")).toHaveTextContent("./capture-ui --headless");
     fireEvent.click(screen.getByTestId("app-edit"));
     expect(screen.getByTestId("app-smoke")).toHaveValue("./capture-ui --headless");
     expect(screen.getByTestId("app-smoke-timeout")).toHaveValue("8");
+    expect(screen.getByTestId("app-smoke-expect")).toHaveValue("exit");
   });
 
   it("shows the engine's refusal rather than failing silently", async () => {
