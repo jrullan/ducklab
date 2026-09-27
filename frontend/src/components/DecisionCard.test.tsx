@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { DecisionCard } from "./DecisionCard";
+import { DecisionCard, documentDissentNote } from "./DecisionCard";
 
 describe("DecisionCard document gates", () => {
   it("makes request changes primary and names discard as the destructive exit", () => {
@@ -113,5 +113,61 @@ describe("DecisionCard composes the whole gate decision", () => {
     expect(screen.getByTestId("landed-notice").textContent).toContain("second change on top");
     rerender(<DecisionCard next={["accept", "reject"]} title="t" consequence="commits the diff" onAccept={() => {}} onReject={() => {}} />);
     expect(screen.queryByTestId("landed-notice")).toBeNull();
+  });
+});
+
+describe("DecisionCard — a document draft the reviewer sent back", () => {
+  it("explains why Accept is absent, lists the findings inside the card, and starts the note from them", () => {
+    render(
+      <DecisionCard
+        next={["request_changes", "reject"]}
+        title="Proposal awaiting your decision"
+        consequence="replaces the approved spec and closes the run"
+        onAccept={() => {}}
+        onReject={() => {}}
+        onRequestChanges={async () => {}}
+        documentGate
+        documentDissent={{
+          blocking: true,
+          findings: [
+            { severity: "major", file: "SPEC-002", line: 21, issue: "Transitions still name a modifier key press", fix: "trigger on pointer release" },
+            { issue: "capture_target is assigned twice" },
+          ],
+        }}
+      />,
+    );
+    const card = screen.getByTestId("decision-card");
+    expect(within(card).getByTestId("stage-dissent-why").textContent).toContain("cannot be accepted");
+    expect(within(card).getByTestId("stage-dissent-list").textContent).toContain("SPEC-002:21");
+    const note = within(card).getByTestId("change-note") as HTMLTextAreaElement;
+    expect(note.value).toBe(
+      "- [major] Transitions still name a modifier key press (SPEC-002:21) Fix: trigger on pointer release\n- capture_target is assigned twice",
+    );
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
+    expect(within(card).getByTestId("request-changes-button")).not.toBeDisabled();
+  });
+
+  it("says the notes are advisory when Accept is still offered", () => {
+    render(
+      <DecisionCard
+        next={["accept", "request_changes", "reject"]}
+        title="Proposal awaiting your decision"
+        consequence="replaces the approved spec"
+        onAccept={() => {}}
+        onReject={() => {}}
+        onRequestChanges={async () => {}}
+        documentGate
+        documentDissent={{ blocking: false, findings: [{ severity: "minor", issue: "a wording nit" }] }}
+      />,
+    );
+    expect(screen.getByTestId("stage-dissent-why").textContent).toContain("not bugs");
+    expect(screen.getByTestId("cycle-accept")).toBeInTheDocument();
+  });
+
+  it("formats an empty finding list as an empty note", () => {
+    expect(documentDissentNote([])).toBe("");
+    // Every field of the finding contract rides along; invariant included.
+    expect(documentDissentNote([{ severity: "minor", file: "SPEC-003", issue: "x", invariant: "no capture leaves the overlay mapped", fix: "y" }]))
+      .toBe("- [minor] x (SPEC-003) Invariant: no capture leaves the overlay mapped Fix: y");
   });
 });
