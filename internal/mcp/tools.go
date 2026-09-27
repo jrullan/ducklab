@@ -366,6 +366,39 @@ func (a args) bool(k string) bool {
 	return v
 }
 
+// validateRequiredArgs enforces the same contract tools/list advertises. MCP
+// clients usually validate that schema themselves, but they are not required
+// to: letting an omitted id degrade into an empty path makes the engine answer
+// a false domain error such as "bug not found". Keep the schema as the single
+// source of truth instead of maintaining a second required-fields table.
+func validateRequiredArgs(name string, a args) error {
+	var declared map[string]interface{}
+	for _, tool := range toolList() {
+		if tool["name"] == name {
+			declared = tool
+			break
+		}
+	}
+	if declared == nil && (name == "pull" || name == "push" || name == "pr") {
+		declared = remoteTool(name)
+	}
+	if declared == nil {
+		return nil
+	}
+	schema, _ := declared["inputSchema"].(map[string]interface{})
+	required, _ := schema["required"].([]string)
+	for _, field := range required {
+		value, present := a[field]
+		if !present || value == nil {
+			return fmt.Errorf("field %s is required for %s; next: provide %s", field, name, field)
+		}
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			return fmt.Errorf("field %s is required for %s; next: provide %s", field, name, field)
+		}
+	}
+	return nil
+}
+
 func (s *Server) roster(a args) (map[string]interface{}, error) {
 	action, scope := a.str("action"), a.str("scope")
 	if action != "get" && action != "set" && action != "unpin" {
@@ -424,6 +457,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("arguments did not parse: %v", err)
 		}
+	}
+	if err := validateRequiredArgs(name, a); err != nil {
+		return nil, err
 	}
 	switch name {
 	case "pull", "push", "pr":

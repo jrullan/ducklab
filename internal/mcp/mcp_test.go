@@ -59,6 +59,7 @@ type fakeEngine struct {
 	lastRosterDucklings []string
 	lastRosterUnpin     string
 	rosterViews         map[string]map[string]interface{}
+	bugMoveCalls        int
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -802,6 +803,7 @@ func (f *fakeEngine) BugPromote(projectID, bugID, actor, note string) (map[strin
 }
 
 func (f *fakeEngine) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
+	f.bugMoveCalls++
 	return map[string]interface{}{"status": status}, nil
 }
 
@@ -937,6 +939,23 @@ func TestBugTriageCarriesPerRunOverrides(t *testing.T) {
 	}
 	if eng.lastTriageReq["agent_turns"] != float64(7) {
 		t.Errorf("agent_turns = %#v, want 7", eng.lastTriageReq["agent_turns"])
+	}
+}
+
+func TestMissingRequiredToolArgumentIsNamedBeforeCallingTheEngine(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "bug_move", `{"project_id":"p","status":"verified"}`),
+	)
+	text, isErr := toolResultText(t, resps[1])
+	if !isErr {
+		t.Fatalf("bug_move without bug_id succeeded: %s", text)
+	}
+	if !strings.Contains(text, "field bug_id is required for bug_move") || strings.Contains(text, "bug not found") {
+		t.Fatalf("missing bug_id result = %q", text)
+	}
+	if eng.bugMoveCalls != 0 {
+		t.Fatalf("engine BugMove calls = %d, want 0", eng.bugMoveCalls)
 	}
 }
 
