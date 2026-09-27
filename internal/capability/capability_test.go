@@ -967,6 +967,66 @@ func TestProjectCapabilitiesComposeGoAndFrontendFromEvidence(t *testing.T) {
 	}
 }
 
+func TestStackProvidersProposeRunCommandsFromBuildMetadata(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  []string
+	}{
+		{"go commands", map[string]string{
+			"go.mod": "module example.com/app\n\ngo 1.24\n", "main.go": "package main\nfunc main() {}\n",
+			"cmd/worker/main.go": "package main\nfunc main() {}\n",
+		}, []string{"go run .", "go run ./cmd/worker"}},
+		{"rust binaries", map[string]string{
+			"Cargo.toml": "[package]\nname='fledge'\nversion='0.1.0'\n", "src/main.rs": "fn main() {}\n", "src/bin/helper.rs": "fn main() {}\n",
+		}, []string{"cargo run --bin fledge", "cargo run --bin helper"}},
+		{"node scripts", map[string]string{
+			"package.json": `{"scripts":{"start":"node server.js","dev":"vite"}}`,
+		}, []string{"npm run start", "npm run dev"}},
+		{"meson executables", map[string]string{
+			"meson.build": "project('app', 'c')\nsubdir('src')\n", "src/meson.build": "executable('capture-ui', 'main.c')\n",
+		}, []string{"./build/src/capture-ui"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for path, body := range test.files {
+				writeFixture(t, root, path, body)
+			}
+			profile, _ := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+			var commands []string
+			for _, candidate := range profile.RunCommands {
+				commands = append(commands, candidate.Command)
+			}
+			for _, want := range test.want {
+				if !slices.Contains(commands, want) {
+					t.Errorf("run candidates %v lack %q", commands, want)
+				}
+			}
+		})
+	}
+}
+
+func TestMesonExecutableTargetRequiresAProductSmokeProbe(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "meson.build", "project('fixture', 'c')\nexecutable('fixture-app', 'main.c')\n")
+	context := PlanTaskContext{
+		ID: "T-002", ProjectRoot: root,
+		Body:         "**Produces:** build-target:fixture-app\n\n**Acceptance probes:**\n1. `meson compile -C build`\n",
+		Verification: "meson compile -C build",
+	}
+	findings := DefaultRegistry().InspectPlanTask(context)
+	if !slices.ContainsFunc(findings, func(f Inspection) bool {
+		return f.Name == "executable-smoke" && strings.Contains(f.Detail, "./build/fixture-app")
+	}) {
+		t.Fatalf("missing executable-smoke finding: %+v", findings)
+	}
+	context.Body = "**Produces:** build-target:fixture-app\n\n**Acceptance probes:**\n1. `xvfb-run -a ./build/fixture-app --help`\n"
+	if findings := DefaultRegistry().InspectPlanTask(context); slices.ContainsFunc(findings, func(f Inspection) bool { return f.Name == "executable-smoke" }) {
+		t.Fatalf("real product smoke was rejected: %+v", findings)
+	}
+}
+
 func TestRustPlanInspectionRejectsNewDisconnectedModules(t *testing.T) {
 	root := t.TempDir()
 	findings := DefaultRegistry().InspectPlanTask(PlanTaskContext{

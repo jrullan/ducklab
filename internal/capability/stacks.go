@@ -42,6 +42,7 @@ func (Go) Detect(ctx Context) Contributions {
 		} else {
 			c.Gates = append(c.Gates, GateCandidate{Capability: "go", Kind: "build", Command: "go build ./...", Scope: ".", Priority: 50})
 		}
+		c.RunCommands = (Go{}).DetectRunCommands(ctx)
 	}
 	if hasLint {
 		c.Detection.Evidence = append(c.Detection.Evidence, ".golangci.yml")
@@ -49,6 +50,8 @@ func (Go) Detect(ctx Context) Contributions {
 	}
 	return c
 }
+
+func (Go) DetectRunCommands(ctx Context) []RunCandidate { return goRunCandidates(ctx.ProjectRoot) }
 
 type Python struct{}
 
@@ -93,6 +96,7 @@ func (Node) Detect(ctx Context) Contributions {
 			c.LaneHints.TestRoots = append(c.LaneHints.TestRoots, existingDirs(ctx.ProjectRoot, "tests", "test", "__tests__")...)
 			c.Gates = append(c.Gates, GateCandidate{Capability: "node", Kind: "tests", Command: "npm test --silent", Scope: ".", Priority: 30})
 		}
+		c.RunCommands = (Node{}).DetectRunCommands(ctx)
 	}
 	frontendPackage := filepath.Join(ctx.ProjectRoot, "frontend", "package.json")
 	if fileExistsPath(frontendPackage) && hasTestScript(frontendPackage) {
@@ -117,6 +121,10 @@ func (Node) Detect(ctx Context) Contributions {
 	return c
 }
 
+func (Node) DetectRunCommands(ctx Context) []RunCandidate {
+	return nodeRunCandidates(filepath.Join(ctx.ProjectRoot, "package.json"))
+}
+
 type Rust struct{}
 
 func (Rust) ID() string { return "rust" }
@@ -125,11 +133,14 @@ func (Rust) Detect(ctx Context) Contributions {
 		return Contributions{}
 	}
 	return Contributions{
-		Detection: Detection{Capability: "rust", Evidence: []string{"Cargo.toml"}},
-		Gates:     []GateCandidate{{Capability: "rust", Kind: "tests", Command: "cargo test", Scope: ".", Priority: 40}},
-		LaneHints: LaneHints{TestRoots: existingDirs(ctx.ProjectRoot, "tests"), TestRegistrationFiles: []string{"Cargo.toml"}},
+		Detection:   Detection{Capability: "rust", Evidence: []string{"Cargo.toml"}},
+		Gates:       []GateCandidate{{Capability: "rust", Kind: "tests", Command: "cargo test", Scope: ".", Priority: 40}},
+		RunCommands: (Rust{}).DetectRunCommands(ctx),
+		LaneHints:   LaneHints{TestRoots: existingDirs(ctx.ProjectRoot, "tests"), TestRegistrationFiles: []string{"Cargo.toml"}},
 	}
 }
+
+func (Rust) DetectRunCommands(ctx Context) []RunCandidate { return rustRunCandidates(ctx.ProjectRoot) }
 
 // InspectPlanTask catches new Rust modules whose proposed Cargo verification
 // cannot discover them. Cargo compiles crate and target roots, not every .rs
@@ -235,10 +246,15 @@ func (Meson) Detect(ctx Context) Contributions {
 		}
 	}
 	return Contributions{
-		Detection: Detection{Capability: "meson", Evidence: []string{"meson.build"}},
-		Gates:     []GateCandidate{candidate},
-		LaneHints: LaneHints{TestRoots: testRoots, TestRegistrationFiles: registration},
+		Detection:   Detection{Capability: "meson", Evidence: []string{"meson.build"}},
+		Gates:       []GateCandidate{candidate},
+		RunCommands: (Meson{}).DetectRunCommands(ctx),
+		LaneHints:   LaneHints{TestRoots: testRoots, TestRegistrationFiles: registration},
 	}
+}
+
+func (Meson) DetectRunCommands(ctx Context) []RunCandidate {
+	return mesonRunCandidates(ctx.ProjectRoot)
 }
 
 func (Meson) ObserveGate(observation GateObservation) []GateFinding {
@@ -294,7 +310,31 @@ var mesonTestCall = regexp.MustCompile(`(?m)(?:^|&&|;)\s*meson\s+test(?:\s+[^;&|
 // exist under the accepted write lane. This is stack knowledge: the document
 // core transports an ordinary required finding and never parses Meson syntax.
 func (Meson) InspectPlanTask(ctx PlanTaskContext) []Inspection {
-	return inspectMesonAcceptanceProbes(ctx.ProjectRoot, planCommandChecklist(ctx.Body, "Acceptance probes"), append(planFieldItems(ctx.Body, "Produces"), planFieldItems(ctx.Body, "Modifies")...))
+	probes := planCommandChecklist(ctx.Body, "Acceptance probes")
+	findings := inspectMesonAcceptanceProbes(ctx.ProjectRoot, probes, append(planFieldItems(ctx.Body, "Produces"), planFieldItems(ctx.Body, "Modifies")...))
+	produces := planFieldItems(ctx.Body, "Produces")
+	commands := append(append([]string{}, probes...), strings.Trim(strings.TrimSpace(ctx.Verification), "`"))
+	for _, candidate := range mesonRunCandidates(ctx.ProjectRoot) {
+		if candidate.Target == "" || !slices.Contains(produces, candidate.Target) || commandsRunCandidate(commands, candidate.Command) {
+			continue
+		}
+		findings = append(findings, Inspection{
+			Capability: "meson", Name: "executable-smoke", Enforcement: Required,
+			Detail: fmt.Sprintf("%s declares executable %s but none of its Acceptance probes or Verification starts %s; add a display-less --help/--version, health, or bounded launch smoke so compiling the target cannot satisfy the task", ctx.ID, candidate.Target, candidate.Command),
+		})
+	}
+	return findings
+}
+
+func commandsRunCandidate(commands []string, candidate string) bool {
+	want := strings.TrimPrefix(filepath.ToSlash(candidate), "./")
+	for _, command := range commands {
+		command = filepath.ToSlash(command)
+		if strings.Contains(command, candidate) || strings.Contains(command, "./"+want) {
+			return true
+		}
+	}
+	return false
 }
 
 func planCommandChecklist(body, label string) []string {
@@ -535,6 +575,130 @@ func hasTestScript(path string) bool {
 	content := string(data)
 	return strings.Contains(content, `"test"`) &&
 		!strings.Contains(content, `"test": "echo \"Error: no test specified\" && exit 1"`)
+}
+
+func nodeRunCandidates(path string) []RunCandidate {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return nil
+	}
+	var out []RunCandidate
+	for _, name := range []string{"start", "dev"} {
+		if strings.TrimSpace(manifest.Scripts[name]) != "" {
+			out = append(out, RunCandidate{Capability: "node", Command: "npm run " + name, Evidence: "package.json scripts." + name, Priority: 20 + len(out)})
+		}
+	}
+	return out
+}
+
+func goRunCandidates(root string) []RunCandidate {
+	var out []RunCandidate
+	if directoryHasGoMain(root) {
+		out = append(out, RunCandidate{Capability: "go", Command: "go run .", Evidence: "root package main", Priority: 20})
+	}
+	entries, _ := os.ReadDir(filepath.Join(root, "cmd"))
+	for _, entry := range entries {
+		if entry.IsDir() && directoryHasGoMain(filepath.Join(root, "cmd", entry.Name())) {
+			out = append(out, RunCandidate{Capability: "go", Command: "go run ./cmd/" + entry.Name(), Evidence: "cmd/" + entry.Name() + " package main", Priority: 30})
+		}
+	}
+	return out
+}
+
+func directoryHasGoMain(dir string) bool {
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err == nil && regexp.MustCompile(`(?m)^\s*package\s+main\s*$`).Match(body) {
+			return true
+		}
+	}
+	return false
+}
+
+func rustRunCandidates(root string) []RunCandidate {
+	var out []RunCandidate
+	entries, _ := os.ReadDir(filepath.Join(root, "src", "bin"))
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".rs" {
+			name := strings.TrimSuffix(entry.Name(), ".rs")
+			out = append(out, RunCandidate{Capability: "rust", Command: "cargo run --bin " + name, Evidence: "src/bin/" + entry.Name(), Priority: 20})
+		}
+	}
+	if fileExists(root, "src/main.rs") {
+		command := "cargo run"
+		if len(out) > 0 {
+			if name := cargoPackageName(root); name != "" {
+				command = "cargo run --bin " + name
+			}
+		}
+		out = append([]RunCandidate{{Capability: "rust", Command: command, Evidence: "src/main.rs", Priority: 10}}, out...)
+	}
+	return out
+}
+
+func cargoPackageName(root string) string {
+	body, err := os.ReadFile(filepath.Join(root, "Cargo.toml"))
+	if err != nil {
+		return ""
+	}
+	inPackage := false
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			inPackage = line == "[package]"
+			continue
+		}
+		if inPackage && strings.HasPrefix(line, "name") {
+			if _, value, ok := strings.Cut(line, "="); ok {
+				return strings.Trim(strings.TrimSpace(value), "'\"")
+			}
+		}
+	}
+	return ""
+}
+
+func mesonRunCandidates(root string) []RunCandidate {
+	call := regexp.MustCompile(`(?m)\bexecutable\s*\(\s*['"]([^'"]+)['"]`)
+	var out []RunCandidate
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".ducklab", "build", "node_modules", "vendor":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if entry.Name() != "meson.build" {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		relDir, _ := filepath.Rel(root, filepath.Dir(path))
+		for _, match := range call.FindAllSubmatch(body, -1) {
+			name := string(match[1])
+			binary := filepath.ToSlash(filepath.Join("build", relDir, name))
+			out = append(out, RunCandidate{Capability: "meson", Command: "./" + binary, Evidence: filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))) + " executable('" + name + "')", Target: "build-target:" + name, Priority: 10})
+		}
+		return nil
+	})
+	return out
 }
 func pythonInterpreter() string {
 	// Modern Debian/Ubuntu may ship python3 without a python alias. A detected

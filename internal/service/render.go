@@ -22,6 +22,36 @@ type renderOutcome struct {
 	Note     string
 }
 
+// smokeRunCommand closes the gap between "compiled" and "runs". A command
+// that exits successfully is a valid CLI smoke; a long-lived GUI/server that
+// survives the observation window is stopped and counted as live. Because the
+// command is the human-approved run.command, this adds no inferred executable
+// authority to the gate.
+func smokeRunCommand(ctx context.Context, root, command, runID, projectID string) (string, error) {
+	if strings.TrimSpace(command) == "" {
+		return "", nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	parentCtx := ctx
+	smokeCtx, cancel := context.WithTimeout(parentCtx, 3*time.Second)
+	defer cancel()
+	env := append(os.Environ(), "DUCKLAB_RUN_ID="+runID, "DUCKLAB_PROJECT_ID="+projectID)
+	out, commandErr := xplat.ShellContext(smokeCtx, root, env, command).CombinedOutput()
+	if commandErr == nil {
+		return "run.command exited successfully", nil
+	}
+	if smokeCtx.Err() == context.DeadlineExceeded && parentCtx.Err() == nil {
+		note := "run.command stayed alive for 3s; stopped after the product-smoke observation window"
+		if output := renderNoteOutput(out); output != "" {
+			note += "; output: " + output
+		}
+		return note, nil
+	}
+	return "", fmt.Errorf("run.command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+}
+
 func captureRender(ctx context.Context, root string, contract config.RenderContract, writer *runlog.Writer, runID, projectID string) (renderOutcome, error) {
 	if strings.TrimSpace(contract.Command) == "" {
 		return renderOutcome{}, nil

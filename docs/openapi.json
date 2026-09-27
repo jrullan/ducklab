@@ -2210,6 +2210,12 @@
           "started_at": {
             "type": "string"
           },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAppSuggestion"
+            },
+            "type": "array"
+          },
           "url": {
             "type": "string"
           }
@@ -2217,6 +2223,25 @@
         "required": [
           "configured",
           "running"
+        ],
+        "type": "object"
+      },
+      "ServiceAppSuggestion": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "command",
+          "evidence"
         ],
         "type": "object"
       },

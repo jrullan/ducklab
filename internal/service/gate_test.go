@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,26 @@ import (
 
 	"github.com/jrullan/ducklab/internal/config"
 )
+
+func TestOnDemandGateIncludesConfiguredProductSmoke(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "smoke", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.mode": "custom", "verify.custom": "true", "run.command": "printf 'product crashed\\n' >&2; exit 7",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.GateRun(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Green || result.ExitCode == 0 || !strings.Contains(result.Output, "blocking product smoke") || !strings.Contains(result.Output, "product crashed") {
+		t.Fatalf("gate did not include the red product smoke: %+v", result)
+	}
+}
 
 // A project with no gate produces UNVERIFIED forever and says nothing about
 // it. The note is what turns "why does nothing ever pass" into one line at the

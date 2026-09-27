@@ -59,6 +59,26 @@ describe("Projects", () => {
     expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(true);
   });
 
+  it("offers a detected run command without applying it until the person saves", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    (client.appStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: false,
+      running: false,
+      suggestions: [{ command: "./build/capture-ui", capability: "meson", evidence: "src/meson.build executable('capture-ui')" }],
+    });
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+
+    const offer = await screen.findByTestId("app-use-suggestion");
+    expect(offer).toHaveTextContent("./build/capture-ui");
+    expect(client.projectUpdate).not.toHaveBeenCalled();
+    fireEvent.click(offer);
+    expect(screen.getByTestId("app-command")).toHaveValue("./build/capture-ui");
+    fireEvent.click(screen.getByTestId("app-save"));
+    await waitFor(() => expect(client.projectUpdate).toHaveBeenCalledWith("alpha", {
+      "run.command": "./build/capture-ui", "run.url": "", "run.health": "", "run.preflight": "", "run.requires": "",
+    }));
+  });
+
   it("shows the engine's refusal rather than failing silently", async () => {
     const client = clientWith([]);
     (client.projectInit as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
@@ -373,4 +393,3 @@ describe("Projects — the path field", () => {
     expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(false);
   });
 });
-

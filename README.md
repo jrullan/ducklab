@@ -235,7 +235,11 @@ Your project declares its own truth in `.ducklab/project.toml`: the gate
 (`[verify]` — with `link_deps` and `setup` for what a clean checkout needs),
 how the app launches (`[run]` with a preflight), and how the project's own
 binaries are rebuilt (`[install]`) so the whole loop runs without leaving
-ducklab.
+ducklab. Stack capabilities propose `run.command` choices from build metadata
+(for example Meson executables, Cargo bins, Go main packages, or Node scripts),
+but a person must adopt one. Once configured, every otherwise-green build gate
+also starts that command: a clean exit or surviving the observation window is
+the product smoke that closes the gap between “compiled” and “runs”.
 
 Gate and shell process trees always receive `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID`. For example, excercise-tracker can use `DATABASE_URL=test_db_${DUCKLAB_RUN_ID}` in `[verify].tests`, and a compose preflight can use `${DUCKLAB_PROJECT_ID}` as its per-run project name. Ducklab guarantees identity only; provisioning and teardown remain the project's.
 

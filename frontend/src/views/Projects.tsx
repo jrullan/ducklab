@@ -465,6 +465,30 @@ function AppChip({
         )}
       </div>
       {editor}
+      {!status.configured && !editing && (status.suggestions?.length ?? 0) > 0 && (
+        <div className="ml-12 mt-1 space-y-1" data-testid="app-suggestions">
+          <div className="text-xs text-ink-muted">Detected from the build system:</div>
+          {status.suggestions!.map((suggestion) => (
+            <button
+              type="button"
+              key={`${suggestion.capability}:${suggestion.command}`}
+              title={suggestion.evidence}
+              onClick={() => {
+                setCommand(suggestion.command);
+                setUrl("");
+                setHealth("");
+                setPreflight("");
+                setRequires("");
+                setEditing(true);
+              }}
+              className="block text-left font-mono text-xs text-ink underline"
+              data-testid="app-use-suggestion"
+            >
+              use {suggestion.command} <span className="font-sans text-ink-muted">· {suggestion.capability}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

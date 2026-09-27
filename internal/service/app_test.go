@@ -92,6 +92,42 @@ func TestTheEngineStartsProbesAndStopsTheApp(t *testing.T) {
 	}
 }
 
+func TestAppStatusSuggestsButDoesNotAdoptDetectedRunCommands(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "meson.build"), []byte("project('fixture', 'c')\nexecutable('fixture-app', 'main.c')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := s.AppStatus(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Configured || status.Command != "" {
+		t.Fatalf("detection silently configured the app: %+v", status)
+	}
+	if len(status.Suggestions) != 1 || status.Suggestions[0].Command != "./build/fixture-app" || status.Suggestions[0].Capability != "meson" {
+		t.Fatalf("run suggestions = %+v", status.Suggestions)
+	}
+	findings, err := s.ConfigDoctor(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		if finding.Key == "run.command" && finding.Proposed == "./build/fixture-app" && strings.Contains(finding.Reason, "meson.build") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("doctor did not propose the detected run.command: %+v", findings)
+	}
+}
+
 // A command that dies on its own leaves its exit and its last words on the
 // status — the first thing a person needs when Launch appears to do nothing.
 func TestACrashedAppReportsItsExit(t *testing.T) {

@@ -642,7 +642,14 @@ export interface ServiceAppStatus {
   requires?: string;
   running?: boolean;
   started_at?: string;
+  suggestions?: ServiceAppSuggestion[];
   url?: string;
+}
+
+export interface ServiceAppSuggestion {
+  capability?: string;
+  command?: string;
+  evidence?: string;
 }
 
 export interface ServiceArtifactLintDiagnostic {

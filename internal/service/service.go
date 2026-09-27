@@ -813,7 +813,27 @@ func (s *Service) configDoctorAt(projectPath string) ([]config.Finding, error) {
 	s.cfgMu.RLock()
 	globalOnAccept := s.cfg.Remote.OnAccept
 	s.cfgMu.RUnlock()
-	return config.DoctorWithOnAccept(projectPath, globalOnAccept)
+	findings, err := config.DoctorWithOnAccept(projectPath, globalOnAccept)
+	if err != nil {
+		return nil, err
+	}
+	project, err := config.LoadProject(filepath.Join(projectPath, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(project.Run.Command) == "" {
+		candidates, _ := capability.DefaultRegistry().ResolveRunCommands(
+			capability.Context{ProjectRoot: projectPath, Policies: project.Capabilities.Policy},
+			project.Capabilities.Auto, project.Capabilities.Enabled, project.Capabilities.Disabled,
+		)
+		if len(candidates) > 0 {
+			findings = append(findings, config.Finding{
+				Key: "run.command", Proposed: candidates[0].Command,
+				Reason: fmt.Sprintf("%s declares a runnable product (%s), but no product smoke is configured", candidates[0].Evidence, candidates[0].Capability),
+			})
+		}
+	}
+	return findings, nil
 }
 
 // ProjectUpdate applies dotted keys to a project's config and saves it.
@@ -2078,6 +2098,19 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 		}
 	}
+	appSmokeGate := "none"
+	if taskGate != "red" && probeGate != "red" && verify.IsGreen(gateResult) && strings.TrimSpace(projCfg.Run.Command) != "" {
+		note, smokeErr := smokeRunCommand(ctx, ectx.ProjectRoot, projCfg.Run.Command, rs.run.ID, rs.run.ProjectID)
+		if smokeErr != nil {
+			appSmokeGate = "red"
+			verificationOutput = "blocking product smoke: " + smokeErr.Error() + "\n\nprior successful verification evidence:\n" + verificationOutput
+			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": false, "command": projCfg.Run.Command, "reason": smokeErr.Error()})
+		} else {
+			appSmokeGate = "green"
+			verificationOutput += "\nproduct smoke: " + note
+			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": true, "command": projCfg.Run.Command, "note": note})
+		}
+	}
 	// Rendering is optional evidence and a failure is only a caveat.
 	render := projCfg.Render
 	if projCfg.RenderConfigured {
@@ -2108,7 +2141,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	effectiveGate := string(gateResult.Gate)
 	effectiveExit := gateResult.ExitCode
-	if taskGate == "red" || probeGate == "red" {
+	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" {
 		effectiveGate = "red"
 		if effectiveExit == 0 {
 			effectiveExit = 1

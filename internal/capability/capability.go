@@ -46,6 +46,18 @@ type GateCandidate struct {
 	Unavailable  error
 }
 
+// RunCandidate is a stack provider's read-only proposal for starting the
+// built product. It is never applied automatically: run.command is human
+// configuration, but the build adapter can provide a concrete choice instead
+// of leaving the person to reverse-engineer its output layout.
+type RunCandidate struct {
+	Capability string
+	Command    string
+	Evidence   string
+	Target     string
+	Priority   int
+}
+
 // Check is an executable contribution from a resolved capability.
 type Check struct {
 	Capability  string
@@ -128,6 +140,7 @@ type ReviewFindingInspection struct {
 type Contributions struct {
 	Detection   Detection
 	Gates       []GateCandidate
+	RunCommands []RunCandidate
 	ReviewRules []ReviewRule
 	// LaneHints identify shared test infrastructure a task may need to edit.
 	// Providers own this stack knowledge; promotion and execution only compose
@@ -144,6 +157,7 @@ type LaneHints struct {
 type Profile struct {
 	Detections  []Detection
 	Gate        *GateCandidate
+	RunCommands []RunCandidate
 	ReviewRules []ReviewRule
 	LaneHints   LaneHints
 }
@@ -157,6 +171,13 @@ type Provider interface {
 type Detector interface {
 	Provider
 	Detect(Context) Contributions
+}
+
+// RunCommandDetector reads build metadata without probing or compiling the
+// project. Project settings call this on every open, so it must stay cheap.
+type RunCommandDetector interface {
+	Provider
+	DetectRunCommands(Context) []RunCandidate
 }
 
 type Checker interface {
@@ -257,8 +278,15 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 		profile.LaneHints.TestRoots = append(profile.LaneHints.TestRoots, contribution.LaneHints.TestRoots...)
 		profile.LaneHints.TestRegistrationFiles = append(profile.LaneHints.TestRegistrationFiles, contribution.LaneHints.TestRegistrationFiles...)
 		gates = append(gates, contribution.Gates...)
+		profile.RunCommands = append(profile.RunCommands, contribution.RunCommands...)
 	}
 	resolveGate(&profile, gates)
+	sort.SliceStable(profile.RunCommands, func(i, j int) bool {
+		if profile.RunCommands[i].Priority == profile.RunCommands[j].Priority {
+			return profile.RunCommands[i].Command < profile.RunCommands[j].Command
+		}
+		return profile.RunCommands[i].Priority < profile.RunCommands[j].Priority
+	})
 	sort.SliceStable(profile.ReviewRules, func(i, j int) bool {
 		if profile.ReviewRules[i].Capability == profile.ReviewRules[j].Capability {
 			return profile.ReviewRules[i].ID < profile.ReviewRules[j].ID
@@ -269,6 +297,28 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 		return profile, profile.Gate.Unavailable
 	}
 	return profile, nil
+}
+
+// ResolveRunCommands composes only launch proposals. Unlike ResolveProject it
+// never runs gate-detection commands such as test collection or compilation.
+func (r *Registry) ResolveRunCommands(ctx Context, auto bool, enabled, disabled []string) ([]RunCandidate, error) {
+	ids, err := r.selected(auto, enabled, disabled)
+	if err != nil {
+		return nil, err
+	}
+	var out []RunCandidate
+	for _, id := range ids {
+		if detector, ok := r.providers[id].(RunCommandDetector); ok {
+			out = append(out, detector.DetectRunCommands(ctx)...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority == out[j].Priority {
+			return out[i].Command < out[j].Command
+		}
+		return out[i].Priority < out[j].Priority
+	})
+	return out, nil
 }
 
 // ResolveChecks returns deterministic per-task diagnostics without running

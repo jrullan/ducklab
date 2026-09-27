@@ -148,3 +148,20 @@ func TestCaptureRenderReportsSmokeCrashBeforeTimeout(t *testing.T) {
 		t.Fatalf("early crash error = %v", err)
 	}
 }
+
+func TestConfiguredRunCommandIsAnExecutableProductSmoke(t *testing.T) {
+	root := t.TempDir()
+	writer, err := runlog.NewWriter(root, &runlog.Run{ID: "product-smoke", ProjectID: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+
+	note, err := smokeRunCommand(context.Background(), root, "printf 'started product\\n'", "product-smoke", "demo")
+	if err != nil || note != "run.command exited successfully" {
+		t.Fatalf("successful product smoke = %q, %v", note, err)
+	}
+	if _, err := smokeRunCommand(context.Background(), root, "printf 'startup failed\\n' >&2; exit 9", "product-smoke", "demo"); err == nil || !strings.Contains(err.Error(), "startup failed") {
+		t.Fatalf("crashing product smoke = %v", err)
+	}
+}
