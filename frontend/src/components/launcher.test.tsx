@@ -132,6 +132,23 @@ describe("notes on shared launch controls", () => {
     expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ note: "the tree changed after the last run" }));
   });
 
+  it("makes the note the primary rerun path and supports the keyboard shortcut", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher variant="rerun" initialMode="pair" initialDucklings={["pato-atom", "pato-sonnet"]} ducklings={fleet} onLaunch={onLaunch} />);
+
+    expect(screen.getByTestId("rerun-summary")).toHaveTextContent("pair·pato-atom + pato-sonnet");
+    expect(screen.getByTestId("run-start")).toBeDisabled();
+    expect(screen.queryByTestId("rerun-setup")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("run-note"), { target: { value: "  preserve the accepted parser contract  " } });
+    fireEvent.keyDown(screen.getByTestId("run-note"), { key: "Enter", ctrlKey: true });
+
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "pair",
+      note: "preserve the accepted parser contract",
+    }));
+  });
+
   it("forwards the TDD note into the chained build request", () => {
     const onTdd = vi.fn();
     render(

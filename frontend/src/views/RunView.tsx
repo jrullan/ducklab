@@ -1530,8 +1530,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         >
           <h2 className="text-sm font-medium text-ink mb-2">
             {run.stage === "test"
-              ? `Test ${run.task_id} again${run.chain_build ? " → then build" : ""}`
-              : `Run ${run.task_id} again`}
+              ? `Retry test ${run.task_id}${run.chain_build ? " → then build" : ""}`
+              : `Retry ${run.task_id}`}
           </h2>
           {relaunchCaveat && !anyway ? (
             <p className="text-sm text-ink-muted" data-testid="relaunch-done">
@@ -1551,16 +1551,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </p>
           ) : (
           <>
-          {/* The provenance, said out loud: this panel and the board's rail
-              open with DIFFERENT seats by design, and unlabelled that read
-              as one of them being wrong. */}
-          <p className="mb-1 text-xs text-ink-muted" data-testid="relaunch-provenance">
-            {fixedSeats(relaunchMode) > 0
-              ? "seated as this run ran — the board launches with your Flock line-up"
-              // Tournament/split runs record one implementer, not the
-              // contestants; the rerun seats from the project roster instead.
-              : "seated from the current project roster — this run's participants were not recorded by seat"}
-          </p>
           <RunLauncher
             measured={measured}
             // Remounted when the mode arrives: the run reaches the store in two
@@ -1577,6 +1567,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             label="Run again"
             busy={relaunchBusy}
             onLaunch={relaunch}
+            variant="rerun"
+            setupHint={fixedSeats(relaunchMode) > 0
+              ? "Seated as this run ran — the board launches with your Flock line-up."
+              // Tournament/split runs record one implementer, not the
+              // contestants; the rerun seats from the project roster instead.
+              : "Seated from the current project roster — this run's participants were not recorded by seat."}
           />
           </>
           )}
