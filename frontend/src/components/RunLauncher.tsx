@@ -26,6 +26,12 @@ function modeCost(mode: string, estimates?: ModeEstimates): string {
   return `estimated $${(average * 0.8).toFixed(2)}–$${(average * 1.2).toFixed(2)} per run`;
 }
 
+function modeAverage(mode: string, estimates?: ModeEstimates): string {
+  const estimate = estimates?.[mode];
+  if (!estimate || estimate.runs <= 0) return "";
+  return `~$${(estimate.usd / estimate.runs).toFixed(2)}`;
+}
+
 /** Project the canonical roster into the positional seats sent to the engine.
  * Roster responses are role-ordered, not seat-ordered. */
 function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
@@ -266,6 +272,8 @@ export function RunLauncher({
   measured,
   roster,
   initiallyOpen = true,
+  variant = "default",
+  setupHint,
 }: {
   ducklings: readonly Duckling[];
   initialMode?: string;
@@ -288,6 +296,10 @@ export function RunLauncher({
   measured?: MeasuredSpend;
   roster?: readonly RosterEntry[];
   initiallyOpen?: boolean;
+  /** A rerun leads with the new instruction and keeps setup behind a door. */
+  variant?: "default" | "rerun";
+  /** Provenance that matters only while changing the rerun's setup. */
+  setupHint?: string;
 }) {
   const resolved = roster ?? [];
   const [open, setOpen] = useState(initiallyOpen);
@@ -297,6 +309,8 @@ export function RunLauncher({
   // until wanted: most launches carry nothing extra.
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   // Explicit initial picks (a relaunch's "what just ran", an escalation's
   // suggested seat) are picks whether or not the roster has arrived yet;
   // they must not lose to a roster that resolves a moment later, nor to one
@@ -336,6 +350,188 @@ export function RunLauncher({
       return next;
     });
   };
+
+  const setLaunchMode = (next: string) => {
+    if (next === mode) return;
+    setMode(next);
+    onModeChange?.(next);
+    // With a roster in hand a mode change re-resolves from it; without one,
+    // preserve the selection the person made by hand.
+    if (resolved.length) {
+      changed.current = false;
+      setChosen([]);
+      setSeatProvenance([]);
+    }
+  };
+
+  const launch = (launchNote = "") => {
+    onLaunch({
+      mode,
+      // The roster is the source of truth for untouched defaults. Fixed-role
+      // modes send only hand-made picks keyed by role; participant modes keep
+      // their positional list.
+      ...(fixedSeats(mode) > 0
+        ? (() => {
+            const picked = pickedSeats(mode, { mode, ducklings: chosen, seatProvenance });
+            return { ducklings: [], ...(Object.keys(picked).length ? { seats: picked } : {}) };
+          })()
+        : { ducklings: changed.current ? chosen : [] }),
+      ...(Number(maxTokens) ? { maxTokens: Number(maxTokens) } : {}),
+      ...(launchNote.trim() ? { note: launchNote.trim() } : {}),
+      ...(turnsNoCap || Number(agentTurns) ? { agentTurns: turnsNoCap ? -1 : Number(agentTurns) } : {}),
+      ...(yolo ? { yes: true } : {}),
+    });
+  };
+
+  if (variant === "rerun") {
+    const visibleSeats = chosen.filter(Boolean);
+    const lineUp = visibleSeats.length > 0
+      ? visibleSeats.join(" + ")
+      : `${cols} seat${cols === 1 ? "" : "s"} from Flock`;
+    const estimate = modeAverage(mode, estimates);
+    return (
+      <div className="space-y-3" data-testid="run-launcher">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted" data-testid="rerun-summary">
+          <span className="font-medium text-ink-secondary">{mode}</span>
+          <span aria-hidden="true">·</span>
+          <span>{lineUp}</span>
+          {estimate && <><span aria-hidden="true">·</span><span>{estimate}</span></>}
+        </div>
+
+        <label className="block space-y-1 text-xs text-ink-muted">
+          <span className="font-medium text-ink-secondary">What should this attempt do differently?</span>
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && note.trim() && !busy) {
+                event.preventDefault();
+                launch(note);
+              }
+            }}
+            rows={2}
+            placeholder="Address the finding, explain what changed, or constrain the next attempt…"
+            data-testid="run-note"
+            className="w-full resize-y rounded border border-hairline bg-surface2 px-2 py-2 text-sm text-ink"
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => launch(note)}
+            disabled={busy || !note.trim()}
+            data-testid="run-start"
+            className="rounded border border-good px-3 py-1.5 text-xs text-good disabled:border-hairline disabled:text-ink-muted disabled:opacity-50"
+          >
+            {busy ? "Starting…" : "Retry with note"}
+          </button>
+          <button
+            type="button"
+            onClick={() => launch()}
+            disabled={busy}
+            data-testid="rerun-without-note"
+            className="text-xs text-ink-muted underline disabled:opacity-40"
+          >
+            Retry without note
+          </button>
+          <button
+            type="button"
+            onClick={() => setSetupOpen((value) => !value)}
+            aria-expanded={setupOpen}
+            data-testid="rerun-setup-toggle"
+            className="text-xs text-ink-muted underline"
+          >
+            {setupOpen ? "Hide setup" : "Change setup…"}
+          </button>
+          <span className="ml-auto text-[11px] text-ink-muted">Ctrl/⌘ + Enter to retry with note</span>
+        </div>
+
+        {setupOpen && (
+          <div className="space-y-3 border-t border-hairline pt-3" data-testid="rerun-setup">
+            <fieldset>
+              <legend className="text-xs font-medium text-ink-muted">Mode</legend>
+              <div className="mt-1 inline-flex flex-wrap rounded border border-hairline p-0.5" data-testid="mode-cards">
+                {MODES.map((candidate) => (
+                  <button
+                    key={candidate}
+                    type="button"
+                    data-testid={`mode-card-${candidate}`}
+                    aria-pressed={mode === candidate}
+                    onClick={() => setLaunchMode(candidate)}
+                    className={`rounded px-3 py-1 text-xs ${mode === candidate ? "bg-surface3 text-ink" : "text-ink-muted"}`}
+                  >
+                    {candidate}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            {ducklings.length > 1 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-ink-muted">Seats</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SeatChips
+                    entries={Array.from({ length: cols }, (_, i) => ({
+                      role: seatLabel(mode, i),
+                      duckling: chosen[i] ?? "",
+                      provenance: seatProvenance[i],
+                    }))}
+                    fleet={[...ducklings]}
+                    measured={measured}
+                    allowDefault
+                    optionsFor={(i) => ducklings.filter((duckling) => duckling.id === chosen[i] || !chosen.includes(duckling.id))}
+                    onPick={(i, id) => setSeat(i, id)}
+                  />
+                  {seats === 0 && (
+                    <button type="button" data-testid="run-seat-add" onClick={() => setExtraSeats(cols + 1)} className="rounded border border-hairline px-2 py-0.5 text-xs" title="add a seat">+</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="text-xs text-ink-muted underline"
+                onClick={() => {
+                  changed.current = false;
+                  setChosen(resolved.length ? rosterSeats(mode, resolved) : []);
+                  setSeatProvenance([]);
+                  onDucklingsChange?.([]);
+                }}
+              >
+                Reset to Flock defaults
+              </button>
+              <button
+                type="button"
+                data-testid="rerun-advanced-toggle"
+                aria-expanded={advancedOpen}
+                onClick={() => setAdvancedOpen((value) => !value)}
+                className="text-xs text-ink-muted underline"
+              >
+                {advancedOpen ? "Hide advanced" : "Advanced…"}
+              </button>
+            </div>
+
+            {advancedOpen && (
+              <div className="flex flex-wrap items-center gap-2 rounded border border-hairline p-2" data-testid="rerun-advanced">
+                <input aria-label="token budget" data-testid="run-max-tokens" placeholder="tokens (default)" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs" />
+                <input aria-label="agent turns" data-testid="run-agent-turns" placeholder={turnsNoCap ? "no cap" : "calls/reply (default)"} disabled={turnsNoCap} value={turnsNoCap ? "" : agentTurns} onChange={(event) => setAgentTurns(event.target.value)} className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs disabled:opacity-40" />
+                <label className="flex items-center gap-1 text-xs text-ink-muted" title="no cap on model calls per reply — the run's token and cost budgets still guard">
+                  <input type="checkbox" data-testid="run-turns-nocap" checked={turnsNoCap} onChange={(event) => setTurnsNoCap(event.target.checked)} /> no cap
+                </label>
+                <label className="flex items-center gap-1 text-xs text-ink-muted" title="unattended: a green gate accepts itself; reviewer dissent and UNVERIFIED still wait for you. ask_human questions are auto-answered by the question advisor and recorded as advisor answers, not yours">
+                  <input type="checkbox" data-testid="run-yolo" checked={yolo} onChange={(event) => setYolo(event.target.checked)} /> unattended
+                </label>
+              </div>
+            )}
+            {setupHint && <p className="text-[11px] text-ink-muted" data-testid="relaunch-provenance">{setupHint}</p>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (!open) return (
     <div>
@@ -386,17 +582,7 @@ export function RunLauncher({
                 data-testid={`mode-card-${m}`}
                 aria-pressed={mode === m}
                 onClick={() => {
-                  if (m === mode) return; // a no-op pick must not clear the seated roster (B-394)
-                  setMode(m);
-                  onModeChange?.(m);
-                  // With a roster in hand a mode change re-resolves from it
-                  // (the seeding effect reseats); without one, a hand-made
-                  // selection stays. Saved Settings line-ups are never picks.
-                  if (resolved.length) {
-                    changed.current = false;
-                    setChosen([]);
-                    setSeatProvenance([]);
-                  }
+                  setLaunchMode(m);
                 }}
                 className={`rounded border p-2 text-left text-xs ${
                   mode === m ? "border-ink" : "border-hairline"
@@ -437,17 +623,7 @@ export function RunLauncher({
           value={mode}
           onChange={(e) => {
             const next = e.target.value;
-            if (next === mode) return; // a no-op change must not clear the seated roster (B-394)
-            setMode(next);
-            onModeChange?.(next);
-            // With a roster in hand a mode change re-resolves from it (the
-            // seeding effect reseats); without one, a hand-made selection
-            // stays. Saved Settings line-ups are never seeded as picks.
-            if (resolved.length) {
-              changed.current = false;
-              setChosen([]);
-              setSeatProvenance([]);
-            }
+            setLaunchMode(next);
           }}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
         >
@@ -534,30 +710,7 @@ export function RunLauncher({
         )}
         <button
           type="button"
-          onClick={() =>
-            onLaunch({
-              mode,
-              // The roster is the source of truth for untouched defaults. Keep
-              // the visible pins in the launcher, but leave them out of the
-              // request so the engine can resolve the canonical roster. Role
-              // modes (solo, pair) send only the hand-made picks, keyed by
-              // role: the engine's positional list reads pair as
-              // [implementer, reviewer] while the launcher shows
-              // [implementer, advisor, reviewer], so a positional echo of
-              // the visible seats seated the advisor as reviewer (B-394).
-              // Participant modes (tournament, split) keep the whole list.
-              ...(fixedSeats(mode) > 0
-                ? (() => {
-                    const seats = pickedSeats(mode, { mode, ducklings: chosen, seatProvenance });
-                    return { ducklings: [], ...(Object.keys(seats).length ? { seats } : {}) };
-                  })()
-                : { ducklings: changed.current ? chosen : [] }),
-              ...(Number(maxTokens) ? { maxTokens: Number(maxTokens) } : {}),
-              ...(note.trim() ? { note: note.trim() } : {}),
-              ...(turnsNoCap || Number(agentTurns) ? { agentTurns: turnsNoCap ? -1 : Number(agentTurns) } : {}),
-              ...(yolo ? { yes: true } : {}),
-            })
-          }
+          onClick={() => launch(note)}
           disabled={busy}
           data-testid="run-start"
           className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"

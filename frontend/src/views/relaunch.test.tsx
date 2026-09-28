@@ -54,8 +54,17 @@ describe("relaunching from the run view", () => {
   it("offers the controls on a run that failed", async () => {
     render(<RunView runId="r-1" client={clientWith()} />);
     await waitFor(() => expect(screen.getByTestId("relaunch")).toBeTruthy());
-    // Pre-set to what just ran, so one change is one change.
-    expect((screen.getByTestId("run-mode") as HTMLSelectElement).value).toBe("pair");
+    // The frequent action is present without opening the full launcher.
+    expect(screen.getByTestId("run-note")).toBeTruthy();
+    expect(screen.getByTestId("run-start")).toHaveTextContent("Retry with note");
+    expect(screen.getByTestId("run-start")).toBeDisabled();
+    expect(screen.getByTestId("rerun-summary")).toHaveTextContent("pair");
+    expect(screen.getByTestId("rerun-summary")).toHaveTextContent("dsv4flash + pato-sonnet");
+    expect(screen.queryByTestId("rerun-setup")).toBeNull();
+
+    // Pre-set to what just ran, so one change is one change once setup opens.
+    fireEvent.click(screen.getByTestId("rerun-setup-toggle"));
+    expect(screen.getByTestId("mode-card-pair")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens a consultant chat about the exact stopped run", async () => {
@@ -80,10 +89,11 @@ describe("relaunching from the run view", () => {
   it("starts the same task with the changed settings", async () => {
     const client = clientWith();
     render(<RunView runId="r-1" client={client} />);
-    await waitFor(() => screen.getByTestId("run-mode"));
-    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "solo" } });
+    fireEvent.click(await screen.findByTestId("rerun-setup-toggle"));
+    fireEvent.click(screen.getByTestId("rerun-advanced-toggle"));
+    fireEvent.click(screen.getByTestId("mode-card-solo"));
     fireEvent.change(screen.getByTestId("run-max-tokens"), { target: { value: "1500000" } });
-    fireEvent.click(screen.getByTestId("run-start"));
+    fireEvent.click(screen.getByTestId("rerun-without-note"));
 
     await waitFor(() =>
       expect(client.runStart).toHaveBeenCalledWith("p", "T-015", {
@@ -111,8 +121,8 @@ describe("relaunching from the run view", () => {
   it("relaunches a pair recorded without an advisor with the reviewer still a reviewer", async () => {
     const client = clientWith();
     render(<RunView runId="r-1" client={client} />);
-    await waitFor(() => screen.getByTestId("run-start"));
-    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() => screen.getByTestId("rerun-without-note"));
+    fireEvent.click(screen.getByTestId("rerun-without-note"));
     await waitFor(() =>
       expect(client.runStart).toHaveBeenCalledWith("p", "T-015", expect.objectContaining({
         mode: "pair",
@@ -122,7 +132,8 @@ describe("relaunching from the run view", () => {
     );
     const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { seats: Record<string, string> };
     expect(opts.seats).not.toHaveProperty("advisor");
-    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated as this run ran/);
+    fireEvent.click(screen.getByTestId("rerun-setup-toggle"));
+    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated as this run ran/i);
   });
 
   it("relaunches a tournament without a positional list, seating contestants from the roster", async () => {
@@ -143,17 +154,17 @@ describe("relaunching from the run view", () => {
       roster,
     } as unknown as Partial<EngineClient>);
     render(<RunView runId="r-tn" client={client} />);
-    await waitFor(() => screen.getByTestId("run-start"));
+    fireEvent.click(await screen.findByTestId("rerun-setup-toggle"));
     await waitFor(() => expect(roster).toHaveBeenCalledWith("p", "tournament"));
     await waitFor(() => expect(screen.getAllByTestId("seat-chip").map((c) => c.textContent).join(" | ")).toContain("contestant 2pato-sonnet"));
-    fireEvent.click(screen.getByTestId("run-start"));
+    fireEvent.click(screen.getByTestId("rerun-without-note"));
     await waitFor(() => expect(client.runStart).toHaveBeenCalled());
     const opts = (client.runStart as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { mode: string; ducklings: string[]; seats?: unknown };
     expect(opts.mode).toBe("tournament");
     expect(opts.ducklings).toEqual([]);
     expect(opts.seats).toBeUndefined();
     // The seats shown are the project roster's, not the run's — say so.
-    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated from the current project roster/);
+    expect(screen.getByTestId("relaunch-provenance").textContent).toMatch(/seated from the current project roster/i);
     expect(screen.getByTestId("relaunch-provenance").textContent).not.toMatch(/as this run ran/);
   });
 
@@ -161,7 +172,6 @@ describe("relaunching from the run view", () => {
     const client = clientWith();
     render(<RunView runId="r-1" client={client} />);
     await screen.findByTestId("run-start");
-    fireEvent.click(screen.getByTestId("run-note-toggle"));
     fireEvent.change(screen.getByTestId("run-note"), { target: { value: "the tree changed after the no-change answer" } });
     fireEvent.click(screen.getByTestId("run-start"));
 
@@ -178,8 +188,8 @@ describe("relaunching from the run view", () => {
       runStart: vi.fn(() => Promise.reject(new Error("no duckling for role implementer"))),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
-    await waitFor(() => screen.getByTestId("run-start"));
-    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() => screen.getByTestId("rerun-without-note"));
+    fireEvent.click(screen.getByTestId("rerun-without-note"));
     await waitFor(() =>
       expect(screen.getByTestId("relaunch-error").textContent).toContain("no duckling"),
     );
@@ -403,12 +413,13 @@ describe("relaunching a failed test-first", () => {
     render(<RunView runId="r-t" client={client} />);
     await waitFor(() => screen.getByTestId("relaunch"));
     // The panel says what it will actually do.
-    expect(screen.getByTestId("relaunch").textContent).toContain("Test T-076 again → then build");
+    expect(screen.getByTestId("relaunch").textContent).toContain("Retry test T-076 → then build");
 
     // The changed model must be one the fleet actually offers.
+    fireEvent.click(screen.getByTestId("rerun-setup-toggle"));
     fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
     fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "dsv4flash" } });
-    fireEvent.click(screen.getByTestId("run-start"));
+    fireEvent.click(screen.getByTestId("rerun-without-note"));
     await waitFor(() => expect(testStart).toHaveBeenCalled());
     const [, taskId, , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];
     expect(taskId).toBe("T-076");
@@ -439,7 +450,7 @@ describe("relaunching a failed test-first", () => {
     } as unknown as Partial<EngineClient>);
     useRuns.setState({ runs: { "r-t": failedWithSeats }, events: {}, deltas: {}, reasoning: {}, spend: {} });
     render(<RunView runId="r-t" client={client} />);
-    fireEvent.click(await screen.findByTestId("run-start"));
+    fireEvent.click(await screen.findByTestId("rerun-without-note"));
     await waitFor(() => expect(testStart).toHaveBeenCalled());
     const [, , , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];
     expect(chain.seats).toEqual(recordedSeats);
