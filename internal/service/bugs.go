@@ -741,10 +741,21 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 
+	cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("load project config for promotion lane: %w", err)
+	}
 	var testPortions []int
 	for i, portion := range out {
 		text := portion.Title + "\n" + strings.Join(portion.Acceptance, "\n")
-		if verify.MentionsTests(text) {
+		claimsTestPath := false
+		for _, owned := range portion.Owns {
+			if verify.ClaimsTestLane(owned, cfg.Verify.TestGlobs) {
+				claimsTestPath = true
+				break
+			}
+		}
+		if claimsTestPath || verify.MentionsTests(text) {
 			testPortions = append(testPortions, i)
 		}
 	}
@@ -752,17 +763,25 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		if len(out) == 1 {
 			testPortions = []int{0}
 		} else {
-			return nil, fmt.Errorf("split proposal requires test or coverage work but no portion claims it; add that acceptance slice to exactly one portion before promoting")
+			var checked []string
+			for i, portion := range out {
+				owns := "no paths"
+				if len(portion.Owns) > 0 {
+					owns = strings.Join(portion.Owns, ", ")
+				}
+				checked = append(checked, fmt.Sprintf("portion %d %q (owns: %s)", i+1, portion.Title, owns))
+			}
+			globs := cfg.Verify.TestGlobs
+			if len(globs) == 0 {
+				globs = verify.DefaultTestGlobs
+			}
+			return nil, fmt.Errorf("split proposal requires test or coverage work but no portion claims it; checked %s. Assign a path matching %s to exactly one portion, or add an acceptance slice such as %q to that portion before promoting", strings.Join(checked, "; "), strings.Join(globs, ", "), "Regression test covers <behavior>")
 		}
 	}
 	if len(testPortions) > 1 {
 		return nil, fmt.Errorf("split proposal assigns shared test infrastructure to %d portions; give one portion ownership of the regression and make the others depend on it", len(testPortions))
 	}
 	if len(testPortions) == 1 {
-		cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
-		if err != nil {
-			return nil, fmt.Errorf("load project config for promotion lane: %w", err)
-		}
 		profile, _ := capability.DefaultRegistry().ResolveProject(capability.Context{ProjectRoot: projectRoot, Policies: cfg.Capabilities.Policy}, cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled)
 		for _, root := range uniqueStrings(profile.LaneHints.TestRoots) {
 			add(testPortions[0], root, "stack test root")

@@ -1526,7 +1526,7 @@ describe("the split on the table", () => {
       taskNext: vi.fn(() => Promise.resolve(null)),
       bugEdit: vi.fn((_p: string, _id: string, body: unknown) => Promise.resolve({ ...bugs[0], ...(body as object) })),
       promoteBug: vi.fn(() => Promise.resolve({ bug: "B-002", task: "T-010" })),
-    }) as unknown as EngineClient & { bugEdit: ReturnType<typeof vi.fn> };
+    }) as unknown as EngineClient & { bugEdit: ReturnType<typeof vi.fn>; promoteBug: ReturnType<typeof vi.fn> };
   const triaged = (extra: Partial<Bug> = {}): Bug => ({
     id: "B-002", title: "saving a profile loses its avatar and leaves the cache stale", severity: "high", status: "triaged",
     source: "manual", created_at: "2026-07-02T00:00:00Z", updated_at: "2026-07-02T00:00:00Z", next: ["in_progress"], ...extra,
@@ -1565,6 +1565,21 @@ describe("the split on the table", () => {
     // Only the split travelled: the report's words are not this form's to send.
     const sent = c.bugEdit.mock.calls[0]![2] as Record<string, unknown>;
     expect(Object.keys(sent)).toEqual(["proposal"]);
+  });
+
+  it("opens the proposal editor beside an actionable promote refusal", async () => {
+    const c = bugsWith([triaged({ proposal: split })]);
+    c.promoteBug.mockRejectedValueOnce(new Error(
+      'split proposal requires test work; checked portion 1 "Persist the avatar on profile save" and portion 2 "Refresh the avatar cache"',
+    ));
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    fireEvent.click(screen.getByTestId("bug-next-promote"));
+    const refusal = await screen.findByTestId("bug-next-error");
+    expect(refusal.textContent).toContain("checked portion 1");
+    fireEvent.click(screen.getByTestId("bug-next-edit-proposal"));
+    const form = await screen.findByTestId("bug-portions-form");
+    expect(form.textContent).toContain("Each portion becomes one task");
+    expect(screen.getByTestId("bug-portion-title-1")).toHaveValue("Refresh the avatar cache");
   });
 
   it("authors a split from nothing and refuses to save an incomplete portion", async () => {
