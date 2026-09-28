@@ -120,6 +120,30 @@ func IsTestPath(path string, globs []string) bool {
 	return matchesAny(path, globs)
 }
 
+// ClaimsTestLane reports whether an Owns entry claims either a test file or
+// the root represented by a project's directory glob. IsTestPath deliberately
+// describes files, while a task lane may correctly own the whole `tests`
+// directory rather than spelling out every future regression file.
+func ClaimsTestLane(claim string, globs []string) bool {
+	if len(globs) == 0 {
+		globs = DefaultTestGlobs
+	}
+	if matchesAny(claim, globs) {
+		return true
+	}
+	claim = path.Clean(strings.TrimPrefix(claim, "./"))
+	for _, glob := range globs {
+		if !strings.HasSuffix(glob, "/**") {
+			continue
+		}
+		root := path.Clean(strings.TrimSuffix(glob, "/**"))
+		if claim == root || strings.HasSuffix(claim, "/"+root) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchesAny reports whether a path matches any of the globs.
 //
 // A `dir/**` glob matches everything under dir at any depth; anything else is
@@ -154,7 +178,7 @@ func matchesAny(file string, globs []string) bool {
 
 // testWord matches the ways a task asks for test work without matching words
 // that merely contain them, like "latest" or "contest".
-var testWord = regexp.MustCompile(`(?i)\b(tests?|testing|spec|specs|assertions?|coverage|fixtures?)\b`)
+var testWord = regexp.MustCompile(`(?i)\b(tests?|testing|spec|specs|assertions?|asserts?|asserted|asserting|coverage|covers?|covered|covering|regressions?|verif(?:y|ies|ied|ying)|fixtures?)\b`)
 
 // spineID matches a traceability reference: PREFIX-<digits> (02 §3).
 var spineID = regexp.MustCompile(`\b[A-Za-z]+-\d+\b`)

@@ -1535,6 +1535,7 @@ function BugRail({
   // door, shown here — the person does not travel to the board to learn
   // that the next act is to write the test or build.
   const journey = useJourney(client, projectId, bug.id, `${bug.status}:${bug.task_id ?? ""}`);
+  const [editPortionsRequest, setEditPortionsRequest] = useState(0);
   return (
     <div className="space-y-3" data-testid="bug-rail">
       <div>
@@ -1546,7 +1547,13 @@ function BugRail({
           on where the bug is, and the loop's rules live in the engine: the
           button acts and a refusal is what gets shown. They used to sit
           under a long body, past the fold. */}
-      <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
+      <BugNext
+        bug={bug}
+        client={client}
+        projectId={projectId}
+        onDone={onDone}
+        onEditProposal={() => setEditPortionsRequest((request) => request + 1)}
+      />
       <dl className="space-y-1 text-xs text-ink-muted">
         <Row label="reported by" value={bug.reporter} />
         <Row label="reported" value={bug.created_at ? `${bug.created_at.slice(0, 16).replace("T", " ")} (${ageOf(bug.created_at)} ago)` : undefined} />
@@ -1554,7 +1561,7 @@ function BugRail({
         <Row label="duplicate of" value={bug.duplicate_of} />
         <Row label="task" value={bug.task_id} />
       </dl>
-      <BugPortions bug={bug} client={client} projectId={projectId} onDone={onDone} />
+      <BugPortions bug={bug} client={client} projectId={projectId} onDone={onDone} editRequest={editPortionsRequest} />
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugAttachments bug={bug} client={client} projectId={projectId} onChanged={onDone} />
       <BugHistory bug={bug} />
@@ -1742,11 +1749,13 @@ function BugNext({
   client,
   projectId,
   onDone,
+  onEditProposal,
 }: {
   bug: Bug;
   client: EngineClient;
   projectId: string;
   onDone: () => void;
+  onEditProposal: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -1856,7 +1865,21 @@ function BugNext({
           </a>
         </p>
       )}
-      {failure !== null && <ErrorCard error={failure} testId="bug-next-error" />}
+      {failure !== null && (
+        <div className="space-y-1">
+          <ErrorCard error={failure} testId="bug-next-error" />
+          {bug.status === "triaged" && !bug.task_id && (
+            <button
+              type="button"
+              data-testid="bug-next-edit-proposal"
+              onClick={onEditProposal}
+              className="text-xs text-ink-muted underline"
+            >
+              Edit the proposal and try again
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1882,13 +1905,15 @@ function BugPortions({
   client,
   projectId,
   onDone,
+  editRequest = 0,
 }: {
   bug: Bug;
   client: EngineClient;
   projectId: string;
   onDone: () => void;
+  editRequest?: number;
 }) {
-  const stored = bug.proposal ?? [];
+  const stored = useMemo(() => bug.proposal ?? [], [bug.proposal]);
   // Promote consumes the split; after it the portions are tasks on the board
   // and the plan, and this card only tells what was made.
   const editable = !bug.task_id && (bug.status === "open" || bug.status === "triaged");
@@ -1896,6 +1921,19 @@ function BugPortions({
   const [draft, setDraft] = useState<PortionDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const handledEditRequest = useRef(0);
+
+  const beginEditing = useCallback(() => {
+    setDraft(stored.length > 0 ? stored.map(toDraft) : [{ ...emptyPortion }, { ...emptyPortion }]);
+    setFailure(null);
+    setEditing(true);
+  }, [stored]);
+
+  useEffect(() => {
+    if (editRequest <= handledEditRequest.current || !editable) return;
+    handledEditRequest.current = editRequest;
+    beginEditing();
+  }, [beginEditing, editRequest, editable]);
 
   const save = (portions: BugPortion[]) => {
     setBusy(true);
@@ -1944,11 +1982,7 @@ function BugPortions({
               type="button"
               data-testid="bug-portions-edit"
               disabled={busy}
-              onClick={() => {
-                setDraft(stored.length > 0 ? stored.map(toDraft) : [{ ...emptyPortion }, { ...emptyPortion }]);
-                setFailure(null);
-                setEditing(true);
-              }}
+              onClick={beginEditing}
               className="text-xs text-ink-muted underline disabled:opacity-40"
             >
               {stored.length > 0 ? "edit portions" : "propose a split"}

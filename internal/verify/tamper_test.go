@@ -95,12 +95,25 @@ func TestProjectGlobsReplaceTheDefaults(t *testing.T) {
 	}
 }
 
+func TestClaimsTestLaneAcceptsAFileOrTheOwnedGlobRoot(t *testing.T) {
+	for _, claim := range []string{"checks/widget.case", "checks", "nested/checks"} {
+		if !ClaimsTestLane(claim, []string{"checks/**"}) {
+			t.Errorf("ClaimsTestLane(%q) = false", claim)
+		}
+	}
+	if ClaimsTestLane("src/checksum.go", []string{"checks/**"}) {
+		t.Error("a source path merely containing the prefix was treated as a test lane")
+	}
+}
+
 // "latest" is not a test, and neither is "contest". A flag that fires on those
 // is a flag that gets ignored on the ones that matter.
 func TestMentionsTests(t *testing.T) {
 	for _, s := range []string{
 		"Add tests for Double", "write a test", "improve coverage",
 		"update the spec", "fix the assertion", "add a fixture",
+		"Cover composed frozen-frame rendering", "add a regression",
+		"verifies the saved frame", "asserts the callback result",
 	} {
 		if !MentionsTests(s) {
 			t.Errorf("MentionsTests(%q) = false", s)

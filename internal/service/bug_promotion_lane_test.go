@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/store"
 )
 
 func TestBugPromotionWidensOnePortionIntoAnExecutableStackLane(t *testing.T) {
@@ -148,6 +151,100 @@ func TestBugPromotionGivesSplitTestPortionRegistrationAndSiblingHeader(t *testin
 	for _, path := range []string{"tests", "meson.build"} {
 		if slices.Contains(capture.Owns, path) {
 			t.Errorf("non-test portion unexpectedly owns shared test infrastructure %q: %v", path, capture.Owns)
+		}
+	}
+}
+
+// B-442: the proposal already put the regression in tests/, but promote only
+// searched its prose for the nouns "test" and "coverage". "Cover ..." was a
+// perfectly clear title and, more importantly, Owns was an authoritative lane;
+// forcing the person to rewrite English to unlock it made the contract weaker.
+func TestBugPromotionRecognizesATestPortionFromItsOwnedLane(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"src/app/composition.c", "tests/test_composition_startup.c"} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &store.Bug{TestStrategy: "test-first"}
+	portions := []agent.SplitProposal{
+		{Title: "Wire the startup frame into the overlay", Acceptance: []string{"the overlay renders the startup frame"}, Owns: []string{"src/app/composition.c"}},
+		{Title: "Cover composed frozen-frame rendering", Acceptance: []string{"the fake portal frame is rendered by the Meson regression target"}, Owns: []string{"tests/test_composition_startup.c"}},
+	}
+	got, err := preparePromotionPortions(root, rec, portions)
+	if err != nil {
+		t.Fatalf("promotion rejected an explicit test lane: %v", err)
+	}
+	if len(got) != 2 || !slices.Contains(got[1].Owns, "tests/test_composition_startup.c") {
+		t.Fatalf("promoted portions = %#v", got)
+	}
+}
+
+func TestBugPromotionUsesTheProjectsTestGlobsForPortionClaims(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	cfg.Verify.TestGlobs = []string{"checks/**"}
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"src/widget.go", "checks/widget.case"} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &store.Bug{TestStrategy: "test-first"}
+	portions := []agent.SplitProposal{
+		{Title: "Correct the widget", Acceptance: []string{"the widget keeps its state"}, Owns: []string{"src/widget.go"}},
+		{Title: "Exercise saved state", Acceptance: []string{"the saved state survives reload"}, Owns: []string{"checks/widget.case"}},
+	}
+	if _, err := preparePromotionPortions(root, rec, portions); err != nil {
+		t.Fatalf("promotion ignored verify.test_globs: %v", err)
+	}
+}
+
+func TestBugPromotionNamesEveryPortionWhenNoTestClaimExists(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"src/alpha.go", "src/beta.go"} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &store.Bug{TestStrategy: "test-first"}
+	portions := []agent.SplitProposal{
+		{Title: "Correct alpha", Acceptance: []string{"alpha works"}, Owns: []string{"src/alpha.go"}},
+		{Title: "Correct beta", Acceptance: []string{"beta works"}, Owns: []string{"src/beta.go"}},
+	}
+	_, err := preparePromotionPortions(root, rec, portions)
+	if err == nil {
+		t.Fatal("promotion accepted a split with no test claim")
+	}
+	for _, want := range []string{
+		`portion 1 "Correct alpha" (owns: src/alpha.go)`,
+		`portion 2 "Correct beta" (owns: src/beta.go)`,
+		`Regression test covers <behavior>`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("promotion error lacks %q:\n%s", want, err)
 		}
 	}
 }
