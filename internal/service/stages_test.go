@@ -17,6 +17,8 @@ import (
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/strategy"
+	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 func projectWithDocs(t *testing.T, s *Service, docs map[artifact.Kind]string) (string, string) {
@@ -429,6 +431,87 @@ func TestHumanApprovedLaneAmendmentUpdatesTheAcceptedTask(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "**Owns:** src/backend, src/core/capture_core.c") {
 		t.Fatalf("accepted plan did not record amendment:\n%s", data)
+	}
+}
+
+func TestAnswerWithLaneRefreshesLiveGuardAndCommitsTheAmendment(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-01 — Core\n\n### T-012 — Backend\n\n**Owns:** src/backend\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := vcs.New(dir)
+	if err := git.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("fixture: accepted plan"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := git.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-lane", ProjectID: p.ID, TaskID: "T-012", Stage: "spec", Status: "paused",
+		PendingKind: "question", PendingData: map[string]interface{}{
+			"question_id": "q-lane", "question": "May I edit src/core/capture_core.c?",
+			"lane_widening": []string{"src/core/capture_core.c"},
+		},
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ectx := &tools.ExecContext{
+		ProjectRoot: dir, Role: config.RoleImplementer, LaneEnforcement: "write",
+		TaskWriteLane: []string{"src/backend/**"}, TaskWritableDirs: []string{"src/backend"},
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir, execCtx: ectx}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	// This fixture has no resumable stage request; that expected error occurs
+	// after the answer and lets the test inspect the refreshed paused context.
+	if err := s.RunAnswerWithLane(context.Background(), run.ID, "q-lane", "yes", []string{"src/core/capture_core.c"}); err == nil {
+		t.Fatal("expected the fixture's stage resume to be refused")
+	}
+	if !slices.Contains(ectx.TaskWriteLane, "src/core/capture_core.c/**") ||
+		!slices.Contains(ectx.TaskWritableDirs, "src/core/capture_core.c") {
+		t.Fatalf("live lane was not refreshed: declared=%v dirs=%v", ectx.TaskWriteLane, ectx.TaskWritableDirs)
+	}
+	args, _ := json.Marshal(map[string]interface{}{"path": "src/core/capture_core.c", "content": "widened\n"})
+	result, err := tools.NewRegistry().Execute(context.Background(), ectx, "fs_write", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("fs_write still rejected the widened lane: %s", result.Content)
+	}
+	after, err := git.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Fatal("lane amendment was not committed")
+	}
+	message, err := git.CommitMessage(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Ducklab-Run: r-lane", "Ducklab-Action: lane_widened"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("lane amendment commit lacks %q:\n%s", want, message)
+		}
 	}
 }
 

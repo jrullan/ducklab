@@ -387,7 +387,11 @@ func widenTaskLane(projectRoot, taskID string, requested []string) ([]string, er
 		return nil, nil
 	}
 	line := "**Owns:** " + strings.Join(lanes, ", ")
-	if ownsFieldLine.MatchString(task.Body) {
+	matches := ownsFieldLine.FindAllStringIndex(task.Body, -1)
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("task %s has %d Owns fields; repair the accepted plan before widening its lane", taskID, len(matches))
+	}
+	if len(matches) == 1 {
 		task.Body = ownsFieldLine.ReplaceAllString(task.Body, line)
 	} else {
 		task.Body = strings.TrimSpace(task.Body) + "\n\n" + line

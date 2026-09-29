@@ -4947,17 +4947,52 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 	if err != nil {
 		return err
 	}
+	planPath := artifact.Path(entry.Path, artifact.KindPlan)
+	planBefore, err := os.ReadFile(planPath)
+	if err != nil {
+		return fmt.Errorf("read accepted plan before lane widening: %w", err)
+	}
 	added, err := widenTaskLane(entry.Path, current.TaskID, requested)
 	if err != nil {
 		return err
 	}
 	if len(added) > 0 {
+		planRel, err := filepath.Rel(entry.Path, planPath)
+		if err != nil {
+			_ = os.WriteFile(planPath, planBefore, 0o644)
+			return fmt.Errorf("resolve accepted plan path: %w", err)
+		}
+		sha, err := vcs.New(entry.Path).CommitPathsWithTrailer(
+			fmt.Sprintf("ducklab: widen %s lane", current.TaskID),
+			map[string]string{"Ducklab-Run": current.ID, "Ducklab-Action": "lane_widened"},
+			[]string{filepath.ToSlash(planRel)},
+		)
+		if err != nil {
+			if restoreErr := os.WriteFile(planPath, planBefore, 0o644); restoreErr != nil {
+				return fmt.Errorf("commit accepted lane amendment: %v (also failed to restore plan: %v)", err, restoreErr)
+			}
+			return fmt.Errorf("commit accepted lane amendment: %w", err)
+		}
+
+		// A paused run retains the ExecContext that enforces its write lane and
+		// feeds the reviewer dossier. Refresh both views before resume; updating
+		// only the plan would leave the live run enforcing its stale snapshot.
+		writableFiles, writableDirs := taskWritableLane(entry.Path, current.TaskID)
+		declared := taskDeclaredLanePaths(entry.Path, current.TaskID)
+		rs.wmu.Lock()
+		if rs.execCtx != nil {
+			rs.execCtx.TaskWriteLane = declared
+			rs.execCtx.TaskWritableFiles = uniqueStrings(writableFiles)
+			rs.execCtx.TaskWritableDirs = uniqueStrings(writableDirs)
+		}
+		rs.wmu.Unlock()
+
 		w, err := s.ensureWriter(rs)
 		if err != nil {
 			return err
 		}
 		w.AppendEvent("lane_widened", map[string]interface{}{
-			"actor": "human", "task_id": current.TaskID, "paths": added,
+			"actor": "human", "task_id": current.TaskID, "paths": added, "commit_sha": sha,
 		})
 	}
 	return s.runAnswer(ctx, id, questionID, answer, "")
