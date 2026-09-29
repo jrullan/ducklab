@@ -4971,6 +4971,100 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 	return s.runAnswer(ctx, id, questionID, answer, "")
 }
 
+// RunAnswerWithLane records an answer after applying the exact lane amendment
+// offered on the pending question. Arbitrary paths are refused: this is a
+// human approval of engine-derived candidates, not a second unrestricted plan
+// editor hidden inside the question endpoint.
+func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer string, requested []string) error {
+	s.runsMu.RLock()
+	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
+	if !ok {
+		return fmt.Errorf("run %q not found", id)
+	}
+	current := rs.snapshotRun()
+	offered := stringSliceValue(current.PendingData["lane_widening"])
+	allowed := map[string]bool{}
+	for _, path := range offered {
+		allowed[cleanLanePath(path)] = true
+	}
+	for _, path := range requested {
+		if clean := cleanLanePath(path); clean == "" || !allowed[clean] {
+			return fmt.Errorf("lane path %q was not offered by the pending question", path)
+		}
+	}
+	entry, err := s.entryFor(rs)
+	if err != nil {
+		return err
+	}
+	planPath := artifact.Path(entry.Path, artifact.KindPlan)
+	planBefore, err := os.ReadFile(planPath)
+	if err != nil {
+		return fmt.Errorf("read accepted plan before lane widening: %w", err)
+	}
+	added, err := widenTaskLane(entry.Path, current.TaskID, requested)
+	if err != nil {
+		return err
+	}
+	if len(added) > 0 {
+		planRel, err := filepath.Rel(entry.Path, planPath)
+		if err != nil {
+			_ = os.WriteFile(planPath, planBefore, 0o644)
+			return fmt.Errorf("resolve accepted plan path: %w", err)
+		}
+		sha, err := vcs.New(entry.Path).CommitPathsWithTrailer(
+			fmt.Sprintf("ducklab: widen %s lane", current.TaskID),
+			map[string]string{"Ducklab-Run": current.ID, "Ducklab-Action": "lane_widened"},
+			[]string{filepath.ToSlash(planRel)},
+		)
+		if err != nil {
+			if restoreErr := os.WriteFile(planPath, planBefore, 0o644); restoreErr != nil {
+				return fmt.Errorf("commit accepted lane amendment: %v (also failed to restore plan: %v)", err, restoreErr)
+			}
+			return fmt.Errorf("commit accepted lane amendment: %w", err)
+		}
+
+		// A paused run retains the ExecContext that enforces its write lane and
+		// feeds the reviewer dossier. Refresh both views before resume; updating
+		// only the plan would leave the live run enforcing its stale snapshot.
+		writableFiles, writableDirs := taskWritableLane(entry.Path, current.TaskID)
+		declared := taskDeclaredLanePaths(entry.Path, current.TaskID)
+		rs.wmu.Lock()
+		if rs.execCtx != nil {
+			rs.execCtx.TaskWriteLane = declared
+			rs.execCtx.TaskWritableFiles = uniqueStrings(writableFiles)
+			rs.execCtx.TaskWritableDirs = uniqueStrings(writableDirs)
+		}
+		rs.wmu.Unlock()
+
+		w, err := s.ensureWriter(rs)
+		if err != nil {
+			return err
+		}
+		w.AppendEvent("lane_widened", map[string]interface{}{
+			"actor": "human", "task_id": current.TaskID, "paths": added, "commit_sha": sha,
+		})
+	}
+	return s.runAnswer(ctx, id, questionID, answer, "")
+}
+
+func stringSliceValue(v interface{}) []string {
+	switch values := v.(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []interface{}:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // runAnswer records an answer with its actual author when automation supplied
 // it. An empty author deliberately remains an ordinary human answer.
 func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author string) error {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/conv"
@@ -340,4 +341,67 @@ func anyClaimContains(claims []laneClaim, path string) bool {
 		}
 	}
 	return false
+}
+
+var ownsFieldLine = regexp.MustCompile(`(?m)^\*\*Owns:\*\*\s*.*$`)
+
+// widenTaskLane applies a human-approved lane amendment directly to the
+// accepted plan. The approval is the button click itself; routing it through a
+// second plan proposal would recreate the abort/edit/relaunch dead end this
+// operation exists to remove.
+func widenTaskLane(projectRoot, taskID string, requested []string) ([]string, error) {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return nil, err
+	}
+	var task *artifact.Section
+	for i := range plan.Sections {
+		for j := range plan.Sections[i].Children {
+			if plan.Sections[i].Children[j].ID == taskID {
+				task = &plan.Sections[i].Children[j]
+				break
+			}
+		}
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s is not in the accepted plan", taskID)
+	}
+	lanes := append([]string(nil), task.Owns...)
+	seen := map[string]bool{}
+	for _, lane := range lanes {
+		seen[cleanLanePath(lane)] = true
+	}
+	var added []string
+	for _, raw := range requested {
+		path := cleanLanePath(raw)
+		if path == "" {
+			return nil, fmt.Errorf("invalid lane path %q", raw)
+		}
+		if !seen[path] {
+			seen[path] = true
+			lanes = append(lanes, path)
+			added = append(added, path)
+		}
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	line := "**Owns:** " + strings.Join(lanes, ", ")
+	matches := ownsFieldLine.FindAllStringIndex(task.Body, -1)
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("task %s has %d Owns fields; repair the accepted plan before widening its lane", taskID, len(matches))
+	}
+	if len(matches) == 1 {
+		task.Body = ownsFieldLine.ReplaceAllString(task.Body, line)
+	} else {
+		task.Body = strings.TrimSpace(task.Body) + "\n\n" + line
+	}
+	task.Owns = lanes
+	plan.Front.Version++
+	plan.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	plan.Front.ApprovedBy = "human"
+	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan), []byte(artifact.Render(plan)), 0o644); err != nil {
+		return nil, err
+	}
+	return added, nil
 }

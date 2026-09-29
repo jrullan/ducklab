@@ -673,6 +673,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const gate = buildGate(events);
   const deliverables = buildDeliverables(events);
   const pending = buildPending(events);
+	const laneWidening = Array.isArray(run.pending_data?.lane_widening)
+	  ? (run.pending_data!.lane_widening as string[])
+	  : [];
   // Yolo resumes immediately, so its answer cannot remain in the paused
   // question card. Keep the recorded notification visible while work continues.
   const advisorAutoAnswers = events.filter(
@@ -2128,6 +2131,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   Answer
                 </button>
               </div>
+			  {laneWidening.length > 0 && (
+				<div className="mt-2 rounded border border-serious p-2" data-testid="lane-widening-offer">
+				  <p className="text-sm text-ink">This question names work outside the task's approved lane:</p>
+				  <p className="mt-1 font-mono text-xs text-ink-secondary">{laneWidening.join(", ")}</p>
+				  <button
+					type="button"
+					data-testid="widen-lane-and-resume"
+					onClick={() => client.answer(runId, pending.questionId ?? "", `Approved lane amendment: ${laneWidening.join(", ")}`, laneWidening).catch(() => {})}
+					className="mt-2 rounded border border-serious px-2 py-1 text-sm text-serious"
+				  >
+					Widen lane and resume
+				  </button>
+				</div>
+			  )}
             </div>
           )}
         </section>

@@ -856,14 +856,21 @@ func parseSince(v string) (time.Duration, error) {
 
 func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		QuestionID string `json:"question_id"`
-		Answer     string `json:"answer"`
+		QuestionID string   `json:"question_id"`
+		Answer     string   `json:"answer"`
+		WidenLane  []string `json:"widen_lane"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if err := s.svc.RunAnswer(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer); err != nil {
+	var err error
+	if len(body.WidenLane) > 0 {
+		err = s.svc.RunAnswerWithLane(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.WidenLane)
+	} else {
+		err = s.svc.RunAnswer(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer)
+	}
+	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
