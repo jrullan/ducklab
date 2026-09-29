@@ -27,7 +27,7 @@ STAMPSHA = $$(git rev-parse HEAD 2>/dev/null || echo unknown)$(SRCDIRTY)
 
 .PHONY: all build test test-race test-service-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
 
-all: vet test frontend
+all: vet test api-check frontend
 
 build:
 	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$(STAMPVER) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$(STAMPSHA)" -o bin/ducklab ./cmd/ducklab

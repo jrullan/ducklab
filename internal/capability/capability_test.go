@@ -967,6 +967,42 @@ func TestProjectCapabilitiesComposeGoAndFrontendFromEvidence(t *testing.T) {
 	}
 }
 
+// B-453: a repository can define the exact regeneration contract without the
+// harness learning its generator or output paths. Once api-check is present,
+// stale generated API artefacts are a required gate, not reviewer folklore.
+func TestGeneratedAPITargetContributesARequiredFreshnessCheck(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "Makefile", "api:\n\t@echo generate\n\napi-check:\n\t@echo check\n")
+
+	profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(profile.Detections, func(d Detection) bool {
+		return d.Capability == "generated-artifacts" && slices.Contains(d.Evidence, "Makefile target api-check")
+	}) {
+		t.Fatalf("generated-artifacts detection = %+v", profile.Detections)
+	}
+	checks, err := DefaultRegistry().ResolveChecks(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(checks, func(check Check) bool {
+		return check.Capability == "generated-artifacts" && check.Command == "make api-check" && check.Enforcement == Required
+	}) {
+		t.Fatalf("generated-artifacts checks = %+v", checks)
+	}
+
+	writeFixture(t, root, "Makefile", "# api-check: mentioned in prose only\ntest:\n\t@true\n")
+	checks, err = DefaultRegistry().ResolveChecks(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(checks, func(check Check) bool { return check.Capability == "generated-artifacts" }) {
+		t.Fatalf("comment-only target enabled generated check: %+v", checks)
+	}
+}
+
 func TestStackProvidersProposeRunCommandsFromBuildMetadata(t *testing.T) {
 	tests := []struct {
 		name  string
