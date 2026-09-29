@@ -384,6 +384,7 @@ export const KNOWN_EVENT_TYPES = [
   // An advisor auto-answer is an operator-facing correction opportunity.
   "notification",
   "human_needed",
+	"lane_widened",
   "checkpoint",
   "warning",
   "error",

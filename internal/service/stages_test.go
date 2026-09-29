@@ -407,6 +407,31 @@ func TestTaskDeclaredLanePathsIncludesOwnsProducesAndModifies(t *testing.T) {
 	}
 }
 
+func TestHumanApprovedLaneAmendmentUpdatesTheAcceptedTask(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Core\n\n### T-012 — Backend\n\n**Owns:** src/backend\n",
+	})
+	added, err := widenTaskLane(dir, "T-012", []string{"src/core/capture_core.c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(added, []string{"src/core/capture_core.c"}) {
+		t.Fatalf("added lanes = %v", added)
+	}
+	lanes := taskDeclaredLanePaths(dir, "T-012")
+	if !slices.Contains(lanes, "src/core/capture_core.c/**") {
+		t.Fatalf("resumed run would not see amended lane: %v", lanes)
+	}
+	data, err := os.ReadFile(artifact.Path(dir, artifact.KindPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "**Owns:** src/backend, src/core/capture_core.c") {
+		t.Fatalf("accepted plan did not record amendment:\n%s", data)
+	}
+}
+
 func TestBuildPromptCarriesProjectMemory(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

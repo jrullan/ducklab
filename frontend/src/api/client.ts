@@ -1422,10 +1422,11 @@ export class EngineClient {
   abort(id: string) {
     return this.request<void>("POST", `/v1/runs/${id}/abort`);
   }
-  answer(id: string, questionId: string, answer: string) {
+  answer(id: string, questionId: string, answer: string, widenLane: string[] = []) {
     return this.request<void>("POST", `/v1/runs/${id}/answer`, {
       question_id: questionId,
       answer,
+	  widen_lane: widenLane,
     });
   }
 

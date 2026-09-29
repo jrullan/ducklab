@@ -662,6 +662,12 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 		"question_id": q.ID,
 		"question":    q.Question,
 	}
+	if entry, err := s.registry.Get(rs.run.ProjectID); err == nil && rs.run.TaskID != "" {
+		text := q.Question + "\n" + strings.Join(q.Options, "\n")
+		if paths := advisorLaneConflicts(entry.Path, rs.run.TaskID, text); len(paths) > 0 {
+			rs.run.PendingData["lane_widening"] = paths
+		}
+	}
 	if len(q.Options) > 0 {
 		rs.run.PendingData["options"] = q.Options
 	}
@@ -670,13 +676,17 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	if advisor != "" {
 		rs.run.PendingData["advisor"] = string(advisor)
 	}
-	w.AppendEvent("human_needed", map[string]interface{}{
+	eventData := map[string]interface{}{
 		"kind":        "question",
 		"question_id": q.ID,
 		"question":    q.Question,
 		"options":     q.Options,
 		"advisor":     string(advisor),
-	})
+	}
+	if paths, ok := rs.run.PendingData["lane_widening"]; ok {
+		eventData["lane_widening"] = paths
+	}
+	w.AppendEvent("human_needed", eventData)
 	w.WriteState()
 	rs.wmu.Unlock()
 	// The advisor drafts the answer while the question waits — a fleet of
