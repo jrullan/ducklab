@@ -2293,7 +2293,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// The task's own words decide whether this is a surprise. A task that says
 	// "add tests for X" does not need a warning about tests changing, and a
 	// warning that is always on is one nobody reads.
-	if tamper := verify.CheckTampering(diff, taskText, projCfg.Verify.TestGlobs); tamper.Flagged() {
+	if tamper := verify.CheckTamperingForLane(diff, taskDeclaredLanePaths(entry.Path, req.TaskID), projCfg.Verify.TestGlobs); tamper.Flagged() {
 		rs.run.TestsModified = true
 		rs.writer.WriteTestHunks(tamper.Hunks)
 		rs.writer.AppendEvent("tests_modified", map[string]interface{}{
