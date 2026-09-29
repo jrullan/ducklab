@@ -932,6 +932,46 @@ func TestProposalGateReportsLocalizedFieldErrorsBeforeGraphCascade(t *testing.T)
 	}
 }
 
+// B-450: promoted tasks accepted under an older grammar are immutable history,
+// not active plan debt. Their unknown fields must not drown the headline while
+// the same defect on unlanded work remains a blocker.
+func TestTraceCheckExcludesAcceptedTaskFieldDebtButKeepsLiveDebt(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Core\n\n**Priority:** must\n",
+		artifact.KindSpec:         "## SPEC-001 — Core\n\n**Implements:** REQ-001\n",
+		artifact.KindPlan: "## M-01 — Work\n\n" +
+			"### T-001 — Landed legacy task\n\n**Implements:** SPEC-001\n\n**Component:** backend\n\n" +
+			"### T-002 — Live malformed task\n\n**Implements:** SPEC-001\n\n**Component:** frontend\n",
+	})
+	s.runs["r-accepted-field-debt"] = &runState{run: &runlog.Run{
+		ID: "r-accepted-field-debt", ProjectID: id, TaskID: "T-001", Stage: "build",
+		Status: "done", Accepted: true, StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
+
+	res, err := s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.FieldErrors) != 1 || res.FieldErrors[0].ID != "T-002" {
+		t.Fatalf("active field errors = %v, want only T-002", res.FieldErrors)
+	}
+	for _, finding := range res.Errors {
+		if (finding.Kind == artifact.UnknownField || finding.Kind == artifact.InvalidField) && finding.ID == "T-001" {
+			t.Fatalf("accepted task debt remained in active spine findings: %+v", finding)
+		}
+	}
+	foundLive := false
+	for _, finding := range res.Errors {
+		if finding.Kind == artifact.UnknownField && finding.ID == "T-002" {
+			foundLive = true
+		}
+	}
+	if !foundLive {
+		t.Fatalf("live malformed task disappeared with history: %+v", res.Errors)
+	}
+}
+
 func TestCandidateSyntaxLintIsReadOnlyAndUsesCompletePlanVocabulary(t *testing.T) {
 	candidate := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
 		"## M-01 — Localized prose is allowed\n\n**Owns:** src/\n\n" +

@@ -1603,25 +1603,35 @@ func (s *Service) TraceCheck(ctx context.Context, projectID string) (*TraceResul
 		return nil, err
 	}
 	errs := spine.Check()
+	accepted := map[string]bool{}
 	// Plan parsing has no run history, so its lane check necessarily treats
 	// every claim as live. The service does have that history: replace those
-	// findings with collisions among work that has not landed yet. Otherwise
-	// the headline debt grows quadratically forever as accepted tasks
-	// accumulate.
+	// findings with collisions among work that has not landed yet. The same
+	// history boundary applies to field vocabulary: an old accepted task is an
+	// immutable record, not current plan debt. Otherwise the headline grows
+	// forever from syntax Ducklab itself emitted before the current grammar.
 	if tasks, taskErr := s.TaskList(ctx, projectID); taskErr == nil {
-		accepted := make(map[string]bool, len(tasks))
 		for _, task := range tasks {
 			accepted[task.ID] = task.Status == "accepted" || task.Status == "done"
 		}
 		filtered := errs[:0]
 		for _, finding := range errs {
-			if finding.Kind != artifact.LaneCollision {
-				filtered = append(filtered, finding)
+			if finding.Kind == artifact.LaneCollision {
+				continue
 			}
+			if accepted[finding.ID] && (finding.Kind == artifact.UnknownField || finding.Kind == artifact.InvalidField) {
+				continue
+			}
+			filtered = append(filtered, finding)
 		}
 		errs = append(filtered, artifact.LaneCollisionsForTasks(spine.Plan, accepted)...)
 	}
-	fieldErrors := append([]artifact.FieldError(nil), spine.Plan.FieldErrors...)
+	fieldErrors := make([]artifact.FieldError, 0, len(spine.Plan.FieldErrors))
+	for _, finding := range spine.Plan.FieldErrors {
+		if !accepted[finding.ID] {
+			fieldErrors = append(fieldErrors, finding)
+		}
+	}
 	if errs == nil {
 		errs = []artifact.TraceError{}
 	}
