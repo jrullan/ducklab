@@ -906,10 +906,10 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion, reopenContext s
 		fmt.Fprintf(&sb, "\n**Owns:** %s\n", strings.Join(portion.Owns, ", "))
 	}
 	if len(portion.LaneAdditions) > 0 {
-		fmt.Fprintf(&sb, "\n**Lane widened at promote:** %s\n", strings.Join(portion.LaneAdditions, "; "))
+		fmt.Fprintf(&sb, "\n- **Lane widened at promote**: %s\n", strings.Join(portion.LaneAdditions, "; "))
 	}
 	if len(portion.TriageNotes) > 0 {
-		fmt.Fprintf(&sb, "\n**Triage notes at promote:** %s\n", strings.Join(uniqueStrings(portion.TriageNotes), "; "))
+		fmt.Fprintf(&sb, "\n- **Triage notes at promote**: %s\n", strings.Join(uniqueStrings(portion.TriageNotes), "; "))
 	}
 	sb.WriteString("\nOnly the Acceptance slices and Owns above are required for this portion.\n")
 	sb.WriteString("\n## Parent context (non-binding)\n\n")
@@ -932,10 +932,11 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	}
 	// The implementer's numbered work contract, in the same shape the plan
 	// architects are dictated (stage.TaskBodyContract): top-level bullets
-	// under **Deliverables:** become the checklist it reports against. A
+	// under the canonical **Acceptance slices:** field become the checklist it
+	// reports against. A
 	// promoted bug was the one door into the build loop without one.
 	if b.Deliverables != "" {
-		sb.WriteString("\n**Deliverables:**\n")
+		sb.WriteString("\n**Acceptance slices:**\n")
 		for _, line := range strings.Split(b.Deliverables, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				fmt.Fprintf(&sb, "- %s\n", line)
@@ -945,17 +946,17 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	if b.Component != "" || b.SuspectedFiles != "" || b.TriageReason != "" {
 		sb.WriteString("\n## Triage\n\n")
 		if b.Component != "" {
-			fmt.Fprintf(&sb, "**Component:** %s\n", b.Component)
+			fmt.Fprintf(&sb, "- **Component**: %s\n", b.Component)
 		}
 		if b.SuspectedFiles != "" {
-			fmt.Fprintf(&sb, "**Suspected files:** %s\n",
+			fmt.Fprintf(&sb, "- **Suspected files**: %s\n",
 				strings.Join(strings.Split(b.SuspectedFiles, "\n"), ", "))
 		}
 		if b.TriageReason != "" {
 			sb.WriteString("\n" + strings.TrimSpace(b.TriageReason) + "\n")
 		}
 		if b.TestStrategy != "" {
-			fmt.Fprintf(&sb, "\n**Verification (triage recommends):** %s", b.TestStrategy)
+			fmt.Fprintf(&sb, "\n- **Verification (triage recommends)**: %s", b.TestStrategy)
 			if b.TestReason != "" {
 				fmt.Fprintf(&sb, " — %s", strings.TrimSpace(b.TestReason))
 			}

@@ -141,6 +141,20 @@ func TestUndeliveredReportSummonsTheDuckAndInformsTheReviewerAsData(t *testing.T
 	}
 }
 
+func TestManualAcceptanceSliceIsNotAnImplementerGap(t *testing.T) {
+	report := &DeliverablesReport{Items: []DeliverableStatus{
+		{ID: 1, Status: "done"},
+		{ID: 2, Status: "blocked", Note: "requires a Wayland session"},
+	}}
+	if gap := incompleteDeliverables(report, 2, map[int]bool{2: true}); len(gap) != 0 {
+		t.Fatalf("manual slice became implementer debt: %v", gap)
+	}
+	effective := reportWithoutManualItems(report, 2, map[int]bool{2: true})
+	if got := effective.Undelivered(); len(got) != 0 {
+		t.Fatalf("manual slice still triggered the strategy loop: %v", got)
+	}
+}
+
 func TestApprovalCannotExcuseAnOmittedDeliverableStatus(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green",

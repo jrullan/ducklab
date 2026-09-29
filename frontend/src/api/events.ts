@@ -385,6 +385,7 @@ export const KNOWN_EVENT_TYPES = [
   "notification",
   "human_needed",
 	"lane_widened",
+	"human_verification_confirmed",
   "checkpoint",
   "warning",
   "error",
