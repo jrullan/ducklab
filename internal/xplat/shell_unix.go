@@ -28,3 +28,13 @@ func killProcessGroup(c *exec.Cmd) error {
 	}
 	return nil
 }
+
+func terminateProcessGroup(c *exec.Cmd) error {
+	if c.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-c.Process.Pid, syscall.SIGTERM); err != nil {
+		return c.Process.Signal(syscall.SIGTERM)
+	}
+	return nil
+}

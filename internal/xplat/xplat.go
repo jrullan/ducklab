@@ -189,6 +189,11 @@ func ShellContext(ctx context.Context, workdir string, env []string, cmd string)
 	return c
 }
 
+// TerminateProcessGroup asks a managed command and its children to stop
+// cleanly. Callers may follow with context cancellation after their grace
+// period to retain ShellContext's hard-stop guarantee.
+func TerminateProcessGroup(c *exec.Cmd) error { return terminateProcessGroup(c) }
+
 // ShellName returns the shell name for display purposes.
 func ShellName() string {
 	if CurrentOS() == Windows {
