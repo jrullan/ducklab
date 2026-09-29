@@ -1933,6 +1933,9 @@
           "budget": {
             "$ref": "#/components/schemas/RunlogBudgetState"
           },
+          "bug_id": {
+            "type": "string"
+          },
           "bug_target_project_id": {
             "type": "string"
           },

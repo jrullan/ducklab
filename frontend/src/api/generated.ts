@@ -566,6 +566,7 @@ export interface RunlogRun {
   base_sha?: string;
   branch?: string;
   budget?: RunlogBudgetState;
+  bug_id?: string;
   bug_target_project_id?: string;
   captures?: string[];
   chain_build?: Record<string, unknown>;
