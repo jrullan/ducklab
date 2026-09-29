@@ -86,7 +86,7 @@ func TestBugPromotionWidensOnePortionIntoAnExecutableStackLane(t *testing.T) {
 			t.Errorf("promoted lane omitted %q: %v", path, task.Owns)
 		}
 	}
-	if !strings.Contains(task.Body, "Lane widened at promote:") ||
+	if !strings.Contains(task.Body, "Lane widened at promote**:") ||
 		!strings.Contains(task.Body, "stack test registration") ||
 		!strings.Contains(task.Body, "triage suspected file") {
 		t.Errorf("promotion did not explain its deterministic additions:\n%s", task.Body)

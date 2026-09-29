@@ -291,6 +291,19 @@ func TestInheritedLaneIsNotSelfCollision(t *testing.T) {
 	}
 }
 
+func TestAcceptedTaskLanesAreHistoryNotCollisions(t *testing.T) {
+	plan, err := Parse("## M-01 — First\n\n### T-001 — Landed\n\n**Owns:** src/shared.c\n\n## M-02 — Second\n\n### T-002 — Live\n\n**Owns:** src/shared.c\n", KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := LaneCollisionsForTasks(plan, map[string]bool{"T-001": true}); len(got) != 0 {
+		t.Fatalf("accepted lane still collided with live work: %v", got)
+	}
+	if got := LaneCollisionsForTasks(plan, map[string]bool{}); len(got) != 1 {
+		t.Fatalf("two live claims produced %d findings, want one: %v", len(got), got)
+	}
+}
+
 var _ = filepath.Join
 
 // A spec section that records what will NOT be built has nothing for a task to
