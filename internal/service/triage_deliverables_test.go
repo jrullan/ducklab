@@ -43,3 +43,18 @@ func TestPromotedTaskWithoutDeliverablesKeepsItsShape(t *testing.T) {
 		t.Fatalf("invented a checklist:\n%s", body)
 	}
 }
+
+func TestManualAcceptanceSlicesAreReservedForTheHumanGate(t *testing.T) {
+	items := []string{
+		"The CSS provider is removed",
+		"GNOME Wayland manual smoke shows the frozen frame",
+	}
+	manual := manualDeliverables(items)
+	if len(manual) != 1 || !manual[2] {
+		t.Fatalf("manual deliverables = %v, want slice 2", manual)
+	}
+	payload := humanVerificationPayload(items)
+	if len(payload) != 1 || payload[0]["id"] != 2 || payload[0]["text"] != items[1] {
+		t.Fatalf("human verification payload = %#v", payload)
+	}
+}

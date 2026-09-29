@@ -206,6 +206,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const live = useRuns((s) => s.spend[runId]);
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
   const [actionError, setActionError] = useState<string | null>(null);
+	const [humanVerified, setHumanVerified] = useState<number[]>([]);
   const [publication, setPublication] = useState<{ policy: "nothing" | "push" | "pr"; remote: string; base: string }>({ policy: "push", remote: "origin", base: "main" });
   const [publicationFailure, setPublicationFailure] = useState<{ sha: string; error: string } | null>(null);
   const [publicationInfo, setPublicationInfo] = useState<string | null>(null);
@@ -831,6 +832,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     next.some((v) => ["accept", "reject", "resume", "request_changes"].includes(v)) ||
     (run.status === "paused" && next.includes("abort"))
   );
+	const manualVerification = Array.isArray(run.pending_data?.human_verification)
+	  ? (run.pending_data!.human_verification as { id: number; text: string }[])
+	  : [];
   const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
   // Composition findings are deterministic engine output, not another
   // reviewer opinion. Historical records did not always copy them into
@@ -1006,10 +1010,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
   const acceptRun = async (resolveAdditiveConflicts = false) => {
     setActionError(null);
+	if (manualVerification.some((item) => !humanVerified.includes(item.id))) {
+	  setActionError("Confirm every manual verification item before accepting.");
+	  return;
+	}
     const store = useRuns.getState();
     store.beginAccept(runId);
     try {
-      const res = await client.accept(runId, "", resolveAdditiveConflicts);
+	  const res = await client.accept(runId, "", resolveAdditiveConflicts, humanVerified);
       store.confirmAccept(runId, res.commit_sha);
       // Accept responses also carry unrelated caveats (for example, the
       // benchmark's same-model self-review warning). Treating every warning
@@ -1059,6 +1067,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
         </div>
       )}
+	  {manualVerification.length > 0 && (
+		<div className="mb-3 rounded border border-serious p-2" data-testid="human-verification">
+		  <div className="text-xs font-medium text-serious">Verify in the live environment</div>
+		  <p className="mt-1 text-sm text-ink-secondary">These checks require your observation; Ducklab did not count them as missing implementer work.</p>
+		  {manualVerification.map((item) => (
+			<label key={item.id} className="mt-2 flex items-start gap-2 text-sm text-ink">
+			  <input type="checkbox" checked={humanVerified.includes(item.id)} onChange={(event) => setHumanVerified((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
+			  <span>I verified acceptance slice {item.id}: {item.text}</span>
+			</label>
+		  ))}
+		</div>
+	  )}
       <DecisionCard
         // The note editor and its seed belong to one run. App reuses this
         // view across runs without remounting, so the key scopes the card's

@@ -1407,10 +1407,11 @@ export class EngineClient {
       (r) => r.output ?? "",
     );
   }
-  accept(id: string, message = "", resolveAdditiveConflicts = false) {
+  accept(id: string, message = "", resolveAdditiveConflicts = false, humanVerified: number[] = []) {
     return this.request<AcceptResult>("POST", `/v1/runs/${id}/accept`, {
       message,
       resolve_additive_conflicts: resolveAdditiveConflicts,
+	  human_verified: humanVerified,
     });
   }
   reject(id: string, reason = "") {

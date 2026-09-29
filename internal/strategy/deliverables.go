@@ -129,7 +129,7 @@ func (r *DeliverablesReport) Missing(n int) []int {
 // incompleteDeliverables is the work still open whether the author named it
 // partial/blocked or silently left its id out of an otherwise parseable
 // report. Both are incompatible with a finding-free approval.
-func incompleteDeliverables(r *DeliverablesReport, n int) []int {
+func incompleteDeliverables(r *DeliverablesReport, n int, ignored ...map[int]bool) []int {
 	if r == nil {
 		return nil
 	}
@@ -142,10 +142,35 @@ func incompleteDeliverables(r *DeliverablesReport, n int) []int {
 	}
 	ids := make([]int, 0, len(set))
 	for id := range set {
+		if len(ignored) > 0 && ignored[0][id] {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
 	return ids
+}
+
+func reportWithoutManualItems(r *DeliverablesReport, n int, manual map[int]bool) *DeliverablesReport {
+	if r == nil || len(manual) == 0 {
+		return r
+	}
+	out := &DeliverablesReport{Unreported: r.Unreported}
+	out.Items = append(out.Items, r.Items...)
+	seen := map[int]bool{}
+	for i := range out.Items {
+		seen[out.Items[i].ID] = true
+		if manual[out.Items[i].ID] {
+			out.Items[i].Status = "done"
+			out.Items[i].Note = "awaits human verification"
+		}
+	}
+	for id := 1; id <= n; id++ {
+		if manual[id] && !seen[id] {
+			out.Items = append(out.Items, DeliverableStatus{ID: id, Status: "done", Note: "awaits human verification"})
+		}
+	}
+	return out
 }
 
 // ParseDeliverablesReport finds the report object in the implementer's

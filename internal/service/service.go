@@ -1247,7 +1247,8 @@ type AcceptResult struct {
 // request additive conflict union, but ordinary acceptance never guesses how
 // to resolve a rebase.
 type AcceptOptions struct {
-	ResolveAdditiveConflicts bool `json:"resolve_additive_conflicts,omitempty"`
+	ResolveAdditiveConflicts bool  `json:"resolve_additive_conflicts,omitempty"`
+	HumanVerified            []int `json:"human_verified,omitempty"`
 }
 
 // RunFilter is a run filter.
@@ -2309,14 +2310,21 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		rs.writer.AppendEvent("skill_problems", map[string]interface{}{"problems": problems})
 	}
 
-	// Check if human gate is needed
-	if rs.run.Autonomy == "manual" || rs.run.Autonomy == "guarded" {
+	manualVerification := humanVerificationPayload(s.taskDeliverables(ctx, rs.run.ProjectID, req.TaskID))
+	// Check if human gate is needed. A manual acceptance slice always returns
+	// to a person, even under auto/yolo: the model and the gate cannot attest
+	// to an observation they were explicitly told requires a human environment.
+	if rs.run.Autonomy == "manual" || rs.run.Autonomy == "guarded" || len(manualVerification) > 0 {
 		if verdict == "PASSED" || verdict == "UNVERIFIED" {
 			rs.run.Status = "paused"
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict}
 			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict}
+			if len(manualVerification) > 0 {
+				rs.run.PendingData["human_verification"] = manualVerification
+				gateData["human_verification"] = manualVerification
+			}
 			if len(governanceCallouts) > 0 {
 				rs.run.PendingData["governance_callouts"] = governanceCallouts
 				gateData["governance_callouts"] = governanceCallouts
@@ -4367,6 +4375,24 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
+	if required := humanVerificationIDs(rs.run.PendingData); len(required) > 0 {
+		confirmed := map[int]bool{}
+		for _, id := range options.HumanVerified {
+			confirmed[id] = true
+		}
+		var missing []string
+		for _, id := range required {
+			if !confirmed[id] {
+				missing = append(missing, fmt.Sprint(id))
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("manual verification is still required for acceptance slice(s) %s", strings.Join(missing, ", "))
+		}
+		rs.writer.AppendEvent("human_verification_confirmed", map[string]interface{}{
+			"actor": actor, "slices": required,
+		})
+	}
 	// Refusals are decisions about custody and verification, not ephemeral HTTP
 	// errors. Keep their cause and all roots in events.jsonl so a later audit can
 	// establish why no commit landed even after the client has disconnected.
@@ -4410,6 +4436,30 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	// inside acceptRun), so a chained build is already at the line's front.
 	s.queue.poke(s)
 	return &AcceptResult{CommitSHA: rs.run.CommitSHA, Warning: rs.run.Warning, Info: publicationInfo(rs.run)}, nil
+}
+
+func humanVerificationIDs(data map[string]interface{}) []int {
+	if data == nil {
+		return nil
+	}
+	var out []int
+	switch items := data["human_verification"].(type) {
+	case []map[string]interface{}:
+		for _, item := range items {
+			if id := intValue(item["id"]); id > 0 {
+				out = append(out, id)
+			}
+		}
+	case []interface{}:
+		for _, raw := range items {
+			if item, ok := raw.(map[string]interface{}); ok {
+				if id := intValue(item["id"]); id > 0 {
+					out = append(out, id)
+				}
+			}
+		}
+	}
+	return out
 }
 
 func acceptedResult(run *runlog.Run) *AcceptResult {

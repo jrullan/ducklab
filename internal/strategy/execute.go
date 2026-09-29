@@ -49,9 +49,14 @@ type ExecuteParams struct {
 	// Deliverables is the task's numbered checklist — the implementer's work
 	// contract (deliverables.go). Empty means no contract is asked for.
 	Deliverables []string
-	AgentLoop    *agent.Loop
-	ExecContext  *tools.ExecContext
-	Rounds       int
+	// ManualDeliverables are one-based checklist items that require a person
+	// or environment the implementer cannot observe. They remain part of the
+	// acceptance contract, but never become reviewer findings against the
+	// implementer.
+	ManualDeliverables map[int]bool
+	AgentLoop          *agent.Loop
+	ExecContext        *tools.ExecContext
+	Rounds             int
 	// KnownIDs are the section ids that exist across the project's documents
 	// (requirements, spec, plan). A document council's structure check flags
 	// an Implements: target outside this set — eleven dangling references
@@ -1161,7 +1166,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// it receives the same bounded repair loop as any other finding.
 			if turn.Role == config.RoleReviewer && lastReport != nil {
 				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil && v.Verdict == "approve" {
-					if gap := incompleteDeliverables(lastReport, len(params.Deliverables)); len(gap) > 0 {
+					if gap := incompleteDeliverables(lastReport, len(params.Deliverables), params.ManualDeliverables); len(gap) > 0 {
 						v.Verdict = "request-changes"
 						for _, id := range gap {
 							item := fmt.Sprintf("acceptance slice %d", id)
@@ -1269,19 +1274,23 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// distress. See rubberduck.go.
 			if turn.Role == config.RoleImplementer {
 				if len(params.Deliverables) > 0 {
-					lastReport = ParseDeliverablesReport(outcome.Text, len(params.Deliverables))
+					rawReport := ParseDeliverablesReport(outcome.Text, len(params.Deliverables))
 					// Self-contained: the texts ride along so a client can
 					// render the checklist without re-deriving it from the task.
 					reportData := map[string]interface{}{
-						"round": round, "items": lastReport.Items, "unreported": lastReport.Unreported,
-						"total": len(params.Deliverables), "undelivered": lastReport.Undelivered(),
+						"round": round, "items": rawReport.Items, "unreported": rawReport.Unreported,
+						"total": len(params.Deliverables), "undelivered": rawReport.Undelivered(),
 						"deliverables": params.Deliverables,
+					}
+					if len(params.ManualDeliverables) > 0 {
+						reportData["manual"] = params.ManualDeliverables
 					}
 					if consultRetries > 0 {
 						reportData["retry"] = consultRetries
 					}
-					reportData["missing"] = lastReport.Undelivered()
+					reportData["missing"] = rawReport.Undelivered()
 					emit(params, "deliverables_report", reportData)
+					lastReport = reportWithoutManualItems(rawReport, len(params.Deliverables), params.ManualDeliverables)
 					if lastReport.Unreported && reportRetries == 0 {
 						reportRetries++
 						reportRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)

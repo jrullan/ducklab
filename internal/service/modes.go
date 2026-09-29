@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -643,6 +644,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 				turnCaps.Sources[config.RoleImplementer], mc.roster[config.RoleImplementer], pairReserve, turnCaps.Caps[config.RoleImplementer]),
 		})
 	}
+	deliverables := s.taskDeliverables(ctx, mc.rs.run.ProjectID, mc.req.TaskID)
 	base := strategy.ExecuteParams{
 		LiveToolEvents:       true,
 		EscalationCandidates: escalationCandidates,
@@ -663,8 +665,9 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
 		// The task's bullets, numbered: the implementer's work contract
 		// (strategy/deliverables.go). The plan's words, never the model's.
-		Deliverables: s.taskDeliverables(ctx, mc.rs.run.ProjectID, mc.req.TaskID),
-		ExecContext:  mc.ectx,
+		Deliverables:       deliverables,
+		ManualDeliverables: manualDeliverables(deliverables),
+		ExecContext:        mc.ectx,
 		// The request, then the configured default for this mode, then the
 		// script's own count. The counts lived only in the scripts, so changing
 		// how many times a reviewer got to push back meant editing Go.
@@ -1095,4 +1098,31 @@ func (s *Service) taskDeliverables(ctx context.Context, projectID, taskID string
 		return acceptance
 	}
 	return strategy.ExtractDeliverables(task.Title, task.Body)
+}
+
+var manualVerificationWords = regexp.MustCompile(`(?i)\b(manual(?:ly)?|by (?:the )?person|physical device|live desktop|wayland session|human (?:verification|check|inspection|smoke|confirmation))\b`)
+
+// manualDeliverables identifies acceptance work that only the person or a
+// live environment can perform. The wording remains in the accepted task;
+// this classification merely keeps the engine from demanding that an
+// implementer fabricate evidence it cannot obtain.
+func manualDeliverables(items []string) map[int]bool {
+	out := map[int]bool{}
+	for i, item := range items {
+		if manualVerificationWords.MatchString(item) {
+			out[i+1] = true
+		}
+	}
+	return out
+}
+
+func humanVerificationPayload(items []string) []map[string]interface{} {
+	manual := manualDeliverables(items)
+	out := make([]map[string]interface{}, 0, len(manual))
+	for id, text := range items {
+		if manual[id+1] {
+			out = append(out, map[string]interface{}{"id": id + 1, "text": text})
+		}
+	}
+	return out
 }
