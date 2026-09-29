@@ -214,6 +214,64 @@ func TestBugPromotionUsesTheProjectsTestGlobsForPortionClaims(t *testing.T) {
 	}
 }
 
+// B-452: a backend and a frontend portion each owning its own regression is
+// not shared test infrastructure. Counting test-shaped portions made every
+// cross-stack split impossible even when their lanes were disjoint.
+func TestBugPromotionAllowsDisjointTestLanesAcrossPortions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		"internal/service/bugs.go", "internal/service/bug_loop_test.go",
+		"frontend/src/views/Board.tsx", "frontend/src/views/board.test.tsx",
+	}
+	for _, name := range paths {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	portions := []agent.SplitProposal{
+		{Title: "Persist provenance", Acceptance: []string{"a Go regression proves provenance persists"}, Owns: []string{"internal/service/bugs.go", "internal/service/bug_loop_test.go"}},
+		{Title: "Show provenance", Acceptance: []string{"a frontend regression proves provenance is visible"}, Owns: []string{"frontend/src/views/Board.tsx", "frontend/src/views/board.test.tsx"}},
+	}
+	got, err := preparePromotionPortions(root, &store.Bug{TestStrategy: "test-first"}, portions)
+	if err != nil {
+		t.Fatalf("promotion rejected disjoint test lanes: %v", err)
+	}
+	if len(got) != 2 || !slices.Contains(got[0].Owns, "internal/service/bug_loop_test.go") ||
+		!slices.Contains(got[1].Owns, "frontend/src/views/board.test.tsx") {
+		t.Fatalf("promoted portions = %#v", got)
+	}
+}
+
+func TestBugPromotionNamesTheOverlappingTestLane(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tests", "shared_test.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	portions := []agent.SplitProposal{
+		{Title: "Own the test tree", Acceptance: []string{"tests cover alpha"}, Owns: []string{"tests"}},
+		{Title: "Edit one shared test", Acceptance: []string{"tests cover beta"}, Owns: []string{"tests/shared_test.go"}},
+	}
+	_, err := preparePromotionPortions(root, &store.Bug{TestStrategy: "test-first"}, portions)
+	if err == nil || !strings.Contains(err.Error(), `share test lane "tests" / "tests/shared_test.go"`) {
+		t.Fatalf("overlap error = %v", err)
+	}
+}
+
 func TestBugPromotionNamesEveryPortionWhenNoTestClaimExists(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DefaultProject("p", "P")

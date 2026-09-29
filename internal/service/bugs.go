@@ -746,16 +746,15 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		return nil, fmt.Errorf("load project config for promotion lane: %w", err)
 	}
 	var testPortions []int
+	testClaims := make([][]string, len(out))
 	for i, portion := range out {
 		text := portion.Title + "\n" + strings.Join(portion.Acceptance, "\n")
-		claimsTestPath := false
 		for _, owned := range portion.Owns {
 			if verify.ClaimsTestLane(owned, cfg.Verify.TestGlobs) {
-				claimsTestPath = true
-				break
+				testClaims[i] = append(testClaims[i], cleanLanePath(owned))
 			}
 		}
-		if claimsTestPath || verify.MentionsTests(text) {
+		if len(testClaims[i]) > 0 || verify.MentionsTests(text) {
 			testPortions = append(testPortions, i)
 		}
 	}
@@ -779,7 +778,27 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 	if len(testPortions) > 1 {
-		return nil, fmt.Errorf("split proposal assigns shared test infrastructure to %d portions; give one portion ownership of the regression and make the others depend on it", len(testPortions))
+		// Multiple portions may each own their own regression. What is unsafe is
+		// shared ownership of the same test file or tree: those tasks would race
+		// and the plan's lane checker would reject them anyway. The old count-only
+		// rule mistook an ordinary backend + frontend split for shared ownership.
+		for _, portion := range testPortions {
+			if len(testClaims[portion]) == 0 {
+				return nil, fmt.Errorf("split portion %d %q requires tests but owns no test path; assign its regression file or test root explicitly before promoting", portion+1, out[portion].Title)
+			}
+		}
+		for left := 0; left < len(testPortions); left++ {
+			for right := left + 1; right < len(testPortions); right++ {
+				i, j := testPortions[left], testPortions[right]
+				for _, a := range testClaims[i] {
+					for _, b := range testClaims[j] {
+						if lanePathsOverlap(a, b) {
+							return nil, fmt.Errorf("split portions %d and %d share test lane %q / %q; give that regression path to only one portion", i+1, j+1, a, b)
+						}
+					}
+				}
+			}
+		}
 	}
 	if len(testPortions) == 1 {
 		profile, _ := capability.DefaultRegistry().ResolveProject(capability.Context{ProjectRoot: projectRoot, Policies: cfg.Capabilities.Policy}, cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled)
@@ -791,6 +810,14 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 	return out, nil
+}
+
+func lanePathsOverlap(a, b string) bool {
+	a, b = strings.TrimSuffix(cleanLanePath(a), "/"), strings.TrimSuffix(cleanLanePath(b), "/")
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 // resolvePromotionLanePaths turns the model's lane vocabulary into paths the
