@@ -186,6 +186,8 @@ export interface Run {
   /** How the mode was resolved: request, settings, project, or fallback. */
   mode_source?: string;
   task_id: string;
+  /** Report whose promotion created this task run. */
+  bug_id?: string;
   status: "running" | "queued" | "paused" | "done" | "failed";
   /** Engine explanation for why a queued run has not been seated. */
   queued_reason?: string;

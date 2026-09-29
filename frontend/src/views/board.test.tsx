@@ -253,6 +253,23 @@ describe("Board, the bugs half", () => {
     expect(screen.getByTestId("board-col-in_progress").textContent).toContain("B-003");
   });
 
+  it("lists runs from every task promoted from the selected bug", async () => {
+    useRuns.setState({
+      runs: {
+        "r-one": { id: "r-one", project_id: "p", stage: "build", mode: "solo", task_id: "T-063", bug_id: "B-003", status: "done", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z" },
+        "r-two": { id: "r-two", project_id: "p", stage: "build", mode: "solo", task_id: "T-064", bug_id: "B-003", status: "done", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z" },
+      }, events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open",
+    });
+    render(<Board client={bothClient()} projectId="p" tab="bugs" />);
+    await screen.findByText("Slow export");
+    fireEvent.click(screen.getByText("Slow export"));
+    const runs = await screen.findByTestId("bug-origin-runs");
+    expect(runs).toHaveTextContent("T-063 · r-one");
+    expect(runs).toHaveTextContent("T-064 · r-two");
+    expect(runs.querySelector('a[href="#/runs/r-one"]')).toBeTruthy();
+    expect(runs.querySelector('a[href="#/runs/r-two"]')).toBeTruthy();
+  });
+
   it("filters by severity", async () => {
     render(<Board client={bothClient()} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(BUGS.length));

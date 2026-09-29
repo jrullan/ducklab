@@ -37,6 +37,8 @@ type Run struct {
 	// or fallback. An explicit request is recorded as request.
 	ModeSource string `json:"mode_source,omitempty"`
 	TaskID     string `json:"task_id"`
+	// BugID identifies the report whose promotion created this task run.
+	BugID string `json:"bug_id,omitempty"`
 	// TaskBodyHash binds derived task state to the meaning run at launch.
 	// Historical runs remain readable but cannot contaminate a recycled ID.
 	TaskBodyHash string            `json:"task_body_hash,omitempty"`

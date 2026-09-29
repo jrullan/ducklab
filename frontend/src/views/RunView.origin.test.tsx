@@ -152,6 +152,16 @@ describe("RunView origin panel", () => {
     expect(breadcrumb.querySelector('a[href="#/cycle/plan/task-1"]')).toHaveTextContent("Implement origin panel");
   });
 
+  it("shows a linked originating bug badge only when the run records one", async () => {
+    const run = { id: "run-1", project_id: "project-1", stage: "build", mode: "solo", task_id: "task-1", bug_id: "B-035", status: "done", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z" };
+    useRuns.setState({ runs: { "run-1": run as never }, events: { "run-1": [] }, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open" });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.run = vi.fn().mockResolvedValue({ run, events: [] });
+    render(<RunView runId="run-1" client={client as never} />);
+    expect(await screen.findByTestId("run-origin-bug")).toHaveTextContent("Fixes B-035");
+    expect(screen.getByTestId("run-origin-bug")).toHaveAttribute("href", "#/board/bugs");
+  });
+
   it("returns a document chat to its exact section", async () => {
     const chat = { id: "run-1", project_id: "project-1", stage: "chat", mode: "solo", task_id: "", status: "paused", verdict: "", started_at: "2026-01-01T00:00:00Z", note: "chat about document REQ-005" };
     useRuns.setState({ runs: { "run-1": chat as never }, events: { "run-1": [] }, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open" });

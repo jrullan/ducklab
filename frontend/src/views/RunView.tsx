@@ -1244,6 +1244,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             a stage opened with an empty space where its name should be. The
             same fallback the runs list uses — task, else stage, else id. */}
         <span className="text-md">{runLabel(run)}</span>
+        {run.bug_id && (
+          <a
+            href={routeHref({ name: "board", tab: "bugs" })}
+            data-testid="run-origin-bug"
+            className="rounded border border-hairline px-2 py-0.5 text-xs text-ink underline"
+          >
+            Fixes {run.bug_id}
+          </a>
+        )}
         {/* The task's title beside its id: the header answers "what is being
             built" without a trip down to the card. Truncated; the card and
             the hover carry the whole of it. */}

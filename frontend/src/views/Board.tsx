@@ -1535,6 +1535,7 @@ function BugRail({
   // door, shown here — the person does not travel to the board to learn
   // that the next act is to write the test or build.
   const journey = useJourney(client, projectId, bug.id, `${bug.status}:${bug.task_id ?? ""}`);
+  const runs = useRuns((s) => Object.values(s.runs).filter((run) => run.project_id === projectId && run.bug_id === bug.id));
   const [editPortionsRequest, setEditPortionsRequest] = useState(0);
   return (
     <div className="space-y-3" data-testid="bug-rail">
@@ -1562,6 +1563,16 @@ function BugRail({
         <Row label="task" value={bug.task_id} />
       </dl>
       <BugPortions bug={bug} client={client} projectId={projectId} onDone={onDone} editRequest={editPortionsRequest} />
+      {runs.length > 0 && (
+        <div data-testid="bug-origin-runs" className="space-y-1 text-xs">
+          <div className="text-ink-muted">runs from this bug</div>
+          {runs.map((run) => (
+            <a key={run.id} href={`#/runs/${run.id}`} className="block text-ink underline">
+              {run.task_id} · {run.id}
+            </a>
+          ))}
+        </div>
+      )}
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugAttachments bug={bug} client={client} projectId={projectId} onChanged={onDone} />
       <BugHistory bug={bug} />

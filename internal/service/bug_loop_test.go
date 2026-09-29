@@ -6,6 +6,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // The bug loop had an entrance and no exit.
@@ -52,6 +53,39 @@ func TestAcceptingATaskMovesItsBugOn(t *testing.T) {
 	bugs, _ := s.BugList(context.Background(), id, false)
 	if bugs[0].Status != "fixed" {
 		t.Errorf("status = %q, want fixed", bugs[0].Status)
+	}
+}
+
+func TestRunStartRecordsPromotedBugOrigin(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if err := vcs.New(dir).Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "origin is retained", Severity: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyTriage(context.Background(), id, []map[string]interface{}{{"bug": "B-001", "severity": "high"}}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, _ := out["task"].(string)
+	run, err := s.RunStart(context.Background(), id, RunRequest{TaskID: taskID, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.BugID != "B-001" {
+		t.Errorf("bug ID = %q, want B-001", run.BugID)
+	}
+	unrelated, err := s.RunStart(context.Background(), id, RunRequest{TaskID: "T-001", DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unrelated.BugID != "" {
+		t.Errorf("unrelated bug ID = %q, want empty", unrelated.BugID)
 	}
 }
 

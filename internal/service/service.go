@@ -1287,6 +1287,33 @@ func (s *Service) resolveBuildMode(projectPath string) (string, string) {
 	return "solo", "fallback"
 }
 
+// originatingBugID finds the bug whose promotion created taskID. The trace is
+// authoritative and supports every task emitted by a split promotion.
+func (s *Service) originatingBugID(projectID, taskID string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	db, err := s.openProjectDB(projectID)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	bugs, err := db.ListBugs()
+	if err != nil {
+		return "", err
+	}
+	for _, b := range bugs {
+		edges, err := db.TracesFrom("bug", b.ID)
+		if err != nil {
+			return "", err
+		}
+		if slices.Contains(edges, "task:"+taskID) {
+			return b.ID, nil
+		}
+	}
+	return "", nil
+}
+
 // RunStart starts a run. Returns immediately with the run in running status.
 func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest) (*runlog.Run, error) {
 	entry, err := s.registry.Get(projectID)
@@ -1339,6 +1366,11 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		}
 	}
 
+	bugID, err := s.originatingBugID(projectID, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create run
 	runID := runlog.GenerateRunID()
 	run := &runlog.Run{
@@ -1348,6 +1380,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		Mode:         req.Mode,
 		ModeSource:   "request",
 		TaskID:       req.TaskID,
+		BugID:        bugID,
 		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
 		Status:       "running",
 		StartedAt:    time.Now().UTC().Format(time.RFC3339),
@@ -1440,7 +1473,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 
 	// Emit run_start event
 	writer.AppendEvent("run_start", map[string]interface{}{
-		"mode": run.Mode, "mode_source": run.ModeSource, "task_id": run.TaskID,
+		"mode": run.Mode, "mode_source": run.ModeSource, "task_id": run.TaskID, "bug_id": run.BugID,
 	})
 
 	// Dry-run is synchronous: render prompts, no model calls, exit immediately
