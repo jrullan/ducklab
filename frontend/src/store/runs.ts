@@ -226,9 +226,19 @@ export const useRuns = create<RunsState>((set) => ({
         } else if (e.type === "run_end") {
           // done and failed are different ends: a tournament with no winner
           // ends done with verdict FAILED. The error event above is what
-          // marks a harness failure, so run_end preserves it.
+          // marks a harness failure, so run_end preserves it. A terminal
+          // event is also authoritative about there being no decision left:
+          // retaining the paused record's offers kept the gate card visible
+          // after Accept had already completed the run.
           const status = run.status === "failed" ? "failed" : "done";
-          runs = { ...runs, [runId]: { ...run, status, verdict: String(e.data?.verdict ?? run.verdict) } };
+          const {
+            pending_kind: _pendingKind,
+            pending_since: _pendingSince,
+            pending_data: _pendingData,
+            next: _next,
+            ...finished
+          } = run;
+          runs = { ...runs, [runId]: { ...finished, status, verdict: String(e.data?.verdict ?? run.verdict), next: [] } };
         }
       }
 

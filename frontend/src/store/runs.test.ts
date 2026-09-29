@@ -283,6 +283,24 @@ describe("a failure arriving on the stream", () => {
     const r = useRuns.getState().runs["r-2"]!;
     expect(r.status).toBe("done");
   });
+
+  it("clears a paused decision when the run ends", () => {
+    useRuns.setState({
+      runs: {
+        "r-3": { id: "r-3", project_id: "p", stage: "triage", mode: "solo", status: "paused", verdict: "UNVERIFIED",
+          pending_kind: "gate", pending_since: "2026-09-29T01:00:00Z", pending_data: { verdict: "UNVERIFIED" },
+          next: ["accept", "reject"] } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    useRuns.getState().applyEvent({ type: "run_end", run_id: "r-3", seq: 6, data: { verdict: "PASSED" } } as never);
+    const run = useRuns.getState().runs["r-3"] as unknown as Record<string, unknown>;
+    expect(run.status).toBe("done");
+    expect(run.next).toEqual([]);
+    expect(run.pending_kind).toBeUndefined();
+    expect(run.pending_since).toBeUndefined();
+    expect(run.pending_data).toBeUndefined();
+  });
 });
 
 // The autopilot's runs are born on the bus, not in this client — and the bus
