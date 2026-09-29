@@ -49,6 +49,29 @@ func TestATaskThatAsksForTestsIsNotFlagged(t *testing.T) {
 	}
 }
 
+func TestAProseMentionDoesNotAuthorizeAnOutOfLaneTestEdit(t *testing.T) {
+	got := CheckTamperingForLane(mixedDiff, []string{"mathutil.go"}, nil)
+	if !got.Flagged() {
+		t.Fatal("an out-of-lane test edit was hidden by task prose")
+	}
+}
+
+func TestADeclaredTestLaneAuthorizesAdditions(t *testing.T) {
+	diff := "diff --git a/mathutil_test.go b/mathutil_test.go\n--- a/mathutil_test.go\n+++ b/mathutil_test.go\n@@ -1 +1,2 @@\n old\n+new case\n"
+	got := CheckTamperingForLane(diff, []string{"mathutil_test.go"}, nil)
+	if got.Flagged() {
+		t.Fatalf("a declared additive test edit was flagged: %+v", got)
+	}
+}
+
+func TestDeletingAnAssertionIsAlwaysFlagged(t *testing.T) {
+	diff := "diff --git a/mathutil_test.go b/mathutil_test.go\n--- a/mathutil_test.go\n+++ b/mathutil_test.go\n@@ -1 +0,0 @@\n-assert.Equal(t, 4, Double(2))\n"
+	got := CheckTamperingForLane(diff, []string{"mathutil_test.go"}, nil)
+	if !got.Flagged() || !got.AssertionDeleted {
+		t.Fatalf("assertion deletion was not flagged: %+v", got)
+	}
+}
+
 func TestADiffThatTouchesNoTestsIsNotFlagged(t *testing.T) {
 	diff := "diff --git a/mathutil.go b/mathutil.go\n--- a/mathutil.go\n+++ b/mathutil.go\n@@ -1 +1 @@\n-a\n+b\n"
 	if got := CheckTampering(diff, "Change Double.", nil); got.Flagged() || got.Hunks != "" {

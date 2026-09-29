@@ -26,6 +26,10 @@ type Tampering struct {
 	// Asked is true when the task itself mentioned tests, which makes the
 	// change expected rather than a surprise.
 	Asked bool
+	// AssertionDeleted is true when the patch removes a line that looks like
+	// an assertion. That is always worth showing, even inside a declared test
+	// lane: deleting the oracle is materially different from adding coverage.
+	AssertionDeleted bool
 }
 
 // Flagged reports whether a human should be shown the test hunks separately.
@@ -33,7 +37,9 @@ type Tampering struct {
 // Only when the task did not ask. Flagging every test edit in a task that says
 // "add tests for X" would train the reader to dismiss the flag, and a warning
 // that is always on is a warning nobody reads.
-func (t Tampering) Flagged() bool { return len(t.Files) > 0 && !t.Asked }
+func (t Tampering) Flagged() bool {
+	return len(t.Files) > 0 && (!t.Asked || t.AssertionDeleted)
+}
 
 // Message is what the human gate says about the change.
 const TamperMessage = "this change edits tests; read these hunks before accepting"
@@ -61,6 +67,66 @@ func CheckTampering(diff, taskText string, globs []string) Tampering {
 		t.Hunks += "\n"
 	}
 	return t
+}
+
+// CheckTamperingForLane inspects test changes against the task's declared
+// write lane. Prose is deliberately not authority here: mentioning a test,
+// verification, or coverage does not authorize rewriting any test in the
+// repository. A task authorizes a test edit by naming that file or a test
+// directory in its lane.
+func CheckTamperingForLane(diff string, lane, globs []string) Tampering {
+	if len(globs) == 0 {
+		globs = DefaultTestGlobs
+	}
+	t := Tampering{Asked: true}
+	var kept []string
+	for _, section := range splitDiff(diff) {
+		file := diffFile(section)
+		if file == "" || !matchesAny(file, globs) {
+			continue
+		}
+		t.Files = append(t.Files, file)
+		kept = append(kept, strings.TrimRight(section, "\n"))
+		if !laneClaimsFile(file, lane) {
+			t.Asked = false
+		}
+		if removesAssertion(section) {
+			t.AssertionDeleted = true
+		}
+	}
+	t.Hunks = strings.Join(kept, "\n")
+	if t.Hunks != "" {
+		t.Hunks += "\n"
+	}
+	return t
+}
+
+func laneClaimsFile(file string, lane []string) bool {
+	file = path.Clean(strings.TrimPrefix(file, "./"))
+	for _, raw := range lane {
+		claim := path.Clean(strings.TrimPrefix(strings.TrimSpace(raw), "./"))
+		if claim == "." || claim == "" {
+			continue
+		}
+		if claim == file || strings.HasPrefix(file, strings.TrimSuffix(claim, "/")+"/") {
+			return true
+		}
+		if ok, _ := path.Match(claim, file); ok {
+			return true
+		}
+	}
+	return false
+}
+
+var assertionLine = regexp.MustCompile(`(?i)\b(assert|expect|require\.|assert\.|t\.(error|fatal)|g_assert)\b`)
+
+func removesAssertion(section string) bool {
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") && assertionLine.MatchString(line[1:]) {
+			return true
+		}
+	}
+	return false
 }
 
 // splitDiff cuts a unified diff at each file header.
