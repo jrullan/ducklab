@@ -355,6 +355,18 @@ func fieldItems(value string) []string {
 // descendants are overlapping claims; this deliberately handles both files and
 // directory globs without consulting the filesystem.
 func checkLaneCollisions(plan *Document) []TraceError {
+	return checkLaneCollisionsForTasks(plan, nil)
+}
+
+// LaneCollisionsForTasks checks only live claims. The accepted map names
+// landed tasks; their lanes are history and no longer compete with current
+// work. A nil map preserves the plan-only checker used before run state is
+// available.
+func LaneCollisionsForTasks(plan *Document, accepted map[string]bool) []TraceError {
+	return checkLaneCollisionsForTasks(plan, accepted)
+}
+
+func checkLaneCollisionsForTasks(plan *Document, accepted map[string]bool) []TraceError {
 	// A milestone's lane is inherited by its tasks. Keep the milestone index so
 	// that this inheritance is not mistaken for two independent claims.
 	type claim struct {
@@ -364,9 +376,23 @@ func checkLaneCollisions(plan *Document) []TraceError {
 	}
 	var claims []claim
 	for mi, m := range plan.Sections {
-		claims = append(claims, claim{section: m, milestone: mi, isMilestone: true})
+		milestoneLive := accepted == nil
+		if accepted != nil {
+			for _, child := range m.Children {
+				if !accepted[child.ID] {
+					milestoneLive = true
+					break
+				}
+			}
+		}
+		if milestoneLive {
+			claims = append(claims, claim{section: m, milestone: mi, isMilestone: true})
+		}
 		for i := range m.Children {
 			child := m.Children[i]
+			if accepted != nil && accepted[child.ID] {
+				continue
+			}
 			// An inherited lane is membership in the milestone's claim, not a
 			// second claim by every child. Materialising inheritance here made
 			// every pair of sibling tasks collide with itself (25 tasks produced

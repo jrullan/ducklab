@@ -1603,6 +1603,24 @@ func (s *Service) TraceCheck(ctx context.Context, projectID string) (*TraceResul
 		return nil, err
 	}
 	errs := spine.Check()
+	// Plan parsing has no run history, so its lane check necessarily treats
+	// every claim as live. The service does have that history: replace those
+	// findings with collisions among work that has not landed yet. Otherwise
+	// the headline debt grows quadratically forever as accepted tasks
+	// accumulate.
+	if tasks, taskErr := s.TaskList(ctx, projectID); taskErr == nil {
+		accepted := make(map[string]bool, len(tasks))
+		for _, task := range tasks {
+			accepted[task.ID] = task.Status == "accepted" || task.Status == "done"
+		}
+		filtered := errs[:0]
+		for _, finding := range errs {
+			if finding.Kind != artifact.LaneCollision {
+				filtered = append(filtered, finding)
+			}
+		}
+		errs = append(filtered, artifact.LaneCollisionsForTasks(spine.Plan, accepted)...)
+	}
 	fieldErrors := append([]artifact.FieldError(nil), spine.Plan.FieldErrors...)
 	if errs == nil {
 		errs = []artifact.TraceError{}
