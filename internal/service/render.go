@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -73,9 +74,53 @@ func smokeRunCommand(ctx context.Context, root, command, source, expectation str
 	}
 	parentCtx := ctx
 	window := time.Duration(timeoutS) * time.Second
+	env := append(os.Environ(), "DUCKLAB_RUN_ID="+runID, "DUCKLAB_PROJECT_ID="+projectID)
+	if expectation == "live" {
+		runCtx, hardStop := context.WithCancel(parentCtx)
+		defer hardStop()
+		cmd := xplat.ShellContext(runCtx, root, env, command)
+		var output bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &output, &output
+		if err := cmd.Start(); err != nil {
+			return "", fmt.Errorf("%s expected live: %w", source, err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		timer := time.NewTimer(window)
+		defer timer.Stop()
+		select {
+		case err := <-done:
+			detail := fmt.Sprintf("%s expected live for %s but exited early", source, window)
+			if err == nil {
+				detail += " with status 0"
+			} else {
+				detail += ": " + err.Error()
+			}
+			if text := renderNoteOutput(output.Bytes()); text != "" {
+				detail += "; output: " + text
+			}
+			return "", fmt.Errorf("%s", detail)
+		case <-parentCtx.Done():
+			hardStop()
+			<-done
+			return "", parentCtx.Err()
+		case <-timer.C:
+			_ = xplat.TerminateProcessGroup(cmd)
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				hardStop()
+				<-done
+			}
+			note := fmt.Sprintf("%s met expectation live: stayed alive for %s; stopped gracefully after the product-smoke observation window", source, window)
+			if text := renderNoteOutput(output.Bytes()); text != "" {
+				note += "; output: " + text
+			}
+			return note, nil
+		}
+	}
 	smokeCtx, cancel := context.WithTimeout(parentCtx, window)
 	defer cancel()
-	env := append(os.Environ(), "DUCKLAB_RUN_ID="+runID, "DUCKLAB_PROJECT_ID="+projectID)
 	out, commandErr := xplat.ShellContext(smokeCtx, root, env, command).CombinedOutput()
 	if commandErr == nil {
 		if expectation == "live" {

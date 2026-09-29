@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,14 +28,17 @@ import (
 
 // appState is one project's managed application process.
 type appState struct {
-	cancel    context.CancelFunc
-	pid       int
-	startedAt time.Time
-	logPath   string
-	done      chan struct{}
-	exitErr   error
-	builtSHA  string
-	builtAt   time.Time
+	cancel     context.CancelFunc
+	cmd        *exec.Cmd
+	pid        int
+	startedAt  time.Time
+	logPath    string
+	done       chan struct{}
+	exitErr    error
+	builtSHA   string
+	builtAt    time.Time
+	stoppedBy  string
+	stopSignal string
 }
 
 // AppStatus is the running-app answer for one project.
@@ -63,6 +67,9 @@ type AppStatus struct {
 	// ExitError is how the last managed process ended, when it ended badly —
 	// the first thing a person needs when Launch appears to do nothing.
 	ExitError string `json:"exit_error,omitempty"`
+	// StoppedBy/StopSignal distinguish an intentional stop from a crash.
+	StoppedBy  string `json:"stopped_by,omitempty"`
+	StopSignal string `json:"stop_signal,omitempty"`
 	// LogTail is the end of the app's combined output, for the same reason.
 	LogTail string `json:"log_tail,omitempty"`
 	// BuiltSHA/BuiltAt identify the source state whose configured build gate
@@ -181,7 +188,7 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	}
 
 	st := &appState{
-		cancel: cancel, pid: cmd.Process.Pid,
+		cancel: cancel, cmd: cmd, pid: cmd.Process.Pid,
 		startedAt: time.Now(), logPath: logPath,
 		done: make(chan struct{}), builtSHA: builtSHA, builtAt: builtAt,
 	}
@@ -194,20 +201,49 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	return s.appStatusLocked(projectID, cfg), nil
 }
 
-// AppStop kills the managed process — the whole group, so a shell's children
-// die with it.
+// AppStop politely stops the managed process group, then force-kills it only
+// after the configured grace period.
 func (s *Service) AppStop(ctx context.Context, projectID string) error {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return err
+	}
 	s.appMu.Lock()
 	st := s.apps[projectID]
-	s.appMu.Unlock()
 	if st == nil || !st.alive() {
+		s.appMu.Unlock()
 		return fmt.Errorf("not stopped — no managed app is running for this project")
 	}
-	st.cancel()
+	st.stoppedBy = "person"
+	st.stopSignal = "SIGTERM"
+	s.appMu.Unlock()
+	if err := xplat.TerminateProcessGroup(st.cmd); err != nil {
+		s.appMu.Lock()
+		st.stopSignal = "SIGKILL"
+		s.appMu.Unlock()
+		st.cancel()
+	}
+	grace := time.Duration(cfg.Run.StopGraceS) * time.Second
+	if grace == 0 {
+		grace = 3 * time.Second
+	}
 	select {
 	case <-st.done:
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("the app did not exit within 5s of the kill; check pid %d by hand", st.pid)
+		return nil
+	case <-time.After(grace):
+		s.appMu.Lock()
+		st.stopSignal = "SIGKILL"
+		s.appMu.Unlock()
+		st.cancel()
+	}
+	select {
+	case <-st.done:
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("the app did not exit after SIGTERM and SIGKILL; check pid %d by hand", st.pid)
 	}
 	return nil
 }
@@ -269,7 +305,9 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		out.BuiltAt = st.builtAt.UTC().Format(time.RFC3339)
 	}
 	if !st.alive() {
-		if st.exitErr != nil {
+		out.StoppedBy = st.stoppedBy
+		out.StopSignal = st.stopSignal
+		if st.exitErr != nil && st.stoppedBy == "" {
 			out.ExitError = st.exitErr.Error()
 		}
 		return out

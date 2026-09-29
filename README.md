@@ -246,7 +246,10 @@ the process to survive the whole observation window. When omitted, an explicit
 `run.smoke` defaults to `exit`, while a `run.command` fallback or an app with a
 URL/health endpoint defaults to `live`. The gate and UI always state the
 effective expectation, so an interactive program that exits cleanly in 20 ms
-cannot masquerade as a booted product.
+cannot masquerade as a booted product. An intentional Stop sends a polite
+termination to the whole app process group, waits `run.stop_grace_s` seconds
+(3 by default), and only then force-kills it; the same graceful boundary is
+used when a `live` product smoke finishes its observation window.
 
 Gate and shell process trees always receive `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID`. For example, excercise-tracker can use `DATABASE_URL=test_db_${DUCKLAB_RUN_ID}` in `[verify].tests`, and a compose preflight can use `${DUCKLAB_PROJECT_ID}` as its per-run project name. Ducklab guarantees identity only; provisioning and teardown remain the project's.
 

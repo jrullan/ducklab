@@ -2,7 +2,10 @@
 
 package xplat
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 // setProcessGroup is a no-op on Windows: cmd.exe children are handled by the
 // job the process already belongs to.
@@ -16,4 +19,11 @@ func killProcessGroup(c *exec.Cmd) error {
 		return nil
 	}
 	return c.Process.Kill()
+}
+
+func terminateProcessGroup(c *exec.Cmd) error {
+	if c.Process == nil {
+		return nil
+	}
+	return c.Process.Signal(os.Interrupt)
 }

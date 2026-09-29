@@ -629,6 +629,9 @@
           "smoke_timeout_s": {
             "type": "integer"
           },
+          "stop_grace_s": {
+            "type": "integer"
+          },
           "url": {
             "type": "string"
           }
@@ -641,6 +644,7 @@
           "smoke",
           "smoke_expect",
           "smoke_timeout_s",
+          "stop_grace_s",
           "url"
         ],
         "type": "object"
@@ -2241,6 +2245,12 @@
             "type": "integer"
           },
           "started_at": {
+            "type": "string"
+          },
+          "stop_signal": {
+            "type": "string"
+          },
+          "stopped_by": {
             "type": "string"
           },
           "suggestions": {

@@ -555,6 +555,10 @@ type RunApp struct {
 	// SmokeTimeoutS is the observation window for a long-lived smoke command.
 	// Zero selects the engine default.
 	SmokeTimeoutS int `toml:"smoke_timeout_s" json:"smoke_timeout_s"`
+	// StopGraceS is how long an intentional stop waits after a polite signal
+	// before the engine force-kills the process group. Zero selects the engine
+	// default.
+	StopGraceS int `toml:"stop_grace_s" json:"stop_grace_s"`
 	// URL is where a person opens the running app.
 	URL string `toml:"url" json:"url"`
 	// Health is a URL the engine probes to report whether the running app is
@@ -912,6 +916,9 @@ func (p *Project) Validate(path string) error {
 	}
 	if p.Run.SmokeTimeoutS < 0 {
 		return &Error{File: path, Key: "run.smoke_timeout_s", Msg: "must be zero (default) or positive"}
+	}
+	if p.Run.StopGraceS < 0 {
+		return &Error{File: path, Key: "run.stop_grace_s", Msg: "must be zero (default) or positive"}
 	}
 	if p.Run.SmokeExpect != "" && p.Run.SmokeExpect != "exit" && p.Run.SmokeExpect != "live" {
 		return &Error{File: path, Key: "run.smoke_expect", Msg: "must be exit | live (or empty for derived default)"}

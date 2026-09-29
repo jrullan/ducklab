@@ -86,9 +86,55 @@ func TestTheEngineStartsProbesAndStopsTheApp(t *testing.T) {
 	if st.Running {
 		t.Error("stopped app still reports running")
 	}
+	if st.StoppedBy != "person" || st.ExitError != "" {
+		t.Errorf("intentional stop reported as a crash: %+v", st)
+	}
 	// Stopping again is refused honestly.
 	if err := s.AppStop(context.Background(), p.ID); err == nil {
 		t.Error("a second stop found something to stop")
+	}
+}
+
+func TestAppStopGivesTheProcessAGracefulShutdownWindow(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "stopped.marker")
+	ready := filepath.Join(dir, "ready.marker")
+	command := "trap 'printf stopped > " + marker + "; exit 0' TERM; printf ready > " + ready + "; while :; do sleep 0.05; done"
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"run.command": command, "run.stop_grace_s": "2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppStart(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("app did not reach its ready point")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := s.AppStop(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("SIGTERM cleanup did not run: %v", err)
+	}
+	st, err := s.AppStatus(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.StoppedBy != "person" || st.StopSignal != "SIGTERM" || st.ExitError != "" {
+		t.Fatalf("graceful stop status = %+v", st)
 	}
 }
 
