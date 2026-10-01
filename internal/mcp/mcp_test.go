@@ -533,6 +533,26 @@ func TestStatusListsWaitingAndRunning(t *testing.T) {
 	}
 }
 
+// Greenfield replay: an intake that failed on an unreachable model left the
+// operator with an empty status. The latest failure is named with its reason
+// while nothing replaced it; an older failure is not.
+func TestStatusNamesTheLatestFailedRun(t *testing.T) {
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{
+		"r-old": {"id": "r-old", "status": "failed", "stage": "build", "started_at": "2026-10-01T20:00:00Z", "failure": "old failure"},
+		"r-new": {"id": "r-new", "status": "failed", "stage": "intake", "started_at": "2026-10-01T21:08:35Z", "failure": "provider chat: 404 Not Found"},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(text, "last_run_failed") || !strings.Contains(text, "r-new") || !strings.Contains(text, "404 Not Found") || strings.Contains(text, "old failure") {
+		t.Fatalf("status = %s", text)
+	}
+	eng.runs["r-later"] = map[string]interface{}{"id": "r-later", "status": "done", "started_at": "2026-10-01T21:20:00Z"}
+	resps = drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	if text, _ := toolResultText(t, resps[1]); strings.Contains(text, "last_run_failed") {
+		t.Fatalf("a failure already superseded is still reported: %s", text)
+	}
+}
+
 func TestStatusIncludesDocumentLifecycleState(t *testing.T) {
 	eng := &fakeEngine{
 		artifacts: map[string]map[string]interface{}{

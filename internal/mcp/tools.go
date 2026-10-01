@@ -200,7 +200,7 @@ func toolList() []map[string]interface{} {
 				"mode":        str("optional mode: solo | council | sectioned"),
 				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
-				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reference documents: paths to files or directories of .md/.txt, loaded bounded into the prompt as context (a wiki outside the project root)"},
+				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "absolute paths: .md/.txt documents or directories (loaded bounded into the prompt), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
 			}, "project_id", "stage"),
 		},
 		{
@@ -931,6 +931,26 @@ func (s *Server) status() (map[string]interface{}, error) {
 			"project": id, "name": p["name"],
 			"waiting_for_decision": waiting,
 			"running":              active,
+		}
+		// The latest run failed and nothing replaced it: say so, with the
+		// engine's reason. An intake that died on an unreachable model left
+		// an operator with an empty status and no idea anything had happened.
+		if len(waiting) == 0 && len(active) == 0 {
+			var latest map[string]interface{}
+			for _, r := range runs {
+				if latest == nil || fmt.Sprint(r["started_at"]) > fmt.Sprint(latest["started_at"]) {
+					latest = r
+				}
+			}
+			if latest != nil && latest["status"] == "failed" {
+				failure := fmt.Sprint(latest["failure"])
+				if len(failure) > 400 {
+					failure = failure[:400] + "…"
+				}
+				entry["last_run_failed"] = map[string]interface{}{
+					"id": latest["id"], "stage": latest["stage"], "task_id": latest["task_id"], "failure": failure,
+				}
+			}
 		}
 		// The guide's ordered steps: without them an operator reads a bug's
 		// raw status transitions and answers "in_progress, duplicate or

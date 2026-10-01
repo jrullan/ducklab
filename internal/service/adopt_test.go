@@ -11,6 +11,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Adoption is refused where it would lie: on a stage that reads documents
@@ -67,6 +68,22 @@ func TestHasCodeSeesCommittedFilesBeyondTheHarness(t *testing.T) {
 	}
 	if projectHasCode(empty) {
 		t.Error("a fresh init counts as a codebase")
+	}
+	// Greenfield replay: a project started from an idea commits its scaffold
+	// (.gitattributes included) and still has no code.
+	t.Setenv("HOME", t.TempDir())
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "calc", GitName: "Ada", GitEmail: "a@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RunID != "" {
+		s.runsMu.RLock()
+		rs := s.runs[res.RunID]
+		s.runsMu.RUnlock()
+		<-rs.done
+	}
+	if projectHasCode(res.Project.Path) {
+		t.Errorf("a just-started project counts as a codebase; tracked: %v", vcs.New(res.Project.Path).LsFiles())
 	}
 }
 

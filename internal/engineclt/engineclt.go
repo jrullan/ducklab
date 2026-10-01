@@ -402,10 +402,16 @@ func (c *Client) TestStartWithVerify(projectID, taskID, duckling string, thenBui
 
 // ProjectNext is the engine's own guidance: the ordered next steps the
 // guide rail renders and the autopilot drives.
+//
+// The engine answers {items, total}. This decoded a bare list, failed on
+// every call, and MCP status swallowed the error: operators saw
+// next_steps: [] on every project (found replaying the greenfield arc).
 func (c *Client) ProjectNext(projectID string) ([]map[string]interface{}, error) {
-	var result []map[string]interface{}
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
 	err := c.get("/v1/projects/"+projectID+"/next", &result)
-	return result, err
+	return result.Items, err
 }
 
 // AppStatus reports the project app's run configuration and process state.
