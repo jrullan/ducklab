@@ -79,10 +79,16 @@ type refImage struct {
 // sections citing the same id for different files. Content addressing makes
 // the id durable across runs, and the same image always gets the same one.
 func loadRefImages(projectRoot string, paths []string) ([]string, []refImage, error) {
-	var urls []string
-	var recs []refImage
+	// Two phases (second review of #120): every image is read and checked
+	// before any is written. Copying as it went, a list like [valid, missing]
+	// left the valid copy behind, and since the run failed before the
+	// reference_images event, no cleanup could find it.
+	type loaded struct {
+		src  string
+		data []byte
+	}
+	var all []loaded
 	total := 0
-	dir := filepath.Join(projectRoot, ".ducklab", "refs", "images")
 	for _, p := range paths {
 		src := strings.TrimSpace(p)
 		if strings.HasPrefix(src, "~/") {
@@ -97,29 +103,47 @@ func loadRefImages(projectRoot string, paths []string) ([]string, []refImage, er
 		if total += len(data); total > refImageBudget {
 			return nil, nil, fmt.Errorf("reference images exceed the %d MB budget at %q; send fewer or smaller images", refImageBudget>>20, p)
 		}
+		all = append(all, loaded{src: src, data: data})
+	}
+
+	dir := filepath.Join(projectRoot, ".ducklab", "refs", "images")
+	var urls []string
+	var recs []refImage
+	var created []string
+	undo := func() {
+		for _, f := range created {
+			_ = os.Remove(f)
+		}
+	}
+	for _, im := range all {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
+			undo()
 			return nil, nil, err
 		}
-		sum := sha256.Sum256(data)
+		sum := sha256.Sum256(im.data)
 		digest := hex.EncodeToString(sum[:])
-		name := digest[:12] + strings.ToLower(filepath.Ext(src))
+		name := digest[:12] + strings.ToLower(filepath.Ext(im.src))
 		target := filepath.Join(dir, name)
 		if _, err := os.Stat(target); err != nil {
-			if err := os.WriteFile(target, data, 0o644); err != nil {
+			if err := os.WriteFile(target, im.data, 0o644); err != nil {
+				// Only this call's own copies: a file that already existed
+				// may belong to an accepted document.
+				undo()
 				return nil, nil, err
 			}
+			created = append(created, target)
 		}
 		rec := refImage{
 			ID:     "REF-IMG-" + digest[:8],
-			Source: src,
+			Source: im.src,
 			Stored: filepath.ToSlash(filepath.Join(".ducklab", "refs", "images", name)),
-			Bytes:  len(data),
+			Bytes:  len(im.data),
 		}
-		if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		if cfg, _, err := image.DecodeConfig(bytes.NewReader(im.data)); err == nil {
 			rec.Width, rec.Height = cfg.Width, cfg.Height
 		}
 		recs = append(recs, rec)
-		urls = append(urls, "data:"+refImageTypes[strings.ToLower(filepath.Ext(src))]+";base64,"+base64.StdEncoding.EncodeToString(data))
+		urls = append(urls, "data:"+refImageTypes[strings.ToLower(filepath.Ext(im.src))]+";base64,"+base64.StdEncoding.EncodeToString(im.data))
 	}
 	return urls, recs, nil
 }

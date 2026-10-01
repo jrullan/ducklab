@@ -85,3 +85,17 @@ func TestAMissingOrOversizedReferenceImageFailsLoudly(t *testing.T) {
 		t.Fatalf("oversized image err = %v", err)
 	}
 }
+
+// Second review of #120: [valid, missing] used to copy the valid image and
+// then fail before any event named it, leaving an orphan no cleanup found.
+func TestAFailedImageListWritesNothing(t *testing.T) {
+	valid := filepath.Join(t.TempDir(), "valid.png")
+	writePNG(t, valid, 10, 10)
+	root := t.TempDir()
+	if _, _, err := loadRefImages(root, []string{valid, "/nonexistent/missing.png"}); err == nil {
+		t.Fatal("a missing image was accepted")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, ".ducklab", "refs", "images")); len(entries) != 0 {
+		t.Fatalf("failed image load left %d copied image(s)", len(entries))
+	}
+}
