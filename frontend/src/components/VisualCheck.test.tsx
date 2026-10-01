@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { Run } from "../api/client";
 import { VisualCheck } from "./VisualCheck";
 import { EvidenceDrawer } from "./EvidenceDrawer";
@@ -33,6 +33,12 @@ describe("VisualCheck", () => {
     await vi.waitFor(() => expect(screen.getByTestId("visual-diff")).toHaveAttribute("src", "blob:visual-diff-scene-01.png"));
     expect(screen.getByTestId("visual-reference")).toHaveAttribute("src", "blob:visual-ref-scene-01.png");
     expect(screen.getByTestId("visual-capture")).toHaveAttribute("src", "blob:scene-01.png");
+    // A run view column is narrow: the comparison opens large on request.
+    fireEvent.click(screen.getByTestId("visual-view-large"));
+    expect(screen.getByTestId("visual-large")).toHaveTextContent("8.3% of the pixels differ");
+    expect(screen.getByTestId("visual-large").querySelectorAll("img")).toHaveLength(3);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("visual-large")).toBeNull();
   });
 
   it("says a diagnostic mismatch does not fail the run, and names a comparison that could not run", () => {

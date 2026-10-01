@@ -136,6 +136,22 @@ func toolList() []map[string]interface{} {
 			}, "name"),
 		},
 		{
+			"name": "visual_check",
+			"description": "Read or set a project's visual gate: each capture the project's [render] command writes (PNG) is compared with a reference image. " +
+				"Without `set` it returns the current settings, the capture names of the latest run (recent_captures) and the stored reference images (references, with REF-IMG ids). " +
+				"With `set: true` it REPLACES the settings: `command` writes PNGs to $DUCKLAB_RENDER_OUTPUT; each `compare` item is {capture, reference, tolerance}; " +
+				"`enforcement` is diagnostic (a mismatch is a caveat) or required (a mismatch fails the run) — required changes what a verdict means, so set it only when the human agreed. " +
+				"To use an image file as a reference, pass it as `import_reference` first; the result has its REF-IMG id.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id":       str("the project id"),
+				"set":              map[string]interface{}{"type": "boolean", "description": "true to replace the settings with the fields below"},
+				"command":          str("capture command that writes PNGs to $DUCKLAB_RENDER_OUTPUT"),
+				"enforcement":      str("diagnostic (default) or required"),
+				"compare":          map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"capture": str("capture file name, e.g. scene-01.png"), "reference": str("REF-IMG-… id or project path"), "tolerance": map[string]interface{}{"type": "number", "description": "fraction of pixels allowed to differ, default 0.02"}}}},
+				"import_reference": str("absolute path of an image to add to the project's references (returns its REF-IMG id)"),
+			}, "project_id"),
+		},
+		{
 			"name": "gate_adopt",
 			"description": "Adopt the detected verification gate for a project that has none (status next_steps says `adopt-gate`). " +
 				"A gate decides what PASSED and FAILED mean for every later run, so adopt only when the human has agreed; " +
@@ -568,6 +584,34 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			req["refs"] = refs
 		}
 		out, err := s.eng.ProjectStart(req)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "visual_check":
+		id := a.str("project_id")
+		if path := a.str("import_reference"); path != "" {
+			out, err := s.eng.ReferenceImport(id, path)
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(out), nil
+		}
+		if !a.bool("set") {
+			out, err := s.eng.VisualCheck(id)
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(out), nil
+		}
+		req := map[string]interface{}{
+			"command": a.str("command"), "enforcement": a.str("enforcement"),
+			"actor": "mcp:" + s.client,
+		}
+		if cmp, ok := a["compare"].([]interface{}); ok {
+			req["compare"] = cmp
+		}
+		out, err := s.eng.VisualCheckSet(id, req)
 		if err != nil {
 			return nil, err
 		}

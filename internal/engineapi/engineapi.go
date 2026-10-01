@@ -2144,3 +2144,60 @@ func requestMode(r *http.Request, bodyMode string) string {
 	}
 	return bodyMode
 }
+
+func (s *Server) handleVisualCheck(w http.ResponseWriter, r *http.Request) {
+	view, err := s.svc.VisualCheck(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleVisualCheckSet(w http.ResponseWriter, r *http.Request) {
+	var req service.VisualCheckSetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	view, err := s.svc.VisualCheckSet(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleReferenceImages(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.ReferenceImages(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleReferenceImport(w http.ResponseWriter, r *http.Request) {
+	var req service.ReferenceImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	info, err := s.svc.ReferenceImport(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, info)
+}
+
+func (s *Server) handleReferenceImage(w http.ResponseWriter, r *http.Request) {
+	data, mediaType, err := s.svc.ReferenceImage(r.Context(), r.PathValue("id"), r.PathValue("ref"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", mediaType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}

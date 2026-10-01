@@ -463,6 +463,20 @@ comparison the mismatch, tolerance, sizes and error) and stores
 `visual-NN-diff-<capture>` (differing pixels in red) beside the captures, served by
 `GET /v1/runs/{id}/captures/{name}`; event `visual_compare` carries the same.
 
+**Setting it up without TOML.** Settings → Project management → *visual* edits
+the capture command, the enforcement and the comparisons, offering the latest
+run's capture names and the project's stored reference images as choices; an
+image chosen from disk is imported as a reference first. The same through the
+API (`GET`/`PUT /v1/projects/{id}/visual-check`,
+`GET`/`POST /v1/projects/{id}/reference-images`,
+`GET /v1/projects/{id}/reference-images/{ref}`) and the MCP verb
+`visual_check`. A comparison needs an explicit capture command: the `[run]`
+fallback starts a server or a window and never writes a PNG. Saving commits
+`project.toml` and the reference images the comparisons name (`git commit
+--only`, nothing else of the person's), so a clone or a build worktree has
+them; at the gate, references resolve in the registered checkout first and
+then in the run's worktree.
+
 ---
 
 ## 4. SQLite schema — `.ducklab/ducklab.db`

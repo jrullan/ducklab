@@ -220,6 +220,46 @@ export async function runCaptureUrl(baseUrl: string, runId: string, name: string
   return URL.createObjectURL(await response.blob());
 }
 
+/** A stored reference image the requirements can cite (REF-IMG-…). */
+export interface ReferenceImageInfo {
+  id: string;
+  stored: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
+/** One comparison the visual gate runs. */
+export interface RenderCompare {
+  capture: string;
+  reference: string;
+  /** Fraction of pixels allowed to differ; absent means 0.02. */
+  tolerance?: number;
+  threshold?: number;
+}
+
+/** The visual gate's configuration and its building blocks (B-460). */
+export interface VisualCheckView {
+  configured: boolean;
+  command: string;
+  effective_command: string;
+  artifacts: string;
+  scenes?: string[];
+  viewport?: string;
+  enforcement: "diagnostic" | "required";
+  compare: RenderCompare[];
+  recent_captures?: string[];
+  recent_run_id?: string;
+  references: ReferenceImageInfo[];
+}
+
+export interface VisualCheckSetRequest {
+  command: string;
+  artifacts?: string;
+  enforcement: "diagnostic" | "required";
+  compare: RenderCompare[];
+}
+
 /** One capture held against one reference image. */
 export interface VisualCompare {
   capture: string;
@@ -1299,6 +1339,29 @@ export class EngineClient {
   /** Adopt the detected gate. Never automatic: a gate decides what a verdict
    * means, and changing that silently makes two runs incomparable while both
    * claim to have been measured the same way. */
+  /** The visual gate's settings, recent captures and reference images. */
+  visualCheck(id: string) {
+    return this.request<VisualCheckView>("GET", `/v1/projects/${id}/visual-check`);
+  }
+  visualCheckSet(id: string, req: VisualCheckSetRequest) {
+    return this.request<VisualCheckView>("PUT", `/v1/projects/${id}/visual-check`, req);
+  }
+  /** Copy an image into the project's references; returns its REF-IMG id. */
+  referenceImport(id: string, path: string) {
+    return this.request<ReferenceImageInfo>("POST", `/v1/projects/${id}/reference-images`, { path });
+  }
+  // Desktop capability: "GET", `/v1/projects/${projectId}/reference-images/${ref}` (implemented as a blob URL).
+  async referenceImageUrl(projectId: string, ref: string): Promise<string> {
+    const f = this.opts.fetchFn ?? fetch;
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.opts.token}` };
+    if (this.opts.version) headers["X-Ducklab-Client"] = this.opts.version;
+    const resp = await f(
+      `${this.opts.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/reference-images/${encodeURIComponent(ref)}`,
+      { headers },
+    );
+    if (!resp.ok) throw new Error(`reference ${ref}: ${resp.status}`);
+    return URL.createObjectURL(await resp.blob());
+  }
   projectGateAdopt(id: string) {
     return this.request<GateStatus>("POST", `/v1/projects/${id}/gate`);
   }

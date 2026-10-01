@@ -36,6 +36,7 @@ var knownGaps = map[string]string{
 }
 
 var notInTheDesktop = map[string]string{
+	"GET /v1/projects/{id}/reference-images":              "MCP/CLI listing; the desktop gets the same list inside GET /v1/projects/{id}/visual-check",
 	"GET /v1/ducklings/scorecards":                        "engine-only scorecards; desktop Roster presentation is out of scope for T-066",
 	"GET /v1/defaults/roster":                             "MCP canonical roster read; desktop settings changes are explicitly out of scope",
 	"PUT /v1/defaults/roster":                             "MCP canonical roster write; desktop settings changes are explicitly out of scope",

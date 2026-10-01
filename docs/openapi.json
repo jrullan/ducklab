@@ -3506,6 +3506,42 @@
         ],
         "type": "object"
       },
+      "ServiceReferenceImageInfo": {
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "stored": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytes",
+          "id",
+          "stored"
+        ],
+        "type": "object"
+      },
+      "ServiceReferenceImportRequest": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "ServiceReleaseRequest": {
         "properties": {
           "bump": {
@@ -4132,6 +4168,103 @@
         "required": [
           "duckling",
           "task_id"
+        ],
+        "type": "object"
+      },
+      "ServiceVisualCheckSetRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "artifacts": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "compare": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigRenderCompare"
+            },
+            "type": "array"
+          },
+          "enforcement": {
+            "type": "string"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "viewport": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifacts",
+          "command",
+          "compare",
+          "enforcement"
+        ],
+        "type": "object"
+      },
+      "ServiceVisualCheckView": {
+        "properties": {
+          "artifacts": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "compare": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigRenderCompare"
+            },
+            "type": "array"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "effective_command": {
+            "type": "string"
+          },
+          "enforcement": {
+            "type": "string"
+          },
+          "recent_captures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "recent_run_id": {
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceReferenceImageInfo"
+            },
+            "type": "array"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "viewport": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifacts",
+          "command",
+          "compare",
+          "configured",
+          "effective_command",
+          "enforcement",
+          "references"
         ],
         "type": "object"
       },
@@ -6587,6 +6720,138 @@
         "summary": "Person-initiated orphan recovery: cherry-pick-chain or restore-as-fresh-commit"
       }
     },
+    "/v1/projects/{id}/reference-images": {
+      "get": {
+        "operationId": "ReferenceImages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceReferenceImageInfo"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The project's stored reference images, newest first"
+      },
+      "post": {
+        "operationId": "ReferenceImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceReferenceImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceReferenceImageInfo"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Copy an image into the project's references and return its REF-IMG id"
+      }
+    },
+    "/v1/projects/{id}/reference-images/{ref}": {
+      "get": {
+        "operationId": "ReferenceImage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One stored reference image"
+      }
+    },
     "/v1/projects/{id}/releases": {
       "get": {
         "operationId": "ReleaseList",
@@ -7901,6 +8166,86 @@
           }
         ],
         "summary": "Walk the spine from an id"
+      }
+    },
+    "/v1/projects/{id}/visual-check": {
+      "get": {
+        "operationId": "VisualCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceVisualCheckView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The visual gate: capture command, comparisons, recent captures and stored reference images"
+      },
+      "put": {
+        "operationId": "VisualCheckSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceVisualCheckSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceVisualCheckView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the visual gate's capture command and comparisons"
       }
     },
     "/v1/providers": {
