@@ -554,6 +554,31 @@ func (r RenderContract) HasContent() bool {
 		strings.TrimSpace(r.Enforcement) != ""
 }
 
+// renderDeclared reads whether the file declares [render] (B-466).
+//
+// Any setting with a value declares it, and so does a bare `[render]` table a
+// person wrote on purpose: the documented way to capture with [run].command.
+// What does not is the table older versions of SaveProject wrote into every
+// project.toml, every key present and every value zero (the encoder could not
+// omit a struct with an int field). Reading that as declared ran [run].command
+// as a 120 s render smoke at every final gate. SaveProject no longer writes
+// it; files that still carry it are recognised here.
+func renderDeclared(md toml.MetaData, r RenderContract) bool {
+	if r.HasContent() {
+		return true
+	}
+	declared, keys := false, 0
+	for _, key := range md.Keys() {
+		k := key.String()
+		if k == "render" {
+			declared = true
+		} else if strings.HasPrefix(k, "render.") {
+			keys++
+		}
+	}
+	return declared && keys == 0
+}
+
 // RenderCompare is one capture held against one reference image.
 type RenderCompare struct {
 	// Capture is the capture's file name, e.g. "scene-01.png".
@@ -907,15 +932,11 @@ func LoadProject(path string) (*Project, error) {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
 	p := DefaultProject("", "")
-	_, err = toml.Decode(string(data), p)
+	md, err := toml.Decode(string(data), p)
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
-	// Content, not the table's presence (B-466): SaveProject writes an empty
-	// [render] into every project.toml (the encoder cannot omit a struct with
-	// an int field), and reading that as "declared" made every final gate run
-	// [run].command as a 120 s render smoke nobody asked for.
-	p.RenderConfigured = p.Render.HasContent()
+	p.RenderConfigured = renderDeclared(md, p.Render)
 	// Tolerant at READ, strict at WRITE. An unknown key here used to refuse
 	// the whole project — which turned every schema-extending task into a
 	// self-deadlock: T-071's implementer declared the very key it was adding
@@ -1195,9 +1216,22 @@ func SaveProject(path string, cfg *Project) error {
 	var buf bytes.Buffer
 	buf.WriteString("# Written by ducklab. Hand edits are preserved on the next write\n")
 	buf.WriteString("# only for keys ducklab knows about.\n\n")
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+	var body bytes.Buffer
+	if err := toml.NewEncoder(&body).Encode(cfg); err != nil {
 		return fmt.Errorf("encode project config: %w", err)
 	}
+	encoded := body.String()
+	switch {
+	case !cfg.RenderConfigured && !cfg.Render.HasContent():
+		// No [render] at all (B-466): the encoder cannot omit the struct, and
+		// the empty table it wrote read as a declared contract.
+		encoded = dropTOMLTable(encoded, "render")
+	case !cfg.Render.HasContent():
+		// Declared on purpose with nothing set: keep the bare table, the
+		// form that means "capture with [run].command".
+		encoded = dropTOMLTable(encoded, "render") + "\n[render]\n"
+	}
+	buf.WriteString(encoded)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -1314,4 +1348,27 @@ func StarterGlobal() *Global {
 		},
 	}
 	return g
+}
+
+// dropTOMLTable removes the encoder's empty [name] table: the header line at
+// column 0 and the indented key lines the encoder writes under it. Only
+// called when the table has no content, so there are no sub-tables; a
+// "[name]" inside another value's text is never at the start of a header
+// line followed by the encoder's indentation, and is left alone.
+func dropTOMLTable(encoded, name string) string {
+	lines := strings.Split(encoded, "\n")
+	for i, line := range lines {
+		if line != "["+name+"]" {
+			continue
+		}
+		j := i + 1
+		for j < len(lines) && strings.HasPrefix(lines[j], "  ") && !strings.HasPrefix(strings.TrimSpace(lines[j]), "[") {
+			j++
+		}
+		if j == i+1 && j < len(lines) && strings.TrimSpace(lines[j]) != "" {
+			continue // not the encoder's block
+		}
+		return strings.Join(append(append([]string{}, lines[:i]...), lines[j:]...), "\n")
+	}
+	return encoded
 }

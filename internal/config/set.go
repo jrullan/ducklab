@@ -83,7 +83,9 @@ func SetKey(cfg *Project, key, value string) error {
 				return err
 			}
 			if strings.HasPrefix(key, "render.") {
-				cfg.RenderConfigured = cfg.Render.HasContent()
+				// Setting any render key declares the section, as writing it
+				// in the file would; an empty value alone does not.
+				cfg.RenderConfigured = cfg.RenderConfigured || cfg.Render.HasContent()
 			}
 			return nil
 		}
