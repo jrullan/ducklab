@@ -346,6 +346,20 @@ describe("Now — the inbox", () => {
     expect(row.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // B-461: Now shows the whole road, refreshed from project status.
+  it("shows the lifecycle road from project status", async () => {
+    const client = clientWith({
+      projectStatus: vi.fn(() => Promise.resolve({ lifecycle: {
+        stages: [{ id: "requirements", label: "Requirements", state: "current" }, { id: "spec", label: "Spec", state: "pending" }],
+        current: "requirements", code_exists: false, tasks_accepted: 0, tasks_total: 0, unreleased_work: 0,
+        next: "Describe what you want to build; Ducklab drafts the requirements for you to approve.",
+      } })),
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    expect(await screen.findByTestId("lifecycle-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("lifecycle-next")).toHaveTextContent("Describe what you want to build");
+  });
+
   // B-458: a project initialised empty had no gate, and when tests arrived
   // the offer to adopt one lived only in Project management.
   it("offers to adopt a newly detected gate as a decision, then refreshes the guide", async () => {

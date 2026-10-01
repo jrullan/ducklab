@@ -55,6 +55,19 @@ export interface ProjectStatus {
   ahead?: number;
   /** Commits present on the configured remote but absent locally. */
   behind?: number;
+  /** The whole road for the project (B-461). Mirrors service.Lifecycle. */
+  lifecycle?: ProjectLifecycle;
+}
+
+/** Mirrors service.Lifecycle: stages, the current one, whether code exists. */
+export interface ProjectLifecycle {
+  stages: { id: string; label: string; state: "done" | "decision" | "current" | "pending" }[];
+  current: string;
+  code_exists: boolean;
+  tasks_accepted: number;
+  tasks_total: number;
+  unreleased_work: number;
+  next: string;
 }
 
 /** The committed acceptance and its independently retryable publication outcome. */

@@ -508,6 +508,9 @@ type Status struct {
 	AcceptedUnreleased int               `json:"accepted_unreleased"`
 	UnreleasedBranches int               `json:"unreleased_branches"`
 	Provenance         string            `json:"provenance,omitempty"`
+	// Lifecycle is the whole road for the project (B-461): stages, the current
+	// one, whether code exists yet, and the stage-level next step.
+	Lifecycle Lifecycle `json:"lifecycle"`
 }
 
 // resolveProjectPath turns a path a person typed into one the engine can use.
@@ -1061,7 +1064,9 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	// gives each plan task the same status the board shows.
 	views, err := s.TaskList(ctx, id)
 	if err != nil {
-		return &Status{StageProgress: stageProgress(entry.Path), ActiveRuns: active, Provenance: build.Provenance()}, nil
+		progress := stageProgress(entry.Path)
+		return &Status{StageProgress: progress, ActiveRuns: active, Provenance: build.Provenance(),
+			Lifecycle: lifecycleOf(lifecycleFacts{Progress: progress, Pending: pendingProposals(entry.Path), HasCode: projectHasCode(entry.Path)})}, nil
 	}
 	taskCounts := make(map[string]int)
 	for _, tv := range views {
@@ -1071,8 +1076,11 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	if err != nil {
 		return nil, err
 	}
-	st := &Status{StageProgress: stageProgress(entry.Path), TaskCounts: taskCounts, ActiveRuns: active,
-		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance()}
+	progress := stageProgress(entry.Path)
+	st := &Status{StageProgress: progress, TaskCounts: taskCounts, ActiveRuns: active,
+		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance(),
+		Lifecycle: lifecycleOf(lifecycleFacts{Progress: progress, Pending: pendingProposals(entry.Path),
+			TaskCounts: taskCounts, Unreleased: accepted, HasCode: projectHasCode(entry.Path)})}
 	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
 	if err == nil {
 		branch, berr := vcs.New(entry.Path).CurrentBranch()

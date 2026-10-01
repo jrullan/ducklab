@@ -1188,6 +1188,18 @@ func TestRunStartCarriesTheRedoNote(t *testing.T) {
 	}
 }
 
+// B-461: the operator gets the same road the desktop strip shows.
+func TestStatusCarriesTheLifecycle(t *testing.T) {
+	eng := &fakeEngine{projectStatus: map[string]interface{}{
+		"lifecycle": map[string]interface{}{"current": "spec", "code_exists": false, "next": "Requirements accepted. Next: draft the specification (how it will be built)."},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(text, `"current": "spec"`) && !strings.Contains(text, `"current":"spec"`) {
+		t.Fatalf("status lacks lifecycle: %s", text)
+	}
+}
+
 // B-458: status next_steps can say adopt-gate; the operator needs the verb.
 func TestGateAdoptIsAnOperatorTool(t *testing.T) {
 	eng := &fakeEngine{}

@@ -10,7 +10,8 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useRef, useState } from "react";
-import type { Bug, Duckling, EngineClient, NextStep, Run, Task, RosterEntry, TraceError } from "../api/client";
+import type { Bug, Duckling, EngineClient, NextStep, ProjectLifecycle, Run, Task, RosterEntry, TraceError } from "../api/client";
+import { LifecycleStrip } from "../components/LifecycleStrip";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
@@ -35,6 +36,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   const [next, setNext] = useState<Task | null>(null);
   const [nextSteps, setNextSteps] = useState<NextStep[]>([]);
+  const [lifecycle, setLifecycle] = useState<ProjectLifecycle | null>(null);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [testRoster, setTestRoster] = useState<RosterEntry[]>([]);
@@ -75,6 +77,10 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         });
     }
     client.projectNext(projectId).then(setNextSteps).catch(() => setNextSteps([]));
+    // Refreshed with runs, so a decision moves the road the moment it lands.
+    if (typeof client.projectStatus === "function") {
+      client.projectStatus(projectId).then((st) => setLifecycle(st.lifecycle ?? null)).catch(() => setLifecycle(null));
+    }
     client
       .bugs(projectId)
       .then((all) => setBugs(all))
@@ -258,6 +264,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           {active.length > 0 && <span><strong className="font-medium text-ink">{active.length}</strong> in progress</span>}
         </div>
       </ContextStrip>
+
+      {lifecycle && <LifecycleStrip lifecycle={lifecycle} />}
 
       {/* Decisions are the reason this page exists; they precede ambient
           activity, matching the page's stated hierarchy. */}
