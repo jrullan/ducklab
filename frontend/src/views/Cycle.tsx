@@ -10,7 +10,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Artifact, ArtifactLintResult, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
+import type { Artifact, ArtifactLintResult, ConfigFinding, Duckling, EngineClient, ProjectLifecycle, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
+import { LifecycleStrip } from "../components/LifecycleStrip";
+import { useRuns } from "../store/runs";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
@@ -43,6 +45,16 @@ export function Cycle({
   stage?: string;
   section?: string;
 }) {
+  // B-461: the document tabs read as document types; the road above them says
+  // they are stages, which one is current, and that no code exists yet.
+  const [lifecycle, setLifecycle] = useState<ProjectLifecycle | null>(null);
+  const lifecycleRuns = useRuns((st) => st.runs);
+  useEffect(() => {
+    if (typeof client.projectStatus !== "function") return;
+    let live = true;
+    client.projectStatus(projectId).then((st) => { if (live) setLifecycle(st.lifecycle ?? null); }).catch(() => {});
+    return () => { live = false; };
+  }, [client, projectId, lifecycleRuns]);
   const routedStage = STAGES.find((candidate) => candidate.stage === stage);
   const [active, setActive] = useState<StageDef>(() => routedStage ?? STAGES[0]);
   // A bare Documents route is contextual: an empty project starts where the
@@ -654,6 +666,7 @@ export function Cycle({
           {landingResolved && !prerequisiteLoading && prerequisite && <button type="button" data-testid="cycle-prerequisite-action" onClick={followPrerequisite} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">{prerequisite.action}</button>}
           {landingResolved && !prerequisiteLoading && !prerequisite && (!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intake" && !inspectedSection) { setActive(STAGES[0]); location.hash = routeHref({ name: "cycle", stage: "intent" }); } else if (active.stage === "intake" && inspectedSection && !brief) { setBrief(`Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
         </div>
+        {lifecycle && <div className="pb-3"><LifecycleStrip lifecycle={lifecycle} /></div>}
         <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-4 gap-3">
           {STAGES.map((s) => (
             <button

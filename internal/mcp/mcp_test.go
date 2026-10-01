@@ -1181,3 +1181,15 @@ func TestRunStartCarriesTheRedoNote(t *testing.T) {
 		t.Fatalf("the note did not reach the engine: %+v", eng.lastRunReq)
 	}
 }
+
+// B-461: the operator gets the same road the desktop strip shows.
+func TestStatusCarriesTheLifecycle(t *testing.T) {
+	eng := &fakeEngine{projectStatus: map[string]interface{}{
+		"lifecycle": map[string]interface{}{"current": "spec", "code_exists": false, "next": "Requirements accepted. Next: draft the specification (how it will be built)."},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(text, `"current": "spec"`) && !strings.Contains(text, `"current":"spec"`) {
+		t.Fatalf("status lacks lifecycle: %s", text)
+	}
+}

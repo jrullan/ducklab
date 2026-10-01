@@ -876,6 +876,22 @@ export interface ServiceLandingOffer {
   evidence?: string;
 }
 
+export interface ServiceLifecycle {
+  code_exists?: boolean;
+  current?: string;
+  next?: string;
+  stages?: ServiceLifecycleStage[];
+  tasks_accepted?: number;
+  tasks_total?: number;
+  unreleased_work?: number;
+}
+
+export interface ServiceLifecycleStage {
+  id?: string;
+  label?: string;
+  state?: string;
+}
+
 export interface ServiceMeasuredEvidence {
   avg_cost_usd?: number;
   avg_wallclock_s?: number;
@@ -1058,6 +1074,7 @@ export interface ServiceStatus {
   ahead?: number;
   behind?: number;
   budget_spent_today?: number;
+  lifecycle?: ServiceLifecycle;
   provenance?: string;
   stage_progress?: Record<string, string>;
   task_counts?: Record<string, number>;

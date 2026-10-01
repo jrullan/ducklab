@@ -2990,6 +2990,63 @@
         ],
         "type": "object"
       },
+      "ServiceLifecycle": {
+        "properties": {
+          "code_exists": {
+            "type": "boolean"
+          },
+          "current": {
+            "type": "string"
+          },
+          "next": {
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceLifecycleStage"
+            },
+            "type": "array"
+          },
+          "tasks_accepted": {
+            "type": "integer"
+          },
+          "tasks_total": {
+            "type": "integer"
+          },
+          "unreleased_work": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code_exists",
+          "current",
+          "next",
+          "stages",
+          "tasks_accepted",
+          "tasks_total",
+          "unreleased_work"
+        ],
+        "type": "object"
+      },
+      "ServiceLifecycleStage": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state"
+        ],
+        "type": "object"
+      },
       "ServiceMeasuredEvidence": {
         "properties": {
           "avg_cost_usd": {
@@ -3672,6 +3729,9 @@
           "budget_spent_today": {
             "type": "number"
           },
+          "lifecycle": {
+            "$ref": "#/components/schemas/ServiceLifecycle"
+          },
           "provenance": {
             "type": "string"
           },
@@ -3698,6 +3758,7 @@
           "accepted_unreleased",
           "active_runs",
           "budget_spent_today",
+          "lifecycle",
           "stage_progress",
           "task_counts",
           "unreleased_branches"

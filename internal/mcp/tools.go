@@ -866,6 +866,10 @@ func (s *Server) status() (map[string]interface{}, error) {
 			entry["accepted_unreleased"] = status["accepted_unreleased"]
 			entry["accepted-unreleased"] = status["accepted_unreleased"]
 			entry["unreleased_branches"] = status["unreleased_branches"]
+			// The road, in the same words the desktop strip uses (B-461).
+			if lifecycle, ok := status["lifecycle"]; ok {
+				entry["lifecycle"] = lifecycle
+			}
 		}
 		// Branch names remain useful provenance, but counts above must come from
 		// the release-aware service status rather than this retained metadata.
