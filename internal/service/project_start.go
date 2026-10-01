@@ -134,10 +134,14 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	// A greenfield start must not adopt somebody's existing work by accident:
 	// an existing non-empty folder that is not already a Ducklab project is
 	// refused with the path, so the person chooses deliberately.
+	// "Create" never mutates a previous project (review of #121: an existing
+	// Ducklab project at the path was opened and given a second intake under
+	// the new name).
+	if _, err := os.Stat(filepath.Join(path, ".ducklab", "project.toml")); err == nil {
+		return nil, fmt.Errorf("%s is already a Ducklab project; open it from Settings → Projects instead of creating it again", path)
+	}
 	if entries, err := os.ReadDir(path); err == nil && len(entries) > 0 {
-		if _, statErr := os.Stat(filepath.Join(path, ".ducklab", "project.toml")); statErr != nil {
-			return nil, fmt.Errorf("%s already contains files; choose an empty or new folder, or open it as an existing project from Settings → Projects", path)
-		}
+		return nil, fmt.Errorf("%s already contains files; choose an empty or new folder, or open it as an existing project from Settings → Projects", path)
 	}
 	project, err := s.ProjectInit(ctx, InitRequest{
 		Path: path, Name: name, GitInit: true, GitName: req.GitName, GitEmail: req.GitEmail,
@@ -155,4 +159,31 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	}
 	out.RunID = run.ID
 	return out, nil
+}
+
+// mkdirAllTracked creates path and returns the directories it created, deepest
+// last, so a refusal can remove exactly those.
+func mkdirAllTracked(path string) ([]string, error) {
+	var missing []string
+	for dir := filepath.Clean(path); ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		missing = append([]string{dir}, missing...)
+		if parent := filepath.Dir(dir); parent == dir {
+			break
+		}
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return nil, err
+	}
+	return missing, nil
+}
+
+// removeCreatedDirs removes directories made by mkdirAllTracked, deepest
+// first; os.Remove refuses a non-empty directory, so nothing else is lost.
+func removeCreatedDirs(dirs []string) {
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i])
+	}
 }

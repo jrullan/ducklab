@@ -21,13 +21,14 @@ func TestProjectInitAsksForAGitIdentityAndSetsItForThatRepositoryOnly(t *testing
 	defer func() { gitIdentityKnown = orig }()
 
 	s := serviceWithDucklings(t, "pato-uno")
-	dir := filepath.Join(t.TempDir(), "calc")
+	dir := filepath.Join(t.TempDir(), "nested", "calc")
 	_, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "calc", GitInit: true})
 	if !errors.Is(err, ErrGitIdentityRequired) {
 		t.Fatalf("err = %v, want ErrGitIdentityRequired", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, ".ducklab")); !os.IsNotExist(statErr) {
-		t.Fatal("a refused init left a half-made project")
+	// Review of #121: nothing at all, not even the empty folders.
+	if _, statErr := os.Stat(filepath.Dir(dir)); !os.IsNotExist(statErr) {
+		t.Fatal("a refused init left the folders it created")
 	}
 
 	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "calc", GitInit: true, GitName: "Ada Lovelace", GitEmail: "ada@example.com"}); err != nil {
@@ -121,5 +122,24 @@ func TestTheProjectsFolderIsAPreference(t *testing.T) {
 	}
 	if v := s.ProjectDefaults(); v.ProjectsDir != "" || v.Effective != filepath.Join(home, "Ducklab") {
 		t.Fatalf("empty did not restore the starting point: %+v", v)
+	}
+}
+
+// Review of #121: "Create" must not reopen an existing project and start a
+// second intake on it under a new name.
+func TestProjectStartRefusesAnExistingDucklabProject(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	dir := t.TempDir()
+	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "original", GitInit: true, GitName: "Ada", GitEmail: "ada@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.RunList(context.Background(), RunFilter{})
+	_, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "replacement", Path: dir, Brief: "something else"})
+	if err == nil || !strings.Contains(err.Error(), "already a Ducklab project") {
+		t.Fatalf("err = %v", err)
+	}
+	after, _ := s.RunList(context.Background(), RunFilter{})
+	if len(after) != len(before) {
+		t.Fatalf("a refused start launched %d run(s)", len(after)-len(before))
 	}
 }
