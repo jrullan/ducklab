@@ -532,3 +532,58 @@ func TestTheGuideSaysWhenTheRepoOutrunsTheRunningBinary(t *testing.T) {
 		}
 	}
 }
+
+// B-458: a greenfield project is initialised empty, so no gate is detected at
+// init; when tests appear later the guide must say so, as a decision.
+func TestTheGuideOffersToAdoptAGateOnceTheProjectBecomesTestable(t *testing.T) {
+	steps := nextSteps(projectSnapshot{AdoptableGate: "go test ./..."})
+	if len(steps) == 0 || steps[0].ID != "adopt-gate" || steps[0].Ref != "go test ./..." ||
+		!strings.Contains(steps[0].Reason, "UNVERIFIED") {
+		t.Fatalf("first step = %+v", steps)
+	}
+	for _, step := range nextSteps(projectSnapshot{}) {
+		if step.ID == "adopt-gate" {
+			t.Fatalf("offered a gate with nothing to adopt: %+v", step)
+		}
+	}
+}
+
+func TestProjectNextNamesTheDetectedGateOfAProjectThatBecameTestable(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "greenfield", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range mustNext(t, s, p.ID) {
+		if step.ID == "adopt-gate" {
+			t.Fatalf("empty project offered a gate: %+v", step)
+		}
+	}
+	// The first code and test arrive after initialisation.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/g\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "g_test.go"), []byte("package g\n\nimport \"testing\"\n\nfunc TestG(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var found *NextStep
+	for _, step := range mustNext(t, s, p.ID) {
+		if step.ID == "adopt-gate" {
+			step := step
+			found = &step
+		}
+	}
+	if found == nil || found.Ref == "" {
+		t.Fatalf("testable project did not offer its detected gate")
+	}
+}
+
+func mustNext(t *testing.T, s *Service, id string) []NextStep {
+	t.Helper()
+	steps, err := s.ProjectNext(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return steps
+}
