@@ -787,8 +787,11 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
 	var referenceContracts []capability.ReferenceContract
-	if len(req.Refs) > 0 {
-		refs, rerr := s.stageReferences(ctx, rs, projCfg, req.Stage, req.Refs, roster[config.RoleArchitect])
+	// Image references travel as images, not as text (B-457): an image path
+	// in Refs used to be read into the prompt as bytes.
+	textRefs, imageRefs := splitImageRefs(req.Refs)
+	if len(textRefs) > 0 {
+		refs, rerr := s.stageReferences(ctx, rs, projCfg, req.Stage, textRefs, roster[config.RoleArchitect])
 		if rerr != nil {
 			s.failRun(rs, fmt.Errorf("references: %w", rerr))
 			return
@@ -833,6 +836,21 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// The amendment's evidence, gated like the triager's: only a seeing
 	// architect is shown images.
 	images := req.Images
+	if len(imageRefs) > 0 {
+		urls, recs, ierr := loadRefImages(projectRoot, imageRefs)
+		if ierr != nil {
+			s.failRun(rs, fmt.Errorf("references: %w", ierr))
+			return
+		}
+		arch := roster[config.RoleArchitect]
+		dcfg, ok := s.cfg.Ducklings[arch]
+		canSee := ok && dcfg.Caps.Vision != nil && *dcfg.Caps.Vision
+		seed += renderRefImages(recs, canSee)
+		rs.writer.AppendEvent("reference_images", map[string]interface{}{
+			"images": recs, "shown_to_architect": canSee, "architect": string(arch),
+		})
+		images = append(append([]string(nil), images...), urls...)
+	}
 	if len(images) > 0 {
 		arch := roster[config.RoleArchitect]
 		if dcfg, ok := s.cfg.Ducklings[arch]; !ok || dcfg.Caps.Vision == nil || !*dcfg.Caps.Vision {

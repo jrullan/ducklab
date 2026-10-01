@@ -77,6 +77,7 @@ export function Cycle({
   const [intakePath, setIntakePath] = useState<"adopt" | "brief" | null>(null);
   const [refsOpen, setRefsOpen] = useState(false);
   const refsList = () => refsText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const isImageRef = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
   async function pickReferenceFile() {
     const path = await chooseFile();
     if (path) setRefsText((current) => (current ? `${current}\n${path}` : path));
@@ -1039,13 +1040,14 @@ export function Cycle({
                     onClick={() => setRefsOpen(true)}
                     className="text-xs text-ink-muted underline hover:text-ink"
                   >
-                    attach reference documents…
+                    attach reference documents or images…
                   </button>
                 ) : (
                   <>
                     <label className="mb-1 block text-xs text-ink-muted" htmlFor="cycle-refs">
-                      reference documents — paths to .md/.txt files or folders, one per line
-                      (loaded bounded into the prompt; the run records what was included)
+                      references — paths to .md/.txt files or folders, or images
+                      (.png/.jpg/.webp/.gif) of what it should look like, one per line
+                      (documents load bounded into the prompt; the run records what was included)
                     </label>
                     <div className="flex items-start gap-2">
                       <textarea
@@ -1068,6 +1070,16 @@ export function Cycle({
                         </button>
                       )}
                     </div>
+                    {/* B-457: a visual requirement needs a visual source of
+                        truth. Say what happens to an image before the run. */}
+                    {refsList().some(isImageRef) && (
+                      <p className="mt-1 text-xs text-ink-secondary" data-testid="cycle-refs-images">
+                        {refsList().filter(isImageRef).length} image
+                        {refsList().filter(isImageRef).length === 1 ? "" : "s"}: copied into the project and named
+                        with a lasting id (REF-IMG-…, from the image itself) so requirements can cite them. An architect that can see is shown them; one
+                        that cannot is told they exist and must not invent visual detail.
+                      </p>
+                    )}
                   </>
                 )}
               </div>

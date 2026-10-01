@@ -668,6 +668,26 @@ describe("Cycle — starting a stage", () => {
     );
   });
 
+  // B-457: a pixel-perfect request needs its visual source of truth.
+  it("accepts image references and says what happens to them", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    expect(screen.getByTestId("cycle-refs-door")).toHaveTextContent("documents or images");
+    fireEvent.click(screen.getByTestId("cycle-refs-door"));
+    expect(screen.queryByTestId("cycle-refs-images")).toBeNull();
+    fireEvent.change(screen.getByTestId("cycle-refs"), {
+      target: { value: "~/Pictures/ti36x-front.png\n~/notes/brief.md" },
+    });
+    expect(screen.getByTestId("cycle-refs-images")).toHaveTextContent("1 image: copied into the project and named");
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({
+        refs: ["~/Pictures/ti36x-front.png", "~/notes/brief.md"],
+      })),
+    );
+  });
+
   it("starts intake with no brief at all", async () => {
     const c = client();
     render(<Cycle client={c} projectId="p" />);

@@ -45,7 +45,7 @@ export function canChooseFile(): boolean {
 }
 
 /** Opens the system chooser for a reference document. */
-export async function chooseFile(title = "Choose a reference document"): Promise<string | null> {
+export async function chooseFile(title = "Choose a reference document or image"): Promise<string | null> {
   const name = window.ducklab?.chooseFile;
   const call = window.wails?.Call?.ByName;
   if (!name || !call) return null;
