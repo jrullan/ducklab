@@ -4887,6 +4887,12 @@ func stageSharedCheckoutRun(git *vcs.Git, rs *runState, projectRoot string) ([]s
 			artifact.Path(projectRoot, artifact.Kind(kind)),
 			artifact.ProposedPath(projectRoot, artifact.Kind(kind)),
 		)
+		// The intake records the person's own brief in intent.md before a
+		// model sees it; it lands with the requirements it produced (review
+		// of #121: a clone lost the human brief).
+		if rs.run.Stage == "intake" {
+			candidates = append(candidates, artifact.Path(projectRoot, artifact.KindIntent))
+		}
 	}
 	// A durable start snapshot is the fallback for legacy/synthetic tool logs
 	// and for explicitly unsafe shell writes. It compares two tree objects, so

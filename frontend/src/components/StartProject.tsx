@@ -16,6 +16,14 @@ import { canChooseDirectory, canChooseFile, chooseDirectory, chooseFile } from "
 
 const isImageRef = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
 
+/** Absolute on any platform the desktop runs on: POSIX /…, Windows C:\… or
+ * C:/…, and UNC \\server\share (review of #121: requiring "/" refused every
+ * Windows folder, including the one Browse returned). The engine still has
+ * the final word with filepath.IsAbs. */
+export function isAbsolutePath(p: string): boolean {
+  return /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(p);
+}
+
 export function slugPreview(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -52,8 +60,8 @@ export function StartProject({
   const refs = refsText.split("\n").map((l) => l.trim()).filter(Boolean);
   const images = refs.filter(isImageRef).length;
   const slug = slugPreview(name);
-  const pathProblem = path.trim() && !path.trim().startsWith("/")
-    ? "Use a full path starting with / (the Browse button fills one in), or leave it empty for the default."
+  const pathProblem = path.trim() && !isAbsolutePath(path.trim())
+    ? "Use a full folder path, like /home/you/app or C:\\Users\\you\\app (Browse fills one in), or leave it empty for the default."
     : null;
   const identityMissing = needIdentity && (!gitName.trim() || !gitEmail.trim());
   const canStart = !!name.trim() && !pathProblem && !identityMissing && !busy;

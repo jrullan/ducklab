@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Starting a project from an idea (B-456).
@@ -150,6 +153,12 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		return nil, err
 	}
 	out := &ProjectStartResult{Project: project}
+	// The scaffold is versioned at once (review of #121): project.toml and
+	// the git housekeeping were left untracked even after accepting the
+	// requirements, so a clone was not a Ducklab project.
+	if err := commitProjectSetup(project.Path, project.ID, "project setup"); err != nil {
+		return nil, fmt.Errorf("commit the project setup: %w", err)
+	}
 	run, err := s.StageStart(ctx, project.ID, StageRequest{
 		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: req.Refs,
 	})
@@ -186,4 +195,39 @@ func removeCreatedDirs(dirs []string) {
 	for i := len(dirs) - 1; i >= 0; i-- {
 		_ = os.Remove(dirs[i])
 	}
+}
+
+// commitProjectSetup commits the files a new project is born with: its
+// config, git housekeeping, and (when present) a preset reference and the
+// project memory.
+func commitProjectSetup(root, projectID, what string) error {
+	var paths []string
+	for _, rel := range []string{
+		filepath.Join(".ducklab", "project.toml"), ".gitignore", ".gitattributes",
+		filepath.Join(".ducklab", "preset.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+	}
+	if mem := artifact.Path(root, artifact.KindProject); fileExists(mem) {
+		if rel, err := filepath.Rel(root, mem); err == nil {
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	git := vcs.New(root)
+	if err := git.AddPaths(paths...); err != nil {
+		return err
+	}
+	_, err := git.CommitPathsWithTrailer("ducklab: "+what,
+		map[string]string{"Ducklab-Action": "project_start", "Ducklab-Project": projectID}, paths)
+	return err
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

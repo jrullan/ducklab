@@ -273,7 +273,7 @@ func routeTable() []Route {
 			Response: service.ProjectDefaultsView{}, Summary: "Where projects started from an idea go when no folder is named", ClientMethod: "ProjectDefaults",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectDefaults }},
 		{Method: "PUT", Path: "/v1/defaults/projects", Auth: true,
-			Request: service.ProjectDefaultsView{}, Summary: "Set the folder for new projects; empty restores ~/Ducklab", ClientMethod: "ProjectDefaultsSet",
+			Request: service.ProjectDefaultsView{}, Response: service.ProjectDefaultsView{}, Summary: "Set the folder for new projects; empty restores ~/Ducklab", ClientMethod: "ProjectDefaultsSet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectDefaultsSet }},
 		{Method: "GET", Path: "/v1/defaults/engine", Auth: true,
 			Response: service.EngineDefaultsView{}, Summary: "Engine concurrency cap and CPU ceiling", ClientMethod: "EngineDefaults",

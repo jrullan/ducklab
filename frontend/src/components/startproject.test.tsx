@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StartProject, slugPreview } from "./StartProject";
+import { StartProject, isAbsolutePath, slugPreview } from "./StartProject";
 import { ApiError, type EngineClient } from "../api/client";
 
 const started = { project: { id: "ti-36x", name: "TI-36X", path: "/home/x/Ducklab/ti-36x" }, run_id: "r-1" };
@@ -47,8 +47,17 @@ describe("StartProject", () => {
     render(<StartProject client={{ projectStart: vi.fn() } as unknown as EngineClient} onStarted={vi.fn()} />);
     fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
     fireEvent.change(screen.getByTestId("start-path"), { target: { value: "~/code/calc" } });
-    expect(screen.getByTestId("start-path-problem")).toHaveTextContent("full path starting with /");
+    expect(screen.getByTestId("start-path-problem")).toHaveTextContent("full folder path");
     expect(screen.getByTestId("start-submit")).toBeDisabled();
+  });
+
+  it("accepts absolute folders on every platform the desktop runs on", () => {
+    for (const p of ["/home/ada/calc", "C:\\Users\\ada\\calc", "D:/work/calc", "\\\\server\\share\\calc"]) {
+      expect(isAbsolutePath(p)).toBe(true);
+    }
+    for (const p of ["~/calc", "calc", "./calc", "C:calc"]) {
+      expect(isAbsolutePath(p)).toBe(false);
+    }
   });
 
   it("previews the folder slug the engine will use", () => {
