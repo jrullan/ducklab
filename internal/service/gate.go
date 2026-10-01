@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/verify"
@@ -75,7 +78,14 @@ func (s *Service) ProjectGate(ctx context.Context, projectID string) (*GateStatu
 }
 
 // ProjectGateAdopt writes the detected gate into the project.
-func (s *Service) ProjectGateAdopt(ctx context.Context, projectID string) (*GateStatus, error) {
+// GateAdoptRequest names who adopted the gate. Empty means a person; an MCP
+// operator sends "mcp:<client>" — the record must never say a person decided
+// what a model decided.
+type GateAdoptRequest struct {
+	Actor string `json:"actor,omitempty"`
+}
+
+func (s *Service) ProjectGateAdopt(ctx context.Context, projectID string, actor string) (*GateStatus, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
@@ -104,6 +114,18 @@ func (s *Service) ProjectGateAdopt(ctx context.Context, projectID string) (*Gate
 	}
 	if err := config.SaveProject(path, projCfg); err != nil {
 		return nil, err
+	}
+	// A gate decides what every later verdict means, so its adoption carries
+	// the same receipt as any attributed configuration change (B-458).
+	if actor == "" {
+		actor = "human"
+	}
+	if receipt, rerr := os.OpenFile(filepath.Join(entry.Path, ".ducklab", "config-audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); rerr == nil {
+		_ = json.NewEncoder(receipt).Encode(map[string]interface{}{
+			"actor": actor, "source": "gate_adopt", "keys": []string{"verify.mode", "verify." + string(detected)},
+			"gate": string(detected), "command": cmd, "ts": time.Now().UTC().Format(time.RFC3339),
+		})
+		_ = receipt.Close()
 	}
 	return s.ProjectGate(ctx, projectID)
 }

@@ -126,7 +126,21 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const waitingIDs = new Set(waiting.map((run) => run.id));
   const planRunID = plan?.proposal?.run_id ?? plan?.run_id;
   const standalonePlan = !!plan?.proposal && (!planRunID || !waitingIDs.has(planRunID));
+  // B-458: a gate offer is a decision with its own button, not navigation.
+  const gateOffer = nextSteps.find((step) => step.id === "adopt-gate");
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const adoptGate = () => {
+    setGateBusy(true);
+    setGateError(null);
+    client
+      .projectGateAdopt(projectId)
+      .then(() => client.projectNext(projectId).then(setNextSteps))
+      .catch((e) => setGateError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setGateBusy(false));
+  };
   const actionSteps = nextSteps.filter((step) => {
+    if (step.id === "adopt-gate") return false;
     // taskNext owns the one-click launcher below. ProjectNext describes the
     // same task as navigation; rendering both produced two doors, two cost
     // figures and no clear primary action.
@@ -363,6 +377,39 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {gateOffer && (
+        <section className="rounded-card border border-warning bg-surface1 p-4" data-testid="now-adopt-gate">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-ink-muted">Your project can be verified now</h2>
+          <p className="mt-1 text-sm text-ink">
+            Adopt <code className="font-mono">{gateOffer.ref}</code> as the project gate? Until a gate exists every
+            run ends <strong>UNVERIFIED</strong>.
+          </p>
+          {/* The engine says what it found (a test, build or lint command);
+              a card that always said "tests exist" misdescribed the others. */}
+          <p className="mt-1 text-xs text-ink-secondary" data-testid="now-adopt-gate-reason">{gateOffer.reason}.</p>
+          <p className="mt-1 text-xs text-ink-secondary">
+            The gate runs after each run&apos;s changes and decides PASSED or FAILED. Adopting it changes what later
+            verdicts mean, so Ducklab never does it on its own. You can change it any time in the project&apos;s
+            settings.
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={adoptGate}
+              disabled={gateBusy}
+              data-testid="now-adopt-gate-button"
+              className="rounded border border-good px-3 py-1 text-xs text-good disabled:opacity-40"
+            >
+              {gateBusy ? "Adopting…" : "Adopt this gate"}
+            </button>
+            <a href={routeHref({ name: "projects" })} className="text-xs text-ink-muted underline">
+              Choose a different command
+            </a>
+          </div>
+          {gateError && <p className="mt-2 text-xs text-critical" data-testid="now-adopt-gate-error">{gateError}</p>}
         </section>
       )}
 

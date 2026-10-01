@@ -14,6 +14,7 @@ import (
 	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/verify"
 )
 
 // The project-level "what now?".
@@ -75,6 +76,13 @@ type projectSnapshot struct {
 	// developing ducklab). Accepted frontend work was invisible for hours
 	// because nothing said "the app you are looking at predates it".
 	SelfAhead int
+	// AdoptableGate is the command detection finds while the project has no
+	// gate (B-458). A greenfield project is initialised empty, so no gate is
+	// detected then; the first test suite arrives later and nothing said so.
+	AdoptableGate string
+	// AdoptableGateKind is what detection found: tests, build or lint. A card
+	// that always said "tests exist" misdescribed a build or lint gate.
+	AdoptableGateKind string
 }
 
 // nextSteps is the guide's whole brain: the loop's own order, stated.
@@ -129,6 +137,19 @@ func nextSteps(st projectSnapshot) []NextStep {
 	// 1. Work already paid for waits on one click. Nothing outranks it.
 	for _, r := range st.Paused {
 		out = append(out, pausedStep(r))
+	}
+
+	// 1b. A project that has become testable but has no gate: every run can
+	// do no better than UNVERIFIED until a person adopts one. Never adopted
+	// silently (a gate defines what a verdict means), so it is a decision.
+	if st.AdoptableGate != "" {
+		out = append(out, NextStep{
+			ID:     "adopt-gate",
+			Action: fmt.Sprintf("Adopt `%s` as the project gate", st.AdoptableGate),
+			Reason: adoptGateReason(st.AdoptableGateKind),
+			Kind:   "project",
+			Ref:    st.AdoptableGate,
+		})
 	}
 
 	// 2. The document pipeline, until the project has a plan to build from.
@@ -445,6 +466,17 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	}
 
 	st.SelfAhead = selfAheadCount(entry.Path)
+	// Detection walks the project; ProjectNext is polled by Now and by MCP
+	// status. Only a project with no gate can have one to adopt.
+	if projCfg, cerr := config.LoadProject(tomlPath); cerr == nil && verify.Gate(projCfg.Verify.Mode) == verify.GateNone {
+		if gate, gerr := s.ProjectGate(ctx, projectID); gerr == nil && gate.Adoptable {
+			st.AdoptableGate = gate.DetectedCommand
+			st.AdoptableGateKind = gate.Detected
+			if st.AdoptableGate == "" {
+				st.AdoptableGate = gate.Detected
+			}
+		}
+	}
 	st.Bugs, _ = s.BugList(ctx, projectID, false)
 	if runs, rerr := s.RunList(ctx, RunFilter{ProjectID: projectID}); rerr == nil {
 		for _, r := range runs {
@@ -508,4 +540,18 @@ func specDebtCount(tasks []TaskView) int {
 		}
 	}
 	return n
+}
+
+// adoptGateReason names what was found in the words a person reads.
+func adoptGateReason(kind string) string {
+	what := "a verification command"
+	switch kind {
+	case "tests":
+		what = "a test command"
+	case "build":
+		what = "a build command"
+	case "lint":
+		what = "a lint command"
+	}
+	return what + " is available, but the project has no gate: every run ends UNVERIFIED until one is adopted"
 }

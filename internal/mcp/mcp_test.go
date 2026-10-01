@@ -60,6 +60,8 @@ type fakeEngine struct {
 	lastRosterUnpin     string
 	rosterViews         map[string]map[string]interface{}
 	bugMoveCalls        int
+	adoptedGateProject  string
+	adoptedGateActor    string
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -227,6 +229,10 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 		return f.tasks, nil
 	}
 	return nil, nil
+}
+func (f *fakeEngine) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
+	f.adoptedGateProject, f.adoptedGateActor = projectID, actor
+	return map[string]interface{}{"mode": "tests"}, nil
 }
 func (f *fakeEngine) TaskRemove(projectID, taskID string) (map[string]interface{}, error) {
 	f.removedProject, f.removedTask = projectID, taskID
@@ -1191,5 +1197,20 @@ func TestStatusCarriesTheLifecycle(t *testing.T) {
 	text, isErr := toolResultText(t, resps[1])
 	if isErr || !strings.Contains(text, `"current": "spec"`) && !strings.Contains(text, `"current":"spec"`) {
 		t.Fatalf("status lacks lifecycle: %s", text)
+	}
+}
+
+// B-458: status next_steps can say adopt-gate; the operator needs the verb.
+func TestGateAdoptIsAnOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "gate_adopt", `{"project_id":"calc"}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("gate_adopt failed")
+	}
+	if eng.adoptedGateProject != "calc" {
+		t.Errorf("adopted gate for %q, want calc", eng.adoptedGateProject)
+	}
+	if !strings.HasPrefix(eng.adoptedGateActor, "mcp:") {
+		t.Errorf("gate adopted as %q; an operator's decision must be attributed to it", eng.adoptedGateActor)
 	}
 }
