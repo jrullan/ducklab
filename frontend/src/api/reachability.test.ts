@@ -18,8 +18,6 @@ const SRC = path.resolve(__dirname, "..");
  * not an exception, it is a gap somebody silenced. Removing a line here is the
  * definition of done for wiring one. */
 const knownUnwired: Record<string, string> = {
-  ducklingProbe:
-    "capability probing is engine-initiated today; the card shows declared caps and re-probing has no surface yet",
   projectInstall:
     "project installation was previously exposed by the retired guide rail; the shell now requires installation outside the two-zone desktop surface",
   rosterSet:

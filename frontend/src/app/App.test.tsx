@@ -78,6 +78,19 @@ describe("App browser engine connection", () => {
     expect(screen.getByTestId("stale-read-only")).toHaveClass("pointer-events-none");
   });
 
+  // B-455: a fresh installation landed on an empty Now with no door.
+  it("opens on the first-run page when the engine has no project", async () => {
+    history.replaceState({}, "", "/?engine=http%3A%2F%2Fengine.test&token=t");
+    localStorage.removeItem("ducklab.project");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    vi.stubGlobal("EventSource", EventSourceStub);
+    render(<App />);
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    act(() => EventSourceStub.latest!.onopen?.({}));
+    expect(screen.getByTestId("first-run-engine")).toHaveTextContent("engine connected");
+    expect(screen.getByTestId("first-run-create")).toHaveTextContent("Create your first project");
+  });
+
   it("shows a non-empty reconnecting banner and clears the dim when open", async () => {
     history.replaceState({}, "", "/?engine=http%3A%2F%2Fengine.test&token=t");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [] }))));

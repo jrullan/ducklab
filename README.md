@@ -186,7 +186,7 @@ key this app has, with the restart button beside the words.
 
 ## A cycle, end to end
 
-From the desktop: **Projects → New project**, then **Cycle → Draft it**. From
+From the desktop: on first launch, **Now → Create your first project**; afterwards **Settings → Projects → New project**, then **Work → Documents → Intent → Add intention → Draft it**. From
 a terminal:
 
 ```bash
