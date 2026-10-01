@@ -656,7 +656,11 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 			if !gitIdentityKnown(git) {
 				name, email = strings.TrimSpace(req.GitName), strings.TrimSpace(req.GitEmail)
 			}
-			if err := git.InitWithIdentity(name, email); err != nil {
+			// The file written below defaults to base_branch=main. Initialise HEAD
+			// on that same branch instead of inheriting a machine-wide
+			// init.defaultBranch such as master (B-467).
+			base := config.DefaultProject("", "").Git.BaseBranch
+			if err := git.InitWithIdentityOnBranch(name, email, base); err != nil {
 				return nil, fmt.Errorf("git init: %w", err)
 			}
 		} else {
@@ -2331,7 +2335,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"reviewer": reviewer, "verdict": reviewVerdict, "findings": reviewFindings,
 	})
 	contractGate := taskGate
-	if probeGate == "red" {
+	if probeGate == "red" || appSmokeGate == "red" {
 		contractGate = "red"
 	}
 	verdict := adjudicateBuildVerdict(projectVerdict, contractGate, dissent)

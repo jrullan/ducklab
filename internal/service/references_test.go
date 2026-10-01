@@ -130,3 +130,24 @@ func TestStructuredJSONReferencesLoadAsExecutableContracts(t *testing.T) {
 		}
 	}
 }
+
+// B-474: a retry launched from any client keeps the project preset and gives
+// relative reference paths a stable project-root meaning.
+func TestStageReferencesKeepThePresetAndResolveRelativeToTheProject(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ducklab"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	preset := filepath.Join(root, ".ducklab", "preset.md")
+	if err := os.WriteFile(preset, []byte("web page constraints"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := normalizeStageRefs(root, "intake", []string{"notes/design.md", ".ducklab/preset.md"})
+	wantDesign := filepath.Join(root, "notes", "design.md")
+	if len(refs) != 2 || refs[0] != wantDesign || refs[1] != preset {
+		t.Fatalf("refs = %v, want [%s %s]", refs, wantDesign, preset)
+	}
+	if got := normalizeStageRefs(root, "spec", nil); len(got) != 0 {
+		t.Fatalf("non-intake inherited preset: %v", got)
+	}
+}

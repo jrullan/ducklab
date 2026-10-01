@@ -94,7 +94,19 @@ func (g *Git) Init() error {
 // before the root commit, so the commit can be made on a machine with no
 // identity of its own.
 func (g *Git) InitWithIdentity(name, email string) error {
-	if _, err := g.run("init"); err != nil {
+	return g.InitWithIdentityOnBranch(name, email, "")
+}
+
+// InitWithIdentityOnBranch is InitWithIdentity with an explicit initial
+// branch. Passing the project's configured base branch keeps a fresh
+// repository's HEAD and project.toml in agreement even when the machine's
+// init.defaultBranch is still "master" (B-467).
+func (g *Git) InitWithIdentityOnBranch(name, email, branch string) error {
+	args := []string{"init"}
+	if strings.TrimSpace(branch) != "" {
+		args = append(args, "-b", shellEscape(strings.TrimSpace(branch)))
+	}
+	if _, err := g.run(args...); err != nil {
 		return err
 	}
 	if name != "" && email != "" {

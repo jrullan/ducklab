@@ -2,9 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
 	"github.com/jrullan/ducklab/internal/mcp"
 )
@@ -14,15 +14,19 @@ import (
 // `ducklab mcp serve` is what an MCP client configures as the command: it
 // connects the model on stdin/stdout to the engine on loopback. Logs go to
 // stderr — stdout belongs to the protocol.
-func mcpCmd(verb string) int {
+func mcpCmd(verb string, noAutostart bool) int {
+	return mcpCmdWith(verb, noAutostart, os.Stdin, os.Stdout, discoverEngine)
+}
+
+func mcpCmdWith(verb string, noAutostart bool, in io.Reader, out io.Writer, discover func(bool) (*engineclt.Client, error)) int {
 	switch verb {
 	case "serve":
-		info, err := daemon.ReadEngineJSON()
-		if err != nil || !daemon.IsEngineRunning(info) {
-			fmt.Fprintln(os.Stderr, "engine not running; start it with `ducklab engine start`")
+		client, err := discover(noAutostart)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp: %v\n", err)
 			return 9
 		}
-		if err := mcp.NewServer(engineclt.New(info)).Serve(os.Stdin, os.Stdout); err != nil {
+		if err := mcp.NewServer(client).Serve(in, out); err != nil {
 			fmt.Fprintf(os.Stderr, "mcp: %v\n", err)
 			return 1
 		}
