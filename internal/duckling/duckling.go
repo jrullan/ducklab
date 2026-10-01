@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -69,16 +70,19 @@ type Health struct {
 
 // Registry manages ducklings.
 type Registry struct {
-	ducklings map[config.DucklingID]*Duckling
-	providers map[config.ProviderID]provider.Provider
-	caps      *CapsCache
+	ducklings     map[config.DucklingID]*Duckling
+	providers     map[config.ProviderID]provider.Provider
+	caps          *CapsCache
+	probeMu       sync.RWMutex
+	probeFailures map[config.DucklingID]string
 }
 
 // NewRegistry creates a new duckling registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		ducklings: make(map[config.DucklingID]*Duckling),
-		providers: make(map[config.ProviderID]provider.Provider),
+		ducklings:     make(map[config.DucklingID]*Duckling),
+		providers:     make(map[config.ProviderID]provider.Provider),
+		probeFailures: make(map[config.DucklingID]string),
 	}
 }
 
@@ -109,7 +113,11 @@ func (r *Registry) Replace(d *Duckling) error {
 	if d.ID == "" {
 		return fmt.Errorf("duckling id is required")
 	}
+	previous := r.ducklings[d.ID]
 	r.ducklings[d.ID] = d
+	if previous == nil || previous.Provider != d.Provider || previous.Model != d.Model || previous.OpenRouterProvider != d.OpenRouterProvider {
+		r.clearProbeFailure(d.ID)
+	}
 	return nil
 }
 
@@ -120,6 +128,30 @@ func (r *Registry) Replace(d *Duckling) error {
 // engine disagree about what exists.
 func (r *Registry) Unregister(id config.DucklingID) {
 	delete(r.ducklings, id)
+	r.clearProbeFailure(id)
+}
+
+// LastProbeFailed reports whether the most recent explicit or launch-time
+// capability probe could not get even one chat response. Failures are kept in
+// memory only: provider weather should influence automatic seating in this
+// engine session, not become a durable verdict about a model.
+func (r *Registry) LastProbeFailed(id config.DucklingID) bool {
+	r.probeMu.RLock()
+	defer r.probeMu.RUnlock()
+	_, failed := r.probeFailures[id]
+	return failed
+}
+
+func (r *Registry) recordProbeFailure(id config.DucklingID, err error) {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	r.probeFailures[id] = err.Error()
+}
+
+func (r *Registry) clearProbeFailure(id config.DucklingID) {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	delete(r.probeFailures, id)
 }
 
 // RegisterProvider registers a provider for ducklings.
@@ -274,8 +306,11 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		Messages:  []provider.Message{{Role: "user", Content: "Reply with ok."}},
 		MaxTokens: intPtr(8),
 	}); err != nil {
-		return nil, fmt.Errorf("%s did not answer a chat at %s: %w", d.ID, d.Model, err)
+		failure := fmt.Errorf("%s did not answer a chat at %s: %w", d.ID, d.Model, err)
+		r.recordProbeFailure(id, failure)
+		return nil, failure
 	}
+	r.clearProbeFailure(id)
 
 	// OpenRouter has two materially different answers to "disable thinking":
 	// some endpoints accept reasoning.enabled=false, while mandatory-reasoning

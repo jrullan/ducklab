@@ -143,6 +143,9 @@ func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<
 // OpenAI-compatible servers report neither, and absence is not an error.
 type ModelInfo struct {
 	ContextTokens int
+	// Vision is present when the provider catalog declares whether image input
+	// is accepted. A nil value means the catalog did not say.
+	Vision *bool
 	// MaxOutputTokens is the model's own reply ceiling. Left unset, a
 	// duckling runs on ducklab's conservative default — which truncated a
 	// whole-document draft twice for a model that could have emitted eight
@@ -183,6 +186,9 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 				Prompt     json.Number `json:"prompt"`
 				Completion json.Number `json:"completion"`
 			} `json:"pricing"`
+			Architecture struct {
+				InputModalities []string `json:"input_modalities"`
+			} `json:"architecture"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -195,6 +201,16 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 		info := &ModelInfo{
 			ContextTokens:   m.ContextLength,
 			MaxOutputTokens: m.TopProvider.MaxCompletionTokens,
+		}
+		if len(m.Architecture.InputModalities) > 0 {
+			vision := false
+			for _, modality := range m.Architecture.InputModalities {
+				if strings.EqualFold(modality, "image") {
+					vision = true
+					break
+				}
+			}
+			info.Vision = &vision
 		}
 		if v, err := m.Pricing.Prompt.Float64(); err == nil {
 			info.PromptPerMTok = v * 1e6

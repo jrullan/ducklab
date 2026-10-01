@@ -162,10 +162,22 @@ describe("Ducklings", () => {
           stop: null,
         },
         color: 0,
-        caps: { native_tools: true, context_tokens: 200000, vision: false },
+        caps: { native_tools: true, context_tokens: 200000 },
         cost: { input_per_mtok: 0, output_per_mtok: 15 },
       }),
     );
+  });
+
+  it("labels the three novice fields and keeps inferred capabilities behind disclosure", async () => {
+    const client = clientWith([], [provider({ id: "openrouter" })]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    expect(screen.getByText("Duckling name")).toBeTruthy();
+    expect(screen.getByText("Provider")).toBeTruthy();
+    expect(screen.getByText("Model")).toBeTruthy();
+    const advanced = screen.getByTestId("duckling-advanced") as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    expect(advanced.textContent).toContain("vision: detect from provider catalog");
   });
 
   it("selects a concrete OpenRouter endpoint and adopts its exact price and disclosed policies", async () => {

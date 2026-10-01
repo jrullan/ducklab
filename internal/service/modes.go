@@ -164,8 +164,12 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 	seats := s.cfg.Defaults.ModeSeats[mode]
 	pins := s.cfg.Defaults.RolePins
 	available := make(map[config.DucklingID]bool, len(s.cfg.Ducklings))
+	autoAvailable := make(map[config.DucklingID]bool, len(s.cfg.Ducklings))
 	for id := range s.cfg.Ducklings {
 		available[id] = true
+		if !s.ducklings.LastProbeFailed(id) {
+			autoAvailable[id] = true
+		}
 	}
 	s.cfgMu.RUnlock()
 	firstAvailable := func(ids []config.DucklingID) config.DucklingID {
@@ -244,8 +248,8 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 	// configured, it stops guessing: a configured install with no triager
 	// gets "no triager seated" at launch, not the alphabet (B-063).
 	if !s.anySeatConfigured(projCfg) {
-		availableIDs := make([]config.DucklingID, 0, len(available))
-		for id := range available {
+		availableIDs := make([]config.DucklingID, 0, len(autoAvailable))
+		for id := range autoAvailable {
 			availableIDs = append(availableIDs, id)
 		}
 		sort.Slice(availableIDs, func(i, j int) bool { return availableIDs[i] < availableIDs[j] })

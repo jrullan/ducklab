@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { FirstRun, readiness } from "./FirstRun";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { FirstRun, friendlyProbeError, readiness } from "./FirstRun";
 import type { Duckling, EngineClient, ProviderView } from "../api/client";
 
 const provider = (over: Partial<ProviderView>): ProviderView => ({ id: "or", kind: "openai", base_url: "https://x", key_present: true, ...over });
@@ -11,6 +11,7 @@ function clientWith(providers: ProviderView[], ducklings: Duckling[], probe: (id
     providers: vi.fn(() => Promise.resolve(providers)),
     ducklings: vi.fn(() => Promise.resolve(ducklings)),
     ducklingProbe: vi.fn(probe),
+    ducklingSet: vi.fn(() => Promise.resolve({})),
   } as unknown as EngineClient;
 }
 
@@ -45,6 +46,27 @@ describe("FirstRun", () => {
     const failure = await screen.findByTestId("first-run-test-failure");
     expect(failure).toHaveTextContent("connection refused");
     expect(failure.querySelector("a")?.getAttribute("href")).toContain("ducklings");
+  });
+
+  it("offers a keyed OpenRouter model and creates it without leaving first run", async () => {
+    const openrouter = provider({ id: "openrouter", base_url: "https://openrouter.ai/api/v1", api_key_env: "OPENROUTER_API_KEY", key_present: true });
+    const client = clientWith([openrouter], [duckling({ id: "pato-local", provider: "local" })]);
+    render(<FirstRun client={client} connected onStarted={vi.fn()} />);
+    expect(await screen.findByTestId("first-run-openrouter")).toHaveTextContent("OpenRouter key found");
+    expect(screen.getByTestId("first-run-openrouter")).toHaveTextContent("vision");
+    fireEvent.click(screen.getByTestId("first-run-add-pato-sonnet"));
+    await waitFor(() => {
+      expect(client.ducklingSet).toHaveBeenCalledWith("pato-sonnet", expect.objectContaining({
+        provider: "openrouter",
+        model: "anthropic/claude-sonnet-4.5",
+      }));
+      expect(client.ducklingProbe).toHaveBeenCalledWith("pato-sonnet");
+    });
+  });
+
+  it("translates the starter local 404 into an actionable explanation", () => {
+    expect(friendlyProbeError("pato-local", "404 Not Found: <h1>404</h1> No context found for request"))
+      .toMatch(/Nothing at the local model address is answering chats/);
   });
 
   it("explains what is missing when there is no provider, and links the fix", async () => {

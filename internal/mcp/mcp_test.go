@@ -66,6 +66,20 @@ type fakeEngine struct {
 	visualSet           map[string]interface{}
 	visualImport        string
 	noProjects          bool
+	ducklings           []map[string]interface{}
+	providers           []map[string]interface{}
+	ducklingSetID       string
+	ducklingSetBody     map[string]interface{}
+}
+
+func (f *fakeEngine) ProviderList() ([]map[string]interface{}, error) { return f.providers, nil }
+func (f *fakeEngine) DucklingList() ([]map[string]interface{}, error) { return f.ducklings, nil }
+func (f *fakeEngine) DucklingSet(id string, body map[string]interface{}) error {
+	f.ducklingSetID, f.ducklingSetBody = id, body
+	return nil
+}
+func (f *fakeEngine) DucklingProbe(id string) (map[string]interface{}, error) {
+	return map[string]interface{}{"id": id, "vision": true}, nil
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -1316,5 +1330,17 @@ func TestStatusWithNoProjectNamesProjectStart(t *testing.T) {
 	text, isErr := toolResultText(t, resps[1])
 	if isErr || !strings.Contains(text, "project_start") {
 		t.Fatalf("empty status does not name project_start: %s", text)
+	}
+}
+
+func TestDucklingAddIsAnOperatorToolAndTestsWhatItSaved(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "duckling", `{"action":"add","id":"pato-sonnet","provider":"openrouter","model":"anthropic/claude-sonnet-4.5"}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(text, `"vision": true`) {
+		t.Fatalf("duckling add = %s", text)
+	}
+	if eng.ducklingSetID != "pato-sonnet" || eng.ducklingSetBody["provider"] != "openrouter" || eng.ducklingSetBody["model"] != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("saved = %q %#v", eng.ducklingSetID, eng.ducklingSetBody)
 	}
 }

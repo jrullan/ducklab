@@ -611,7 +611,7 @@ function DucklingForm({
   // Declared, not probed: a text-only model sent an image array gets a 400,
   // so the person states what their endpoint accepts. Off, a bug's
   // screenshots are withheld from this duckling's triage turns.
-  const [vision, setVision] = useState(existing?.caps?.vision === true);
+  const [vision, setVision] = useState<boolean | undefined>(existing?.caps?.vision);
   const [costIn, setCostIn] = useState(String(existing?.cost?.input_per_mtok ?? 0));
   const [costOut, setCostOut] = useState(String(existing?.cost?.output_per_mtok ?? 0));
   // How the model is asked to generate. The engine has accepted these all
@@ -712,7 +712,7 @@ function DucklingForm({
         caps: {
           native_tools: nativeTools,
           context_tokens: Number(contextTokens) || 0,
-          vision,
+          ...(vision === undefined ? {} : { vision }),
         },
         cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
         fallback: fallback || undefined,
@@ -723,44 +723,60 @@ function DucklingForm({
 
   return (
     <div className="mb-3 space-y-2 rounded border border-hairline p-2" data-testid="duckling-form">
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          aria-label="duckling id"
-          data-testid="duckling-id"
-          placeholder="pato-sonnet"
-          value={id}
-          // The id is the name runs and reports are recorded under, so
-          // changing it would orphan every measurement already taken.
-          disabled={Boolean(existing)}
-          onChange={(e) => setId(e.target.value)}
-          className="w-40 rounded border border-hairline bg-surface2 px-2 py-1 text-sm disabled:opacity-60"
-        />
-        <select
-          aria-label="provider"
-          data-testid="duckling-provider"
-          value={provider}
-          onChange={(e) => {
-            setProvider(e.target.value);
-            if (!isOpenRouterProvider(providers.find((item) => item.id === e.target.value))) {
-              setOpenRouterProvider("");
-            }
-          }}
-          className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
-        >
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="model"
-          data-testid="duckling-model"
-          placeholder="anthropic/claude-sonnet-4.5"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="min-w-56 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
-        />
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-xs text-ink-secondary">
+          Duckling name
+          <input
+            aria-label="duckling id"
+            data-testid="duckling-id"
+            placeholder="pato-sonnet"
+            value={id}
+            // The id is the name runs and reports are recorded under, so
+            // changing it would orphan every measurement already taken.
+            disabled={Boolean(existing)}
+            onChange={(e) => setId(e.target.value)}
+            className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink disabled:opacity-60"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-secondary">
+          Provider
+          <select
+            aria-label="provider"
+            data-testid="duckling-provider"
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              if (!isOpenRouterProvider(providers.find((item) => item.id === e.target.value))) {
+                setOpenRouterProvider("");
+              }
+            }}
+            className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-secondary">
+          Model
+          <input
+            aria-label="model"
+            data-testid="duckling-model"
+            placeholder="anthropic/claude-sonnet-4.5"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
+          />
+        </label>
+      </div>
+
+      <details className="rounded border border-hairline p-2" data-testid="duckling-advanced">
+        <summary className="cursor-pointer text-sm text-ink">Advanced details</summary>
+        <div className="mt-2 space-y-2">
+        <label className="flex items-center gap-2 text-sm text-ink-secondary">
+          Capacity tier
         <select
           aria-label="model tier"
           data-testid="duckling-tier"
@@ -773,7 +789,7 @@ function DucklingForm({
           <option value="small">tier: small</option>
           <option value="large">tier: large</option>
         </select>
-      </div>
+        </label>
 
       {openRouter && (
         <div className="rounded border border-hairline bg-surface2 p-2 text-sm" data-testid="openrouter-endpoint-config">
@@ -853,11 +869,11 @@ function DucklingForm({
         >
           <input
             type="checkbox"
-            checked={vision}
+            checked={vision === true}
             data-testid="duckling-vision"
             onChange={(e) => setVision(e.target.checked)}
           />
-          vision
+          {vision === undefined ? "vision: detect from provider catalog" : "vision"}
         </label>
         <label className="flex items-center gap-1">
           fallback
@@ -994,6 +1010,9 @@ function DucklingForm({
           />
         ))}
       </div>
+
+        </div>
+      </details>
 
       <div className="flex gap-2">
         <button

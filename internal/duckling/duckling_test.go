@@ -94,4 +94,7 @@ func TestProbeFailsAndCachesNothingWhenTheEndpointAnswersNoChat(t *testing.T) {
 	if _, cached := r.CachedCaps("pato-local"); cached {
 		t.Fatal("a failed probe was cached")
 	}
+	if !r.LastProbeFailed("pato-local") {
+		t.Fatal("the failed probe was not retained for automatic seating")
+	}
 }

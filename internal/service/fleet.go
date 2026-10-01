@@ -497,7 +497,8 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	needsContext := view.Caps.ContextTokens == nil || *view.Caps.ContextTokens <= 0
 	needsCost := view.Cost.InputPerMTok == 0 && view.Cost.OutputPerMTok == 0
 	needsOutput := view.Params.MaxTokens == nil || *view.Params.MaxTokens <= 0
-	if !needsContext && !needsCost && !needsOutput {
+	needsVision := view.Caps.Vision == nil
+	if !needsContext && !needsCost && !needsOutput && !needsVision {
 		return view
 	}
 	prov, ok := s.providers[config.ProviderID(view.Provider)]
@@ -537,7 +538,7 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 			}
 		}
 	}
-	if !needsContext && !needsCost && !needsOutput {
+	if !needsContext && !needsCost && !needsOutput && !needsVision {
 		return view
 	}
 	info, err := informer.ModelInfo(ctx, view.Model)
@@ -558,6 +559,10 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	if needsOutput && info.MaxOutputTokens > 0 {
 		n := info.MaxOutputTokens
 		view.Params.MaxTokens = &n
+	}
+	if needsVision && info.Vision != nil {
+		vision := *info.Vision
+		view.Caps.Vision = &vision
 	}
 	return view
 }

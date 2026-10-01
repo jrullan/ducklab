@@ -13,7 +13,7 @@ func TestModelInfoReadsOpenRouterShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"other/model","context_length":8192,"pricing":{"prompt":"0.000001","completion":"0.000002"}},
-			{"id":"anthropic/claude-sonnet-4.5","context_length":200000,"top_provider":{"max_completion_tokens":64000},"pricing":{"prompt":"0.000003","completion":"0.000015"}}
+			{"id":"anthropic/claude-sonnet-4.5","context_length":200000,"architecture":{"input_modalities":["text","image"]},"top_provider":{"max_completion_tokens":64000},"pricing":{"prompt":"0.000003","completion":"0.000015"}}
 		]}`))
 	}))
 	defer srv.Close()
@@ -31,6 +31,9 @@ func TestModelInfoReadsOpenRouterShape(t *testing.T) {
 	}
 	if info.MaxOutputTokens != 64000 {
 		t.Errorf("reply ceiling = %d, want 64000", info.MaxOutputTokens)
+	}
+	if info.Vision == nil || !*info.Vision {
+		t.Errorf("vision = %v, want catalog-declared true", info.Vision)
 	}
 }
 
