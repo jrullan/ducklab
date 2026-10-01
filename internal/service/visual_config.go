@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Configuring the visual gate without editing TOML (B-460, part 2).
@@ -275,5 +276,47 @@ func (s *Service) VisualCheckSet(ctx context.Context, id string, req VisualCheck
 	s.projMu.Lock()
 	delete(s.projects, id)
 	s.projMu.Unlock()
+	if err := commitVisualSetup(root, id, &updated); err != nil {
+		return nil, fmt.Errorf("saved, but could not commit the visual check: %w", err)
+	}
 	return s.VisualCheck(ctx, id)
+}
+
+// commitVisualSetup versions the configuration and the reference images it
+// names (review of #124): left uncommitted, a clone, or a build worktree made
+// from the default branch, had a comparison whose reference did not exist.
+// Only the files the visual check owns are committed, with --only, so the
+// person's other staged work stays theirs.
+func commitVisualSetup(root, projectID string, cfg *config.Project) error {
+	git := vcs.New(root)
+	if !git.HasGit() {
+		return nil
+	}
+	candidates := []string{".ducklab/project.toml"}
+	for _, c := range cfg.Render.Compare {
+		path, err := resolveRenderReference(root, c.Reference)
+		if err != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+			candidates = append(candidates, filepath.ToSlash(rel))
+		}
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, p := range candidates {
+		if !seen[p] && !git.PathIsCommitted(p) {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := git.AddPaths(paths...); err != nil {
+		return err
+	}
+	_, err := git.CommitPathsWithTrailer("ducklab: visual check settings",
+		map[string]string{"Ducklab-Action": "visual_check", "Ducklab-Project": projectID}, paths)
+	return err
 }

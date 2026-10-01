@@ -471,7 +471,11 @@ API (`GET`/`PUT /v1/projects/{id}/visual-check`,
 `GET`/`POST /v1/projects/{id}/reference-images`,
 `GET /v1/projects/{id}/reference-images/{ref}`) and the MCP verb
 `visual_check`. A comparison needs an explicit capture command: the `[run]`
-fallback starts a server or a window and never writes a PNG.
+fallback starts a server or a window and never writes a PNG. Saving commits
+`project.toml` and the reference images the comparisons name (`git commit
+--only`, nothing else of the person's), so a clone or a build worktree has
+them; at the gate, references resolve in the registered checkout first and
+then in the run's worktree.
 
 ---
 

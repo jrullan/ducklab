@@ -303,3 +303,26 @@ func TestEachComparisonKeepsItsOwnEvidence(t *testing.T) {
 		t.Fatal("the first comparison's diff shows the second one's mismatch")
 	}
 }
+
+// Review of #124: the run's configuration comes from the registered checkout,
+// and so may its references; the run's own worktree is the fallback.
+func TestTheVisualGateFindsAReferenceInTheRegisteredCheckout(t *testing.T) {
+	w, worktree := visualFixture(t, func(p string) { paintPNG(t, p, 10, 10, white, black, image.Rect(0, 0, 5, 5)) })
+	checkout := t.TempDir()
+	src := filepath.Join(t.TempDir(), "ref.png")
+	paintPNG(t, src, 10, 10, white, black, image.Rect(0, 0, 5, 5))
+	_, recs, err := loadRefImages(checkout, []string{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := config.RenderContract{Compare: []config.RenderCompare{{Capture: "scene-01.png", Reference: recs[0].ID}}}
+	if gate := runVisualGate(worktree, contract, w, []string{"scene-01.png"}); gate.Passed {
+		t.Fatal("the fixture is wrong: the worktree alone should not hold the reference")
+	}
+	if gate := runVisualGate(checkout, contract, w, []string{"scene-01.png"}, worktree); !gate.Passed {
+		t.Fatalf("not found in the checkout: %+v", gate.Results)
+	}
+	if gate := runVisualGate(worktree, contract, w, []string{"scene-01.png"}, checkout); !gate.Passed {
+		t.Fatalf("the fallback root is not searched: %+v", gate.Results)
+	}
+}

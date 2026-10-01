@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // B-460 part 2: the visual gate is configured from what the project already
@@ -75,6 +77,22 @@ func TestTheVisualCheckIsConfiguredFromTheProjectsOwnImagesAndCaptures(t *testin
 	}
 	if !cfg.RenderConfigured || cfg.Render.Command != "node shot.mjs" || cfg.Render.Compare[0].Reference != ref.ID {
 		t.Fatalf("saved render = %+v", cfg.Render)
+	}
+	// Review of #124: the settings and the reference are versioned, so a
+	// worktree made from the branch (as a build run's is) holds both.
+	git := vcs.New(p.Path)
+	refRel := strings.TrimPrefix(ref.Stored, "./")
+	for _, f := range []string{".ducklab/project.toml", refRel} {
+		if !git.PathIsCommitted(f) {
+			t.Errorf("%s is not committed after saving the visual check", f)
+		}
+	}
+	wt := filepath.Join(t.TempDir(), "wt")
+	if out, err := exec.Command("git", "-C", p.Path, "worktree", "add", "-q", "--detach", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree: %v\n%s", err, out)
+	}
+	if _, err := resolveRenderReference(wt, ref.ID); err != nil {
+		t.Fatalf("a worktree from HEAD cannot find the reference: %v", err)
 	}
 	audit, _ := os.ReadFile(filepath.Join(p.Path, ".ducklab", "config-audit.jsonl"))
 	if !strings.Contains(string(audit), `"source":"visual_check"`) {

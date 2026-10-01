@@ -13,10 +13,13 @@ import { useEffect, useState } from "react";
 import type { EngineClient, RenderCompare, VisualCheckView } from "../api/client";
 import { canChooseFile, chooseFile } from "../lib/picker";
 
-type Row = { capture: string; reference: string; tolerancePct: string };
+// threshold is carried, not edited (review of #124): rebuilding rows from
+// the visible fields reset a configured per-pixel threshold to the default,
+// which could turn a required failure into a pass.
+type Row = { capture: string; reference: string; tolerancePct: string; threshold?: number };
 
 const toRows = (compare: RenderCompare[]): Row[] =>
-  compare.map((c) => ({ capture: c.capture, reference: c.reference, tolerancePct: String(Math.round((c.tolerance ?? 0.02) * 1000) / 10) }));
+  compare.map((c) => ({ capture: c.capture, reference: c.reference, tolerancePct: String(Math.round((c.tolerance ?? 0.02) * 1000) / 10), threshold: c.threshold }));
 
 export function VisualCheckSettings({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [view, setView] = useState<VisualCheckView | null>(null);
@@ -91,7 +94,10 @@ export function VisualCheckSettings({ client, projectId }: { client: EngineClien
         command: command.trim(),
         artifacts: view.artifacts || undefined,
         enforcement,
-        compare: rows.map((r) => ({ capture: r.capture.trim(), reference: r.reference, tolerance: Number(r.tolerancePct) / 100 })),
+        compare: rows.map((r) => ({
+          capture: r.capture.trim(), reference: r.reference, tolerance: Number(r.tolerancePct) / 100,
+          ...(r.threshold !== undefined ? { threshold: r.threshold } : {}),
+        })),
       });
       setView(next);
       setEditing(false);

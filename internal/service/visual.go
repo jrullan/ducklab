@@ -171,7 +171,13 @@ func encodePNG(img image.Image) ([]byte, error) {
 // stores the reference and the difference next to the captures. A compare
 // that cannot run (no such capture, unreadable reference) fails with the
 // reason: a gate that silently skips is the gap this closes.
-func runVisualGate(root string, contract config.RenderContract, writer *runlog.Writer, captures []string) *runlog.VisualGate {
+//
+// References resolve under root first, then under each of alsoUnder: the
+// run passes the registered checkout (where its configuration comes from, and
+// where an imported reference lands) and then its own worktree (review of
+// #124: a build worktree made from the default branch lacked a reference the
+// person had just imported, so every run failed "not stored").
+func runVisualGate(root string, contract config.RenderContract, writer *runlog.Writer, captures []string, alsoUnder ...string) *runlog.VisualGate {
 	if len(contract.Compare) == 0 {
 		return nil
 	}
@@ -207,6 +213,14 @@ func runVisualGate(root string, contract config.RenderContract, writer *runlog.W
 			continue
 		}
 		refPath, err := resolveRenderReference(root, cmp.Reference)
+		for _, other := range alsoUnder {
+			if err == nil || other == "" || other == root {
+				break
+			}
+			if p, otherErr := resolveRenderReference(other, cmp.Reference); otherErr == nil {
+				refPath, err = p, nil
+			}
+		}
 		if err != nil {
 			fail("%v", err)
 			continue

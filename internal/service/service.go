@@ -2228,7 +2228,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		rs.wmu.Lock()
 		captures := append([]string(nil), rs.run.Captures...)
 		rs.wmu.Unlock()
-		vg := runVisualGate(ectx.ProjectRoot, render, rs.writer, captures)
+		vg := runVisualGate(entry.Path, render, rs.writer, captures, ectx.ProjectRoot)
 		summary := visualGateSummary(vg)
 		// The run is visible to RunGet while the gate runs; its record is
 		// changed only under the lock snapshotRun takes (review of #123).

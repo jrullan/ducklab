@@ -63,6 +63,18 @@ describe("VisualCheckSettings", () => {
     expect(client.referenceImport).toHaveBeenCalledWith("calc", "/home/ada/ti36x-front.png");
   });
 
+  // Review of #124: editing an unrelated setting keeps a configured threshold.
+  it("keeps each comparison's threshold when saving other changes", async () => {
+    const client = fakeClient({ ...fresh, configured: true, command: "node capture.mjs", compare: [{ capture: "scene-01.png", reference: "REF-IMG-1a2b3c4d", tolerance: 0.02, threshold: 0.01 }] });
+    render(<VisualCheckSettings client={client as unknown as EngineClient} projectId="calc" />);
+    await waitFor(() => screen.getByTestId("visual-settings-edit"));
+    fireEvent.click(screen.getByTestId("visual-settings-edit"));
+    fireEvent.click(screen.getByTestId("visual-enf-required"));
+    fireEvent.click(screen.getByTestId("visual-save"));
+    await waitFor(() => expect(client.visualCheckSet).toHaveBeenCalled());
+    expect(client.visualCheckSet.mock.calls[0]?.[1].compare).toEqual([{ capture: "scene-01.png", reference: "REF-IMG-1a2b3c4d", tolerance: 0.02, threshold: 0.01 }]);
+  });
+
   it("shows the engine's refusal in place", async () => {
     const client = fakeClient();
     client.visualCheckSet.mockRejectedValueOnce(new Error("comparison 1: REF-IMG-1a2b3c4d is not stored in this project"));
