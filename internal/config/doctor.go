@@ -56,6 +56,9 @@ func DoctorWithOnAccept(projectPath, globalOnAccept string) ([]Finding, error) {
 	if remote && !hasRemote && !hasGitHub {
 		add("github.enabled", "true", "a git remote is configured but no remote or github configuration declares how ducklab should use it")
 	}
+	if current, ok := missingBaseBranch(projectPath, p.Git.BaseBranch); ok {
+		add("git.base_branch", current, "configured base branch '"+p.Git.BaseBranch+"' does not exist; use the repository's current branch")
+	}
 	if hasGitHub && !githubConsumed(p) {
 		add("github", "", "github configuration is present but no configured command uses GitHub or pull requests")
 	}
@@ -108,6 +111,25 @@ func gitRemoteNamed(root, name string) bool {
 	cmd := exec.Command("git", "remote", "get-url", name)
 	cmd.Dir = root
 	return cmd.Run() == nil
+}
+
+func missingBaseBranch(root, configured string) (string, bool) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return "", false
+	}
+	for _, ref := range []string{"refs/heads/" + configured, "refs/remotes/origin/" + configured} {
+		cmd := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
+		cmd.Dir = root
+		if cmd.Run() == nil {
+			return "", false
+		}
+	}
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	current := strings.TrimSpace(string(out))
+	return current, err == nil && current != "" && current != configured
 }
 func githubConsumed(p *Project) bool {
 	for _, s := range []string{p.Verify.Tests, p.Verify.Build, p.Verify.Lint, p.Verify.Custom, p.Install.Command, p.Run.Command} {

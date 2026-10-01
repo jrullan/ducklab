@@ -152,6 +152,7 @@ func StartEngine(path string) error {
 // can tell "still recovering" from "died".
 func StartEnginePID(path string) (int, error) {
 	cmd := exec.Command(path)
+	prepareDetachedCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("start engine: %w", err)
 	}
