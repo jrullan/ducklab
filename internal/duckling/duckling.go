@@ -264,6 +264,19 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		ContextTokens: 32768,
 	}
 
+	// First: does the endpoint answer a chat at all? Every capability probe
+	// below reads a failure as "not supported", so an endpoint that answered
+	// nothing (a starter duckling at localhost:8080 where another service
+	// returned 404 to everything) came back "probed", with vision inferred
+	// true from an unrelated error and the result cached for a month (B-464).
+	if _, err := p.Chat(ctx, provider.ChatRequest{
+		Model:     d.Model,
+		Messages:  []provider.Message{{Role: "user", Content: "Reply with ok."}},
+		MaxTokens: intPtr(8),
+	}); err != nil {
+		return nil, fmt.Errorf("%s did not answer a chat at %s: %w", d.ID, d.Model, err)
+	}
+
 	// OpenRouter has two materially different answers to "disable thinking":
 	// some endpoints accept reasoning.enabled=false, while mandatory-reasoning
 	// endpoints reject it. `exclude:true` is not suppression — it only hides the

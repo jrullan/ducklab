@@ -139,6 +139,9 @@ type Defaults struct {
 	// triage did not require build-only verification. Empty preserves the
 	// historical test-first path.
 	AutopilotPath string `toml:"autopilot_path" json:"autopilot_path"`
+	// ProjectsDir is where a project started from an idea goes when the
+	// person names no folder (B-456). Empty means ~/Ducklab.
+	ProjectsDir string `toml:"projects_dir" json:"projects_dir"`
 	// Rounds is how many rounds each mode runs, keyed by mode name. Absent or
 	// zero leaves the script's own limit alone.
 	//

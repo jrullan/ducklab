@@ -121,6 +121,20 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "task_id"),
 		},
 		{
+			"name": "project_start",
+			"description": "Start a new project from an idea: creates the project folder (default ~/Ducklab/<name>), git, and starts the intake run that drafts the requirements. " +
+				"Pass the person's own words as `brief`; reference documents or images (.png/.jpg/.webp/.gif) as `refs`. " +
+				"If it answers git_identity_required, ask the person for the name and email to record in THIS project's git config and call again with git_name and git_email.",
+			"inputSchema": obj(map[string]interface{}{
+				"name":      str("project name"),
+				"brief":     str("what to build, in the person's words (empty starts an interview)"),
+				"path":      str("absolute folder (optional; default ~/Ducklab/<name>)"),
+				"refs":      map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reference documents or images"},
+				"git_name":  str("git user.name for this project only, when asked"),
+				"git_email": str("git user.email for this project only, when asked"),
+			}, "name"),
+		},
+		{
 			"name": "gate_adopt",
 			"description": "Adopt the detected verification gate for a project that has none (status next_steps says `adopt-gate`). " +
 				"A gate decides what PASSED and FAILED mean for every later run, so adopt only when the human has agreed; " +
@@ -544,6 +558,19 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(result), nil
+	case "project_start":
+		req := map[string]interface{}{
+			"name": a.str("name"), "brief": a.str("brief"), "path": a.str("path"),
+			"git_name": a.str("git_name"), "git_email": a.str("git_email"),
+		}
+		if refs, ok := a["refs"].([]interface{}); ok {
+			req["refs"] = refs
+		}
+		out, err := s.eng.ProjectStart(req)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "gate_adopt":
 		out, err := s.eng.ProjectGateAdopt(a.str("project_id"), "mcp:"+s.client)
 		if err != nil {
@@ -825,6 +852,18 @@ func (s *Server) status() (map[string]interface{}, error) {
 		return nil, err
 	}
 	out := []map[string]interface{}{}
+	// With no project at all, the operator's first move is to create one
+	// (B-455/B-456): say so instead of answering an empty list.
+	if len(projects) == 0 {
+		return toolJSON([]map[string]interface{}{{
+			"project": nil,
+			"next_steps": []map[string]interface{}{{
+				"id": "start-project", "kind": "engine",
+				"action": "Start a project with project_start: a name and what to build in the person's words",
+				"reason": "there is no project yet; everything else needs one",
+			}},
+		}}), nil
+	}
 	for _, p := range projects {
 		id, _ := p["id"].(string)
 		if id == "" {

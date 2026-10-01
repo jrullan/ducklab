@@ -70,6 +70,30 @@ export interface ProjectLifecycle {
   next: string;
 }
 
+/** Mirrors service.ProjectDefaultsView. */
+export interface ProjectDefaultsView {
+  projects_dir: string;
+  effective: string;
+}
+
+/** Mirrors service.ProjectStartRequest. */
+export interface ProjectStartRequest {
+  name: string;
+  /** Absolute folder; empty means ~/Ducklab/<name-slug>. */
+  path?: string;
+  brief: string;
+  refs?: string[];
+  git_name?: string;
+  git_email?: string;
+}
+
+/** Mirrors service.ProjectStartResult. */
+export interface ProjectStartResult {
+  project: Project;
+  run_id?: string;
+  intake_error?: string;
+}
+
 /** The committed acceptance and its independently retryable publication outcome. */
 export interface AcceptResult {
   commit_sha: string;
@@ -969,6 +993,12 @@ export class EngineClient {
   /** Create or adopt a project at a path. A folder that is already a project
    * is opened rather than refused, so pointing at an existing one is not a
    * mistake the person has to undo. */
+  /** Start a project from an idea (B-456): create it, git included, and start
+   * the intake run. A machine with no git identity answers ApiError code
+   * `git_identity_required`; send git_name and git_email to continue. */
+  projectStart(req: ProjectStartRequest) {
+    return this.request<ProjectStartResult>("POST", "/v1/projects/start", req);
+  }
   projectInit(path: string, name: string, gitInit: boolean) {
     return this.request<Project>("POST", "/v1/projects", {
       path,
@@ -1266,6 +1296,14 @@ export class EngineClient {
   }
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
+  }
+  /** Where projects started from an idea go (B-456): the stored preference
+   * (empty = built-in) and the folder actually in effect. */
+  projectDefaults() {
+    return this.request<ProjectDefaultsView>("GET", "/v1/defaults/projects");
+  }
+  projectDefaultsSet(body: { projects_dir: string }) {
+    return this.request<ProjectDefaultsView>("PUT", "/v1/defaults/projects", body);
   }
   engineDefaults() {
     return this.request<EngineDefaultsView>("GET", "/v1/defaults/engine");

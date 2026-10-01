@@ -417,3 +417,20 @@ describe("Projects — the path field", () => {
     expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(false);
   });
 });
+
+// Jose's review of B-456: the folder for new projects is a preference.
+describe("Projects — folder for new projects", () => {
+  it("shows the folder in effect and saves a new one", async () => {
+    const projectDefaultsSet = vi.fn(() => Promise.resolve({ projects_dir: "/srv/work", effective: "/srv/work" }));
+    const client = {
+      ...clientWith([]),
+      projectDefaults: vi.fn(() => Promise.resolve({ projects_dir: "", effective: "/home/x/Ducklab" })),
+      projectDefaultsSet,
+    } as unknown as EngineClient;
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    expect(await screen.findByTestId("projects-folder")).toHaveTextContent("/home/x/Ducklab");
+    fireEvent.change(screen.getByTestId("projects-folder-input"), { target: { value: "/srv/work" } });
+    fireEvent.click(screen.getByTestId("projects-folder-save"));
+    await waitFor(() => expect(projectDefaultsSet).toHaveBeenCalledWith({ projects_dir: "/srv/work" }));
+  });
+});

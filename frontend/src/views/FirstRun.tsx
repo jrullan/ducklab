@@ -13,7 +13,8 @@
  */
 
 import { useEffect, useState } from "react";
-import type { Duckling, EngineClient, ProviderView } from "../api/client";
+import type { Duckling, EngineClient, ProjectStartResult, ProviderView } from "../api/client";
+import { StartProject } from "../components/StartProject";
 import { routeHref } from "../app/routes";
 import { StatusChip } from "../components/StatusChip";
 
@@ -42,8 +43,20 @@ export function readiness(providers: readonly ProviderView[], ducklings: readonl
   return { usable, missingKeys, noDucklings: ducklings.length === 0, noProviders: providers.length === 0 };
 }
 
-export function FirstRun({ client, connected }: { client: EngineClient; connected: boolean }) {
+export function FirstRun({
+  client,
+  connected,
+  onStarted,
+}: {
+  client: EngineClient;
+  connected: boolean;
+  /** Called once the project exists (and its intake run started, when it could). */
+  onStarted: (result: ProjectStartResult) => void;
+}) {
   const [state, setState] = useState<Readiness | null>(null);
+  // A project that exists while its intake could not start (no usable model,
+  // say) is shown here before moving on, so the reason is not lost.
+  const [stalled, setStalled] = useState<ProjectStartResult | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -89,13 +102,6 @@ export function FirstRun({ client, connected }: { client: EngineClient; connecte
         </p>
       </div>
 
-      <a
-        href={routeHref({ name: "projects" })}
-        data-testid="first-run-create"
-        className="inline-block rounded border border-good px-4 py-2 text-sm font-medium text-good"
-      >
-        Create your first project
-      </a>
 
       <div className="space-y-2 rounded-card border border-hairline p-3" data-testid="first-run-readiness">
         <h3 className="text-xs font-medium text-ink-muted">Before the first draft</h3>
@@ -130,7 +136,7 @@ export function FirstRun({ client, connected }: { client: EngineClient; connecte
                 </div>
                 {Object.entries(tests).filter(([, r]) => r !== "ok" && r !== "testing").map(([id, r]) => (
                   <p key={id} className="text-xs text-ink-secondary" data-testid="first-run-test-failure">
-                    <code>{id}</code> did not answer: {r}.{" "}
+                    {r}.{" "}
                     <a href={routeHref({ name: "settings", section: "ducklings" })} className="text-ink underline">
                       Fix the model setup
                     </a>
@@ -165,12 +171,32 @@ export function FirstRun({ client, connected }: { client: EngineClient; connecte
             </li>
           )}
         </ul>
-        {!modelReady && state && (
-          <p className="text-xs text-ink-muted">
-            You can create the project now; drafting starts once a model is ready.
-          </p>
-        )}
       </div>
+      {stalled ? (
+        <div className="space-y-2 rounded-card border border-warning p-3" data-testid="first-run-stalled">
+          <p className="text-sm text-ink">
+            Project <strong>{stalled.project.name}</strong> was created at <code>{stalled.project.path}</code>, but drafting
+            could not start: {stalled.intake_error}
+          </p>
+          <button
+            type="button"
+            onClick={() => onStarted(stalled)}
+            className="rounded border border-hairline px-3 py-1 text-xs"
+            data-testid="first-run-continue"
+          >
+            Continue to the project
+          </button>
+        </div>
+      ) : (
+        <section className="rounded-card border border-hairline p-4" data-testid="first-run-create">
+          <h3 className="mb-3 text-sm font-medium text-ink">Create your first project</h3>
+          <StartProject
+            client={client}
+            onStarted={(result) => (result.run_id ? onStarted(result) : setStalled(result))}
+            modelWarning={anyOk ? undefined : "No model has answered a test yet. You can create the project now, but drafting needs a model that answers: use Test connection above first."}
+          />
+        </section>
+      )}
     </section>
   );
 }

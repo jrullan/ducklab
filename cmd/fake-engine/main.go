@@ -127,6 +127,9 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/health", f.health)
 	f.mux.HandleFunc("GET /v1/engine", f.auth(f.engine))
 	f.mux.HandleFunc("GET /v1/projects", f.auth(f.projects))
+	f.mux.HandleFunc("GET /v1/defaults/projects", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"projects_dir": "", "effective": "/tmp/Ducklab"})
+	}))
 	f.mux.HandleFunc("GET /v1/projects/{id}", f.auth(f.project))
 	f.mux.HandleFunc("GET /v1/projects/{id}/status", f.auth(f.projectStatus))
 	f.mux.HandleFunc("GET /v1/projects/{id}/app", f.auth(f.projectApp))

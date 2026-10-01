@@ -2881,8 +2881,14 @@
           "describe": {
             "type": "string"
           },
+          "git_email": {
+            "type": "string"
+          },
           "git_init": {
             "type": "boolean"
+          },
+          "git_name": {
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -3268,6 +3274,68 @@
           "id",
           "name",
           "path"
+        ],
+        "type": "object"
+      },
+      "ServiceProjectDefaultsView": {
+        "properties": {
+          "effective": {
+            "type": "string"
+          },
+          "projects_dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effective",
+          "projects_dir"
+        ],
+        "type": "object"
+      },
+      "ServiceProjectStartRequest": {
+        "properties": {
+          "brief": {
+            "type": "string"
+          },
+          "git_email": {
+            "type": "string"
+          },
+          "git_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "brief",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ServiceProjectStartResult": {
+        "properties": {
+          "intake_error": {
+            "type": "string"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ServiceProject"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
         ],
         "type": "object"
       },
@@ -4434,6 +4502,66 @@
         "summary": "Replace the per-mode defaults"
       }
     },
+    "/v1/defaults/projects": {
+      "get": {
+        "operationId": "ProjectDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProjectDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Where projects started from an idea go when no folder is named"
+      },
+      "put": {
+        "operationId": "ProjectDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceProjectDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProjectDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the folder for new projects; empty restores ~/Ducklab"
+      }
+    },
     "/v1/defaults/roster": {
       "get": {
         "operationId": "GlobalRosterGet",
@@ -4856,6 +4984,42 @@
           }
         ],
         "summary": "Open or initialise a project"
+      }
+    },
+    "/v1/projects/start": {
+      "post": {
+        "operationId": "ProjectStart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceProjectStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProjectStartResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a project from an idea: create it (git included) and start its intake run"
       }
     },
     "/v1/projects/{id}": {

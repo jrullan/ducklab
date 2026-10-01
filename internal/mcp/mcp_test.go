@@ -62,9 +62,14 @@ type fakeEngine struct {
 	bugMoveCalls        int
 	adoptedGateProject  string
 	adoptedGateActor    string
+	startReq            map[string]interface{}
+	noProjects          bool
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
+	if f.noProjects {
+		return nil, nil
+	}
 	return []map[string]interface{}{{"id": "calc", "name": "Calculator"}}, nil
 }
 func (f *fakeEngine) ConfigDoctor(string) ([]engineclt.Finding, error) { return nil, nil }
@@ -229,6 +234,10 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 		return f.tasks, nil
 	}
 	return nil, nil
+}
+func (f *fakeEngine) ProjectStart(req map[string]interface{}) (map[string]interface{}, error) {
+	f.startReq = req
+	return map[string]interface{}{"run_id": "r-1"}, nil
 }
 func (f *fakeEngine) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
 	f.adoptedGateProject, f.adoptedGateActor = projectID, actor
@@ -1212,5 +1221,30 @@ func TestGateAdoptIsAnOperatorTool(t *testing.T) {
 	}
 	if !strings.HasPrefix(eng.adoptedGateActor, "mcp:") {
 		t.Errorf("gate adopted as %q; an operator's decision must be attributed to it", eng.adoptedGateActor)
+	}
+}
+
+// B-456: the operator starts a project with one verb.
+func TestProjectStartIsAnOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "project_start", `{"name":"calc","brief":"a calculator","refs":["/tmp/front.png"]}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("project_start failed")
+	}
+	if eng.startReq["name"] != "calc" || eng.startReq["brief"] != "a calculator" {
+		t.Fatalf("request = %v", eng.startReq)
+	}
+	if refs, _ := eng.startReq["refs"].([]interface{}); len(refs) != 1 {
+		t.Fatalf("refs = %v", eng.startReq["refs"])
+	}
+}
+
+// B-455/B-456: with no project, status names the first move.
+func TestStatusWithNoProjectNamesProjectStart(t *testing.T) {
+	eng := &fakeEngine{noProjects: true}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr || !strings.Contains(text, "project_start") {
+		t.Fatalf("empty status does not name project_start: %s", text)
 	}
 }

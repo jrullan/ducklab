@@ -76,9 +76,34 @@ func (g *Git) HasGit() bool {
 // on "fatal: ambiguous argument 'HEAD'" after the ducklings have already done
 // the work. `project init --git-init` used to leave exactly that: a project
 // that looked ready and could not complete a single run.
+// IdentityKnown reports whether git can attribute a commit made here: a
+// configured user (repository, global or environment) or one it can derive.
+// A fresh machine with no ~/.gitconfig answers no, and the first commit of
+// `project init` used to fail with git's raw "Author identity unknown" (B-463).
+func (g *Git) IdentityKnown() bool {
+	_, err := g.run("var", "GIT_AUTHOR_IDENT")
+	return err == nil
+}
+
 func (g *Git) Init() error {
+	return g.InitWithIdentity("", "")
+}
+
+// InitWithIdentity initialises the repository and, when name and email are
+// given, records them in THIS repository's config only (never globally)
+// before the root commit, so the commit can be made on a machine with no
+// identity of its own.
+func (g *Git) InitWithIdentity(name, email string) error {
 	if _, err := g.run("init"); err != nil {
 		return err
+	}
+	if name != "" && email != "" {
+		if _, err := g.run("config", "user.name", shellEscape(name)); err != nil {
+			return fmt.Errorf("set repository user.name: %w", err)
+		}
+		if _, err := g.run("config", "user.email", shellEscape(email)); err != nil {
+			return fmt.Errorf("set repository user.email: %w", err)
+		}
 	}
 	if sha, err := g.HeadSHA(); err == nil && strings.TrimSpace(sha) != "" {
 		return nil // an existing history; leave it alone
