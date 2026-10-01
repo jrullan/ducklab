@@ -1,6 +1,10 @@
 package service
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/jrullan/ducklab/internal/artifact"
+)
 
 // The lifecycle map (B-461).
 //
@@ -39,17 +43,39 @@ type Lifecycle struct {
 	Next string `json:"next"`
 }
 
-// lifecycleOf builds the map from stage progress (stageProgress), task counts
-// by status, and accepted-but-unreleased work.
-func lifecycleOf(progress map[string]string, taskCounts map[string]int, unreleased int) Lifecycle {
+// lifecycleFacts are the observations the map is built from.
+type lifecycleFacts struct {
+	// Progress is stageProgress: approved | proposed | empty per stage.
+	Progress map[string]string
+	// Pending names stages with a proposal waiting for a decision, including
+	// a revision of an already approved document. stageProgress reports such a
+	// stage as "approved" (it only looks for a proposal when the approved
+	// document is empty), which made a pending revision read as done.
+	Pending    map[string]bool
+	TaskCounts map[string]int
+	Unreleased int
+	// HasCode is the tree's own answer (projectHasCode): an adopted or
+	// hand-populated repository has code before Ducklab accepts any task.
+	HasCode bool
+}
+
+// lifecycleOf builds the map from stage progress, pending proposals, task
+// counts by status, accepted-but-unreleased work and the tree itself.
+func lifecycleOf(f lifecycleFacts) Lifecycle {
+	progress, taskCounts, unreleased := f.Progress, f.TaskCounts, f.Unreleased
 	total := 0
 	for _, n := range taskCounts {
 		total += n
 	}
 	accepted := taskCounts["accepted"] + taskCounts["done"]
-	l := Lifecycle{TasksAccepted: accepted, TasksTotal: total, UnreleasedWork: unreleased, CodeExists: accepted > 0}
+	l := Lifecycle{TasksAccepted: accepted, TasksTotal: total, UnreleasedWork: unreleased, CodeExists: accepted > 0 || f.HasCode}
 
+	revision := map[string]bool{}
 	doc := func(id, label, stage string) LifecycleStage {
+		if f.Pending[stage] {
+			revision[id] = progress[stage] == "approved"
+			return LifecycleStage{ID: id, Label: label, State: "decision"}
+		}
 		switch progress[stage] {
 		case "approved":
 			return LifecycleStage{ID: id, Label: label, State: "done"}
@@ -86,6 +112,11 @@ func lifecycleOf(progress map[string]string, taskCounts map[string]int, unreleas
 	}
 	l.Stages = stages
 
+	if revision[l.Current] {
+		names := map[string]string{"requirements": "requirements", "spec": "specification", "plan": "plan"}
+		l.Next = fmt.Sprintf("A revision of the accepted %s waits for your decision: accept it, or send it back with a note.", names[l.Current])
+		return l
+	}
 	switch l.Current {
 	case "requirements":
 		if stages[0].State == "decision" {
@@ -119,4 +150,17 @@ func lifecycleOf(progress map[string]string, taskCounts map[string]int, unreleas
 		l.Next = "Everything planned is built and released. Add an intention to extend the project."
 	}
 	return l
+}
+
+// pendingProposals names the stages whose proposal waits for a decision.
+func pendingProposals(root string) map[string]bool {
+	out := map[string]bool{}
+	for stage, kind := range map[string]artifact.Kind{
+		"intake": artifact.KindRequirements, "spec": artifact.KindSpec, "plan": artifact.KindPlan,
+	} {
+		if prop, err := artifact.LoadProposed(root, kind); err == nil && prop != nil && len(prop.Sections) > 0 {
+			out[stage] = true
+		}
+	}
+	return out
 }

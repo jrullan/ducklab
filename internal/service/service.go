@@ -1066,7 +1066,7 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	if err != nil {
 		progress := stageProgress(entry.Path)
 		return &Status{StageProgress: progress, ActiveRuns: active, Provenance: build.Provenance(),
-			Lifecycle: lifecycleOf(progress, nil, 0)}, nil
+			Lifecycle: lifecycleOf(lifecycleFacts{Progress: progress, Pending: pendingProposals(entry.Path), HasCode: projectHasCode(entry.Path)})}, nil
 	}
 	taskCounts := make(map[string]int)
 	for _, tv := range views {
@@ -1079,7 +1079,8 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	progress := stageProgress(entry.Path)
 	st := &Status{StageProgress: progress, TaskCounts: taskCounts, ActiveRuns: active,
 		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance(),
-		Lifecycle: lifecycleOf(progress, taskCounts, accepted)}
+		Lifecycle: lifecycleOf(lifecycleFacts{Progress: progress, Pending: pendingProposals(entry.Path),
+			TaskCounts: taskCounts, Unreleased: accepted, HasCode: projectHasCode(entry.Path)})}
 	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
 	if err == nil {
 		branch, berr := vcs.New(entry.Path).CurrentBranch()
