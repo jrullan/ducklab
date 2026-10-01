@@ -175,7 +175,10 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	refs := append([]string(nil), req.Refs...)
 	setup := "project setup"
 	if preset.ID != "" {
-		ref, err := applyPreset(project.Path, project.ID, req.Brief, python, preset)
+		// Serialised: two starts at once must not both pick the same port.
+		s.presetPortMu.Lock()
+		ref, err := applyPreset(project.Path, project.ID, req.Brief, python, preset, s.claimedRunPorts(project.ID))
+		s.presetPortMu.Unlock()
 		if err != nil {
 			return nil, fmt.Errorf("preset %s: %w", preset.ID, err)
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -323,5 +324,72 @@ func TestAStartedProjectIsVersionedAndTheAcceptedIntakeLandsTheBrief(t *testing.
 		if !after[f] {
 			t.Errorf("%s not committed by the accept; tracked: %v", f, after)
 		}
+	}
+}
+
+// Second review of #122: two projects created before either runs must not be
+// given the same port; the choice skips ports registered projects claim.
+func TestPresetPortsSkipPortsOtherProjectsClaim(t *testing.T) {
+	first := presetPort("calc", nil)
+	if got := presetPort("calc", map[int]bool{first: true}); got == first {
+		t.Fatalf("presetPort returned the claimed port %d", got)
+	}
+
+	orig := presetPython
+	presetPython = func() (string, error) { return "python3", nil }
+	defer func() { presetPython = orig }()
+	t.Setenv("HOME", t.TempDir())
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	ports := map[int]string{}
+	for _, name := range []string{"calc", "notes", "clock"} {
+		res, err := s.ProjectStart(context.Background(), ProjectStartRequest{
+			Name: name, Preset: "web-page", GitName: "Ada", GitEmail: "ada@example.com",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.RunID != "" {
+			s.runsMu.RLock()
+			rs := s.runs[res.RunID]
+			s.runsMu.RUnlock()
+			<-rs.done
+		}
+		claimed := s.claimedRunPorts(res.Project.ID)
+		for p, other := range ports {
+			if !claimed[p] {
+				t.Errorf("%s's port %d is not seen as claimed", other, p)
+			}
+		}
+		mine := s.claimedRunPorts("")
+		for p := range mine {
+			if !claimed[p] {
+				if prev, dup := ports[p]; dup {
+					t.Fatalf("%s and %s share port %d", prev, name, p)
+				}
+				ports[p] = name
+			}
+		}
+	}
+	if len(ports) != 3 {
+		t.Fatalf("ports = %v, want three distinct", ports)
+	}
+}
+
+// Second review of #122: an executable called python is not enough; it must
+// be a Python 3 that has http.server.
+func TestPresetPythonRefusesAPythonThatIsNotPython3(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stubs")
+	}
+	bin := t.TempDir()
+	for _, name := range []string{"python3", "python"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\necho 'Python 2.7.18' >&2\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	_, err := presetPython()
+	if err == nil || !strings.Contains(err.Error(), "not a Python 3") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -1,13 +1,17 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
@@ -66,13 +70,18 @@ func (s *Service) ProjectPresets() []ProjectPreset {
 }
 
 // presetPort picks a port for the project: stable for the same project id,
-// and free at the moment of choosing (several projects run side by side).
-func presetPort(projectID string) int {
+// not claimed by another registered project, and free at the moment of
+// choosing. Review of #122: probing the socket alone let two projects created
+// before either ran receive the same port, so they could not run side by side.
+func presetPort(projectID string, claimed map[int]bool) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(projectID))
 	base := 41000 + int(h.Sum32()%900)
-	for i := 0; i < 100; i++ {
-		port := base + i
+	for i := 0; i < 900; i++ {
+		port := 41000 + (base-41000+i)%900
+		if claimed[port] {
+			continue
+		}
 		if l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
 			_ = l.Close()
 			return port
@@ -81,29 +90,72 @@ func presetPort(projectID string) int {
 	return base
 }
 
+// claimedRunPorts are the ports other registered projects serve their app
+// on, read from each project's [run] url.
+func (s *Service) claimedRunPorts(exceptID string) map[int]bool {
+	claimed := map[int]bool{}
+	for _, e := range s.registry.List() {
+		if e.ID == exceptID || e.Missing {
+			continue
+		}
+		cfg, err := config.LoadProject(filepath.Join(e.Path, ".ducklab", "project.toml"))
+		if err != nil || cfg == nil {
+			continue
+		}
+		for _, raw := range []string{cfg.Run.URL, cfg.Run.Health} {
+			if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.Port() != "" {
+				if n, err := strconv.Atoi(u.Port()); err == nil {
+					claimed[n] = true
+				}
+			}
+		}
+	}
+	return claimed
+}
+
 // presetPython finds the Python that serves a static preset. Review of #122:
 // `python3` is not guaranteed (Windows usually installs `python`), and a
 // preset that fails only when the app is first launched fails far from the
 // choice that caused it. Resolved before the project is created; an absent
 // Python refuses the preset with the fix.
 var presetPython = func() (string, error) {
+	found := ""
 	for _, name := range []string{"python3", "python"} {
-		if path, err := exec.LookPath(name); err == nil && path != "" {
+		if path, err := exec.LookPath(name); err != nil || path == "" {
+			continue
+		}
+		if found == "" {
+			found = name
+		}
+		if pythonServes(name) {
 			return name, nil
 		}
+	}
+	if found != "" {
+		return "", fmt.Errorf("this preset serves the page with Python 3's http.server, and %q on PATH is not a Python 3 with http.server; install Python 3 or choose \"Something else\"", found)
 	}
 	return "", fmt.Errorf("this preset serves the page with Python's built-in web server, and no python3 or python was found on PATH; install Python 3 or choose \"Something else\"")
 }
 
+// pythonServes reports whether name is a Python 3 that can import http.server
+// (second review of #122: any executable called `python` passed, including a
+// Python 2 or a Windows store stub that only opens the store).
+func pythonServes(name string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, "-c", "import sys, http.server; sys.exit(0 if sys.version_info[0] == 3 else 1)")
+	return cmd.Run() == nil
+}
+
 // applyPreset configures the project for the preset and returns the path of
 // the reference document handed to the intake.
-func applyPreset(projectRoot, projectID, brief, python string, p ProjectPreset) (string, error) {
+func applyPreset(projectRoot, projectID, brief, python string, p ProjectPreset, claimed map[int]bool) (string, error) {
 	tomlPath := filepath.Join(projectRoot, ".ducklab", "project.toml")
 	cfg, err := config.LoadProject(tomlPath)
 	if err != nil {
 		return "", err
 	}
-	port := presetPort(projectID)
+	port := presetPort(projectID, claimed)
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
 	cfg.Run.Command = fmt.Sprintf("%s -m http.server %d --bind 127.0.0.1", python, port)
 	cfg.Run.URL = url
