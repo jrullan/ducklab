@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -37,7 +38,7 @@ var projectPresets = []ProjectPreset{
 		Label:   "A web page that runs locally (one file)",
 		Summary: "One self-contained index.html, opened from a small local server. No build step, no dependencies.",
 		conventions: "- Deliver one self-contained `index.html` at the project root: HTML, CSS and JavaScript inline, no external requests, no build step, no package dependencies.\n" +
-			"- It is served by the project's run command (`python3 -m http.server` on the project's port) and must work opened that way.\n" +
+			"- It is served by the project's run command (Python's `http.server` on the project's port) and must work opened that way.\n" +
 			"- Behaviour tests live in `tests/*.test.mjs` and run with Node's built-in runner: keep a `package.json` whose `test` script is `node --test tests/`. Logic the tests need goes in an inline `<script type=\"module\">` that also exports to a sibling `logic.mjs` only if the tests cannot reach it otherwise.\n",
 	},
 	{
@@ -45,7 +46,7 @@ var projectPresets = []ProjectPreset{
 		Label:   "A local web app (several files, no build step)",
 		Summary: "index.html plus plain CSS and JavaScript modules, opened from a small local server. No build step, no dependencies.",
 		conventions: "- Deliver a static web app at the project root: `index.html` plus plain CSS files and ES modules (`*.mjs` or `type=\"module\"` scripts). No bundler, no build step, no package dependencies, no external requests.\n" +
-			"- It is served by the project's run command (`python3 -m http.server` on the project's port) and must work opened that way.\n" +
+			"- It is served by the project's run command (Python's `http.server` on the project's port) and must work opened that way.\n" +
 			"- Behaviour tests live in `tests/*.test.mjs` and run with Node's built-in runner: keep a `package.json` whose `test` script is `node --test tests/`. Put logic in modules the tests can import directly.\n",
 	},
 }
@@ -80,9 +81,23 @@ func presetPort(projectID string) int {
 	return base
 }
 
+// presetPython finds the Python that serves a static preset. Review of #122:
+// `python3` is not guaranteed (Windows usually installs `python`), and a
+// preset that fails only when the app is first launched fails far from the
+// choice that caused it. Resolved before the project is created; an absent
+// Python refuses the preset with the fix.
+var presetPython = func() (string, error) {
+	for _, name := range []string{"python3", "python"} {
+		if path, err := exec.LookPath(name); err == nil && path != "" {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("this preset serves the page with Python's built-in web server, and no python3 or python was found on PATH; install Python 3 or choose \"Something else\"")
+}
+
 // applyPreset configures the project for the preset and returns the path of
 // the reference document handed to the intake.
-func applyPreset(projectRoot, projectID, brief string, p ProjectPreset) (string, error) {
+func applyPreset(projectRoot, projectID, brief, python string, p ProjectPreset) (string, error) {
 	tomlPath := filepath.Join(projectRoot, ".ducklab", "project.toml")
 	cfg, err := config.LoadProject(tomlPath)
 	if err != nil {
@@ -90,13 +105,14 @@ func applyPreset(projectRoot, projectID, brief string, p ProjectPreset) (string,
 	}
 	port := presetPort(projectID)
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	cfg.Run.Command = fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port)
+	cfg.Run.Command = fmt.Sprintf("%s -m http.server %d --bind 127.0.0.1", python, port)
 	cfg.Run.URL = url
 	cfg.Run.Health = url
 	// The product smoke must not start a second server on the port the
 	// running app holds; checking the deliverable exists is what a static
 	// page can honestly prove without a browser.
-	cfg.Run.Smoke = "test -f index.html"
+	// Python, not `test`: `test` does not exist under Windows' cmd /C.
+	cfg.Run.Smoke = python + ` -c "import os,sys; sys.exit(0 if os.path.isfile('index.html') else 1)"`
 	cfg.Run.SmokeExpect = "exit"
 	if err := config.SaveProject(tomlPath, cfg); err != nil {
 		return "", err

@@ -953,6 +953,12 @@ export interface ServiceProjectDefaultsView {
   projects_dir?: string;
 }
 
+export interface ServiceProjectPreset {
+  id?: string;
+  label?: string;
+  summary?: string;
+}
+
 export interface ServiceProjectStartRequest {
   brief?: string;
   git_email?: string;

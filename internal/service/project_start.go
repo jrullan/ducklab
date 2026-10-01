@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Starting a project from an idea (B-456).
@@ -130,6 +133,14 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		}
 		preset = p
 	}
+	python := ""
+	if preset.ID != "" {
+		py, err := presetPython()
+		if err != nil {
+			return nil, err
+		}
+		python = py
+	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
 		base, err := s.projectsDir()
@@ -162,12 +173,20 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	}
 	out := &ProjectStartResult{Project: project}
 	refs := append([]string(nil), req.Refs...)
+	setup := "project setup"
 	if preset.ID != "" {
-		ref, err := applyPreset(project.Path, project.ID, req.Brief, preset)
+		ref, err := applyPreset(project.Path, project.ID, req.Brief, python, preset)
 		if err != nil {
 			return nil, fmt.Errorf("preset %s: %w", preset.ID, err)
 		}
 		refs = append(refs, ref)
+		setup = "project setup: " + preset.ID
+	}
+	// The setup is versioned at once (review of #122): project.toml with its
+	// run command, the preset reference and the memory that shaped the first
+	// documents were left untracked, so a clone lost them.
+	if err := commitProjectSetup(project.Path, project.ID, setup); err != nil {
+		return nil, fmt.Errorf("commit the project setup: %w", err)
 	}
 	run, err := s.StageStart(ctx, project.ID, StageRequest{
 		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: refs,
@@ -205,4 +224,38 @@ func removeCreatedDirs(dirs []string) {
 	for i := len(dirs) - 1; i >= 0; i-- {
 		_ = os.Remove(dirs[i])
 	}
+}
+
+// commitProjectSetup commits the files a new project is born with: its
+// config, git housekeeping, the preset reference and the project memory.
+func commitProjectSetup(root, projectID, what string) error {
+	var paths []string
+	for _, rel := range []string{
+		filepath.Join(".ducklab", "project.toml"), ".gitignore", ".gitattributes",
+		filepath.Join(".ducklab", "preset.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+	}
+	if mem := artifact.Path(root, artifact.KindProject); fileExists(mem) {
+		if rel, err := filepath.Rel(root, mem); err == nil {
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	git := vcs.New(root)
+	if err := git.AddPaths(paths...); err != nil {
+		return err
+	}
+	_, err := git.CommitPathsWithTrailer("ducklab: "+what,
+		map[string]string{"Ducklab-Action": "project_start", "Ducklab-Project": projectID}, paths)
+	return err
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

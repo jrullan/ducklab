@@ -3292,6 +3292,25 @@
         ],
         "type": "object"
       },
+      "ServiceProjectPreset": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ServiceProjectStartRequest": {
         "properties": {
           "brief": {
@@ -4911,8 +4930,30 @@
       "get": {
         "operationId": "ProjectPresets",
         "responses": {
-          "204": {
-            "description": "no content"
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceProjectPreset"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
           },
           "401": {
             "description": "missing or invalid credentials"
