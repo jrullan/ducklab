@@ -60,6 +60,8 @@ type fakeEngine struct {
 	lastRosterUnpin     string
 	rosterViews         map[string]map[string]interface{}
 	bugMoveCalls        int
+	adoptedGateProject  string
+	adoptedGateActor    string
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -227,6 +229,10 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 		return f.tasks, nil
 	}
 	return nil, nil
+}
+func (f *fakeEngine) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
+	f.adoptedGateProject, f.adoptedGateActor = projectID, actor
+	return map[string]interface{}{"mode": "tests"}, nil
 }
 func (f *fakeEngine) TaskRemove(projectID, taskID string) (map[string]interface{}, error) {
 	f.removedProject, f.removedTask = projectID, taskID
@@ -1179,5 +1185,20 @@ func TestRunStartCarriesTheRedoNote(t *testing.T) {
 		callFrame(2, "run_start", `{"project_id":"p","task_id":"T-002","note":"fs_patch chokes on backticks; rewrite whole functions with fs_write"}`))
 	if eng.lastRunReq == nil || eng.lastRunReq["note"] != "fs_patch chokes on backticks; rewrite whole functions with fs_write" {
 		t.Fatalf("the note did not reach the engine: %+v", eng.lastRunReq)
+	}
+}
+
+// B-458: status next_steps can say adopt-gate; the operator needs the verb.
+func TestGateAdoptIsAnOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "gate_adopt", `{"project_id":"calc"}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("gate_adopt failed")
+	}
+	if eng.adoptedGateProject != "calc" {
+		t.Errorf("adopted gate for %q, want calc", eng.adoptedGateProject)
+	}
+	if !strings.HasPrefix(eng.adoptedGateActor, "mcp:") {
+		t.Errorf("gate adopted as %q; an operator's decision must be attributed to it", eng.adoptedGateActor)
 	}
 }

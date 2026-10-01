@@ -121,6 +121,15 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "task_id"),
 		},
 		{
+			"name": "gate_adopt",
+			"description": "Adopt the detected verification gate for a project that has none (status next_steps says `adopt-gate`). " +
+				"A gate decides what PASSED and FAILED mean for every later run, so adopt only when the human has agreed; " +
+				"the decision is recorded as yours.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+			}, "project_id"),
+		},
+		{
 			"name":        "task_land",
 			"description": "Declare a task completed by a commit already reachable from the default branch. The commit must name the exact task id unless confirm_task explicitly attests the association. Records an accepted external build run with actor and reason provenance.",
 			"inputSchema": obj(map[string]interface{}{
@@ -535,6 +544,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(result), nil
+	case "gate_adopt":
+		out, err := s.eng.ProjectGateAdopt(a.str("project_id"), "mcp:"+s.client)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "task_remove":
 		out, err := s.eng.TaskRemove(a.str("project_id"), a.str("task_id"))
 		if err != nil {

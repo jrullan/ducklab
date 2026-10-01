@@ -346,6 +346,34 @@ describe("Now — the inbox", () => {
     expect(row.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // B-458: a project initialised empty had no gate, and when tests arrived
+  // the offer to adopt one lived only in Project management.
+  it("offers to adopt a newly detected gate as a decision, then refreshes the guide", async () => {
+    const steps = [
+      [{ kind: "project", id: "adopt-gate", ref: "npm run build", action: "Adopt `npm run build` as the project gate", reason: "a build command is available, but the project has no gate" }],
+      [],
+    ];
+    let call = 0;
+    const projectGateAdopt = vi.fn(() => Promise.resolve({}));
+    const client = clientWith({
+      projectNext: vi.fn(() => Promise.resolve(steps[Math.min(call++, 1)])),
+      projectGateAdopt,
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-adopt-gate");
+    expect(card).toHaveTextContent("UNVERIFIED");
+    expect(card).toHaveTextContent("npm run build");
+    expect(card).toHaveTextContent("never does it on its own");
+    // What was found is the engine's word, not an assumption that it is tests.
+    expect(screen.getByTestId("now-adopt-gate-reason")).toHaveTextContent("a build command is available");
+    expect(card).not.toHaveTextContent("Tests exist");
+    // Not also rendered as a navigation step.
+    expect(screen.queryByText("Adopt `npm run build` as the project gate")).toBeNull();
+    fireEvent.click(screen.getByTestId("now-adopt-gate-button"));
+    await waitFor(() => expect(projectGateAdopt).toHaveBeenCalledWith("p"));
+    await waitFor(() => expect(screen.queryByTestId("now-adopt-gate")).toBeNull());
+  });
+
   it("renders next steps as a native Now section", async () => {
     const client = clientWith({
       projectNext: vi.fn(() => Promise.resolve([

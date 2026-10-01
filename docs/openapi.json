@@ -2796,6 +2796,14 @@
         ],
         "type": "object"
       },
+      "ServiceGateAdoptRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ServiceGateResult": {
         "properties": {
           "command": {
@@ -5795,6 +5803,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceGateAdoptRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

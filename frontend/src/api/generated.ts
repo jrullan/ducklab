@@ -820,6 +820,10 @@ export interface ServiceEngineDefaultsView {
   max_concurrent_runs?: number;
 }
 
+export interface ServiceGateAdoptRequest {
+  actor?: string;
+}
+
 export interface ServiceGateResult {
   command?: string;
   duration_s?: number;

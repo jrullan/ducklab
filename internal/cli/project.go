@@ -155,7 +155,8 @@ func projectGateCmd(client *engineclt.Client, repo string, args []string) int {
 	}
 	get := client.ProjectGate
 	if adopt {
-		get = client.ProjectGateAdopt
+		// The CLI is a person at a terminal: recorded as human.
+		get = func(id string) (map[string]interface{}, error) { return client.ProjectGateAdopt(id, "") }
 	}
 	st, err := get(projectID)
 	if err != nil {

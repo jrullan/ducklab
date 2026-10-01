@@ -421,9 +421,10 @@ func (c *Client) ProjectGate(projectID string) (map[string]interface{}, error) {
 }
 
 // ProjectGateAdopt writes the detected gate into the project.
-func (c *Client) ProjectGateAdopt(projectID string) (map[string]interface{}, error) {
+// actor is recorded in the project's config audit; empty means a person.
+func (c *Client) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/projects/"+projectID+"/gate", nil, &result)
+	err := c.post("/v1/projects/"+projectID+"/gate", map[string]string{"actor": actor}, &result)
 	return result, err
 }
 
