@@ -35,7 +35,7 @@ func TestImageReferencesAreSplitCopiedAndNamed(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "ti36x-front.png")
 	writePNG(t, src, 40, 80)
 	root := t.TempDir()
-	urls, recs, err := loadRefImages(root, "r-1", []string{src})
+	urls, recs, err := loadRefImages(root, []string{src})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,15 +43,28 @@ func TestImageReferencesAreSplitCopiedAndNamed(t *testing.T) {
 		t.Fatalf("urls = %v", urls)
 	}
 	r := recs[0]
-	if r.ID != "REF-IMG-1" || r.Width != 40 || r.Height != 80 || r.Stored != ".ducklab/refs/r-1/img-1.png" {
+	if !strings.HasPrefix(r.ID, "REF-IMG-") || len(r.ID) != len("REF-IMG-")+8 || r.Width != 40 || r.Height != 80 ||
+		!strings.HasPrefix(r.Stored, ".ducklab/refs/images/") || !strings.HasSuffix(r.Stored, ".png") {
 		t.Fatalf("record = %+v", r)
+	}
+	// Review of #120: the id is durable — the same image gets the same id in
+	// another run, and a different image a different one.
+	_, again, err := loadRefImages(t.TempDir(), []string{src})
+	if err != nil || again[0].ID != r.ID {
+		t.Fatalf("same image, different id: %v vs %v (%v)", again[0].ID, r.ID, err)
+	}
+	other := filepath.Join(t.TempDir(), "back.png")
+	writePNG(t, other, 41, 80)
+	_, diff, _ := loadRefImages(t.TempDir(), []string{other})
+	if diff[0].ID == r.ID {
+		t.Fatal("two different images share an id")
 	}
 	if _, err := os.Stat(filepath.Join(root, r.Stored)); err != nil {
 		t.Fatalf("image not copied into the project: %v", err)
 	}
 
 	seeing := renderRefImages(recs, true)
-	if !strings.Contains(seeing, "REF-IMG-1: ti36x-front.png") || !strings.Contains(seeing, "40x80 px") || !strings.Contains(seeing, "shown with this message") {
+	if !strings.Contains(seeing, r.ID+": ti36x-front.png") || !strings.Contains(seeing, "40x80 px") || !strings.Contains(seeing, "shown with this message") {
 		t.Fatalf("seeing section = %s", seeing)
 	}
 	blind := renderRefImages(recs, false)
@@ -61,14 +74,14 @@ func TestImageReferencesAreSplitCopiedAndNamed(t *testing.T) {
 }
 
 func TestAMissingOrOversizedReferenceImageFailsLoudly(t *testing.T) {
-	if _, _, err := loadRefImages(t.TempDir(), "r-1", []string{"/nonexistent/x.png"}); err == nil {
+	if _, _, err := loadRefImages(t.TempDir(), []string{"/nonexistent/x.png"}); err == nil {
 		t.Fatal("a missing image was silently dropped")
 	}
 	big := filepath.Join(t.TempDir(), "big.png")
 	if err := os.WriteFile(big, make([]byte, refImageBudget+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadRefImages(t.TempDir(), "r-1", []string{big}); err == nil || !strings.Contains(err.Error(), "budget") {
+	if _, _, err := loadRefImages(t.TempDir(), []string{big}); err == nil || !strings.Contains(err.Error(), "budget") {
 		t.Fatalf("oversized image err = %v", err)
 	}
 }

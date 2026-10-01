@@ -1076,7 +1076,7 @@ export function Cycle({
                       <p className="mt-1 text-xs text-ink-secondary" data-testid="cycle-refs-images">
                         {refsList().filter(isImageRef).length} image
                         {refsList().filter(isImageRef).length === 1 ? "" : "s"}: copied into the project and named
-                        REF-IMG-1, 2… so requirements can cite them. An architect that can see is shown them; one
+                        with a lasting id (REF-IMG-…, from the image itself) so requirements can cite them. An architect that can see is shown them; one
                         that cannot is told they exist and must not invent visual detail.
                       </p>
                     )}

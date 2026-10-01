@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func TestIntakeImageReferenceReachesASeeingArchitectAndIsNamedForABlindOne(t *te
 				if strings.Contains(m.Content, "pixel perfect calculator") {
 					images += len(m.Images)
 				}
-				named = named || strings.Contains(m.Content, "REF-IMG-1: ti36x.png")
+				named = named || strings.Contains(m.Content, ": ti36x.png (stored at .ducklab/refs/images/")
 				blindNote = blindNote || strings.Contains(m.Content, "cannot see images")
 			}
 			return &provider.ChatResponse{Choices: []provider.Choice{{
@@ -109,11 +110,54 @@ func TestAcceptingTheStageCommitsItsReferenceImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := git.LsFiles()
-	want := ".ducklab/refs/" + run.ID + "/img-1.png"
 	for _, f := range files {
-		if strings.HasSuffix(filepath.ToSlash(f), want) {
+		if strings.HasPrefix(filepath.ToSlash(f), ".ducklab/refs/images/") && strings.HasSuffix(f, ".png") {
 			return
 		}
 	}
-	t.Fatalf("%s was not committed with the requirements; tracked: %v", want, files)
+	t.Fatalf("the reference image was not committed with the requirements; tracked: %v", files)
+}
+
+// Review of #120: rejecting the run removes the image it wrote; the checkout
+// must not keep a file nothing accepted.
+func TestRejectingTheStageRemovesItsReferenceImages(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	projectID, projectRoot := projectWithDocs(t, s, map[artifact.Kind]string{})
+	git := vcs.New(projectRoot)
+	if !git.HasGit() {
+		if err := git.Init(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = git.AddAll()
+	_, _ = git.Commit("fixture")
+	img := filepath.Join(t.TempDir(), "ti36x.png")
+	writePNG(t, img, 30, 60)
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+		return &provider.ChatResponse{Choices: []provider.Choice{{
+			Message:      provider.Message{Role: "assistant", Content: "## REQ-001 — Matches the image\n\n**Priority:** must\n\nBody.\n"},
+			FinishReason: provider.FinishStop,
+		}}}
+	}
+	run, err := s.StageStart(context.Background(), projectID, StageRequest{
+		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img}, Ducklings: []string{"pato-uno"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	<-rs.done
+	dir := filepath.Join(projectRoot, ".ducklab", "refs", "images")
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("expected the stored image before reject, got %d", len(entries))
+	}
+	if err := s.RunReject(context.Background(), run.ID, "not this"); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("reject left %d reference image(s) in the checkout", len(entries))
+	}
 }

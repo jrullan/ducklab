@@ -837,7 +837,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// architect is shown images.
 	images := req.Images
 	if len(imageRefs) > 0 {
-		urls, recs, ierr := loadRefImages(projectRoot, rs.run.ID, imageRefs)
+		urls, recs, ierr := loadRefImages(projectRoot, imageRefs)
 		if ierr != nil {
 			s.failRun(rs, fmt.Errorf("references: %w", ierr))
 			return

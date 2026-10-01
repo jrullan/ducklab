@@ -2,7 +2,9 @@ package service
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"image"
 	_ "image/gif"  // DecodeConfig for .gif references
@@ -11,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Image references for a document stage (B-457).
@@ -64,16 +68,22 @@ type refImage struct {
 	Height int    `json:"height,omitempty"`
 }
 
-// loadRefImages copies each image into .ducklab/refs/<runID>/ and returns the
-// data URLs (within the budget) and the record. An unreadable or oversized
-// image is an error: a reference the person named and the run silently lost
-// is exactly the gap this exists to close.
-func loadRefImages(projectRoot, runID string, paths []string) ([]string, []refImage, error) {
+// loadRefImages copies each image into .ducklab/refs/images/ under a name
+// derived from its content and returns the data URLs (within the budget) and
+// the record. An unreadable or oversized image is an error: a reference the
+// person named and the run silently lost is exactly the gap this exists to
+// close.
+//
+// The id is the content's hash, not its position (review of #120): with
+// REF-IMG-1 reused by every run, an extended document could hold old and new
+// sections citing the same id for different files. Content addressing makes
+// the id durable across runs, and the same image always gets the same one.
+func loadRefImages(projectRoot string, paths []string) ([]string, []refImage, error) {
 	var urls []string
 	var recs []refImage
 	total := 0
-	dir := filepath.Join(projectRoot, ".ducklab", "refs", runID)
-	for i, p := range paths {
+	dir := filepath.Join(projectRoot, ".ducklab", "refs", "images")
+	for _, p := range paths {
 		src := strings.TrimSpace(p)
 		if strings.HasPrefix(src, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
@@ -90,14 +100,19 @@ func loadRefImages(projectRoot, runID string, paths []string) ([]string, []refIm
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, nil, err
 		}
-		name := fmt.Sprintf("img-%d%s", i+1, strings.ToLower(filepath.Ext(src)))
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
-			return nil, nil, err
+		sum := sha256.Sum256(data)
+		digest := hex.EncodeToString(sum[:])
+		name := digest[:12] + strings.ToLower(filepath.Ext(src))
+		target := filepath.Join(dir, name)
+		if _, err := os.Stat(target); err != nil {
+			if err := os.WriteFile(target, data, 0o644); err != nil {
+				return nil, nil, err
+			}
 		}
 		rec := refImage{
-			ID:     fmt.Sprintf("REF-IMG-%d", i+1),
+			ID:     "REF-IMG-" + digest[:8],
 			Source: src,
-			Stored: filepath.ToSlash(filepath.Join(".ducklab", "refs", runID, name)),
+			Stored: filepath.ToSlash(filepath.Join(".ducklab", "refs", "images", name)),
 			Bytes:  len(data),
 		}
 		if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
@@ -121,7 +136,7 @@ func renderRefImages(recs []refImage, canSee bool) string {
 	if canSee {
 		b.WriteString("The person attached these images; they are shown with this message. They are the visual " +
 			"authority for appearance: layout, proportions, colours, typography, labels. A requirement whose " +
-			"acceptance depends on appearance must cite the image id (for example \"matches REF-IMG-1\") and state " +
+			"acceptance depends on appearance must cite the image id exactly as listed below and state " +
 			"the viewport or scale at which it is judged.\n\n")
 	} else {
 		b.WriteString("The person attached these images, but this seat cannot see images. Do not invent visual " +
@@ -138,7 +153,22 @@ func renderRefImages(recs []refImage, canSee bool) string {
 	return b.String()
 }
 
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// removeUnacceptedRefImages deletes the reference images a run wrote when the
+// run ends without acceptance (review of #120: a rejected intake left them in
+// the checkout). Stage runs keep no tree snapshot, so the generic restore does
+// not reach them. A file git already tracks belongs to an earlier accepted
+// document (ids are content-addressed, so two runs can name the same file)
+// and is kept.
+func removeUnacceptedRefImages(projectRoot string, written []string) {
+	tracked := map[string]bool{}
+	for _, f := range vcs.New(projectRoot).LsFiles() {
+		tracked[filepath.ToSlash(f)] = true
+	}
+	for _, p := range written {
+		p = filepath.ToSlash(p)
+		if !strings.HasPrefix(p, ".ducklab/refs/images/") || tracked[p] {
+			continue
+		}
+		_ = os.Remove(filepath.Join(projectRoot, filepath.FromSlash(p)))
+	}
 }

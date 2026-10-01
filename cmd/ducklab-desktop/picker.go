@@ -59,15 +59,24 @@ func (p *Picker) ChooseDirectory(title string) (string, error) {
 
 // ChooseFile opens the system file chooser for Markdown and text documents.
 // An empty string means the person cancelled, which is not an error.
+// referenceFilePattern is every file type a stage accepts as a reference:
+// the text the loader reads and the images the engine shows a seeing
+// architect (internal/service/refimages.go).
+const referenceFilePattern = "*.md;*.txt;*.json;*.png;*.jpg;*.jpeg;*.webp;*.gif"
+
 func (p *Picker) ChooseFile(title string) (string, error) {
 	if title == "" {
-		title = "Choose a reference document"
+		title = "Choose a reference document or image"
 	}
 	dialog := application.Get().Dialog.OpenFile().
 		CanChooseDirectories(false).
 		CanChooseFiles(true).
 		AllowsOtherFileTypes(false).
-		AddFilter("Reference documents (*.md, *.txt)", "*.md;*.txt").
+		// Images are references too (B-457); the first filter is the default,
+		// so Browse… can pick either without the person switching filters.
+		AddFilter("Documents and images", referenceFilePattern).
+		AddFilter("Reference documents (*.md, *.txt, *.json)", "*.md;*.txt;*.json").
+		AddFilter("Images (*.png, *.jpg, *.jpeg, *.webp, *.gif)", "*.png;*.jpg;*.jpeg;*.webp;*.gif").
 		SetTitle(title)
 	if home, err := os.UserHomeDir(); err == nil {
 		dialog.SetDirectory(home)

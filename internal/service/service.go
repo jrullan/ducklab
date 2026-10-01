@@ -4848,12 +4848,6 @@ func stageSharedCheckoutRun(git *vcs.Git, rs *runState, projectRoot string) ([]s
 			artifact.Path(projectRoot, artifact.Kind(kind)),
 			artifact.ProposedPath(projectRoot, artifact.Kind(kind)),
 		)
-		// The reference images the document cites as REF-IMG-n (B-457) land
-		// with it: a requirement pointing at an unversioned file is a
-		// citation that breaks on the next clone.
-		if refs := filepath.Join(projectRoot, ".ducklab", "refs", rs.run.ID); dirExists(refs) {
-			candidates = append(candidates, refs)
-		}
 	}
 	// A durable start snapshot is the fallback for legacy/synthetic tool logs
 	// and for explicitly unsafe shell writes. It compares two tree objects, so
@@ -5535,7 +5529,32 @@ func runWrittenPaths(runDir string) []string {
 				Args json.RawMessage `json:"args"`
 			} `json:"data"`
 		}
-		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Type != "tool_call" {
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue
+		}
+		// Reference images are written by the engine, not by a file tool
+		// (B-457). They are the run's writes all the same: an accept must
+		// land them with the document that cites them, and a reject must
+		// remove them (review of #120: a rejected intake left them behind).
+		if e.Type == "reference_images" {
+			var imgs struct {
+				Data struct {
+					Images []struct {
+						Stored string `json:"stored"`
+					} `json:"images"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(sc.Bytes(), &imgs) == nil {
+				for _, img := range imgs.Data.Images {
+					if img.Stored != "" && !seen[img.Stored] {
+						seen[img.Stored] = true
+						out = append(out, img.Stored)
+					}
+				}
+			}
+			continue
+		}
+		if e.Type != "tool_call" {
 			continue
 		}
 		switch e.Data.Tool {
@@ -5565,7 +5584,16 @@ func runWrittenPaths(runDir string) []string {
 }
 
 func restoreAfterUnaccepted(rs *runState) error {
-	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.run.Accepted {
+	if rs == nil || rs.run == nil || rs.run.Accepted {
+		return nil
+	}
+	// Document stages keep no tree snapshot, so the restore below never ran
+	// for them; their engine-written reference images are removed here on
+	// every unaccepted end — reject, failure, abort (review of #120).
+	if artifactKindForStage(rs.run.Stage) != "" && rs.projectPath != "" {
+		removeUnacceptedRefImages(rs.projectPath, runWrittenPaths(rs.runDir))
+	}
+	if rs.run.TreeSnapshot == "" {
 		return nil
 	}
 	git := vcs.New(runRoot(rs.run, rs.projectPath))
