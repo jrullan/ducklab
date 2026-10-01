@@ -932,13 +932,15 @@ func (s *Server) status() (map[string]interface{}, error) {
 			"waiting_for_decision": waiting,
 			"running":              active,
 		}
-		// The latest run failed and nothing replaced it: say so, with the
-		// engine's reason. An intake that died on an unreachable model left
-		// an operator with an empty status and no idea anything had happened.
-		if len(waiting) == 0 && len(active) == 0 {
+		// The newest run failed: say so, with the engine's reason. An intake
+		// that died on an unreachable model left an operator with an empty
+		// status and no idea anything had happened. Only a NEWER run
+		// supersedes the failure; an older paused one does not (review of
+		// #126). Newest by started_at, ties broken by id, as RunList orders.
+		{
 			var latest map[string]interface{}
 			for _, r := range runs {
-				if latest == nil || fmt.Sprint(r["started_at"]) > fmt.Sprint(latest["started_at"]) {
+				if latest == nil || newerRun(r, latest) {
 					latest = r
 				}
 			}
@@ -1147,4 +1149,14 @@ func noteProp() map[string]interface{} {
 		"description": "Context for the model doing the work — e.g. why the previous attempt missed " +
 			"expectations, or what the human just clarified. Always pass it on a redo.",
 	}
+}
+
+// newerRun reports whether run a started after run b, ties broken by id; the
+// same order the engine's RunList uses.
+func newerRun(a, b map[string]interface{}) bool {
+	as, bs := fmt.Sprint(a["started_at"]), fmt.Sprint(b["started_at"])
+	if as != bs {
+		return as > bs
+	}
+	return fmt.Sprint(a["id"]) > fmt.Sprint(b["id"])
 }

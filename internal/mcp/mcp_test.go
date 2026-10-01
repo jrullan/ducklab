@@ -546,6 +546,19 @@ func TestStatusNamesTheLatestFailedRun(t *testing.T) {
 	if isErr || !strings.Contains(text, "last_run_failed") || !strings.Contains(text, "r-new") || !strings.Contains(text, "404 Not Found") || strings.Contains(text, "old failure") {
 		t.Fatalf("status = %s", text)
 	}
+	// Review of #126: an OLDER paused run does not hide the newest failure.
+	eng.runs["r-paused"] = map[string]interface{}{"id": "r-paused", "status": "paused", "started_at": "2026-10-01T20:00:00Z", "pending_kind": "gate"}
+	resps = drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	if text, _ := toolResultText(t, resps[1]); !strings.Contains(text, "last_run_failed") || !strings.Contains(text, "r-new") || !strings.Contains(text, "r-paused") {
+		t.Fatalf("an older paused run hid the newest failure: %s", text)
+	}
+	// Same second: the id breaks the tie, as RunList orders.
+	eng.runs["r-tie"] = map[string]interface{}{"id": "r-tie", "status": "done", "started_at": "2026-10-01T21:08:35Z"}
+	resps = drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	if text, _ := toolResultText(t, resps[1]); strings.Contains(text, "last_run_failed") {
+		t.Fatalf("a run started the same second with a later id did not supersede the failure: %s", text)
+	}
+	delete(eng.runs, "r-tie")
 	eng.runs["r-later"] = map[string]interface{}{"id": "r-later", "status": "done", "started_at": "2026-10-01T21:20:00Z"}
 	resps = drive(t, eng, initFrame, callFrame(2, "status", `{}`))
 	if text, _ := toolResultText(t, resps[1]); strings.Contains(text, "last_run_failed") {
