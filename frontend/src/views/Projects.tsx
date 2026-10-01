@@ -10,6 +10,7 @@
  * work from a list view is a tool nobody should point at a real repository.
  */
 
+import { VisualCheckSettings } from "../components/VisualCheckSettings";
 import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, ConfigFinding, Duckling, EngineClient, GateStatus, Project } from "../api/client";
 import { ChatAbout } from "../components/ChatAbout";
@@ -369,6 +370,7 @@ export function Projects({
                       }
                     }}
                   />
+                  <VisualCheckSettings client={client} projectId={p.id} />
                 </div>
               </li>
             ))}

@@ -140,6 +140,15 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects/{id}/app", f.auth(f.projectApp))
 	f.mux.HandleFunc("GET /v1/projects/{id}/autopilot", f.auth(f.projectAutopilot))
 	f.mux.HandleFunc("GET /v1/projects/{id}/gate", f.auth(f.projectGate))
+	f.mux.HandleFunc("GET /v1/projects/{id}/reference-images", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"items": []interface{}{}, "total": 0})
+	}))
+	f.mux.HandleFunc("GET /v1/projects/{id}/visual-check", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{
+			"configured": false, "command": "", "effective_command": "", "artifacts": "",
+			"enforcement": "diagnostic", "compare": []interface{}{}, "references": []interface{}{},
+		})
+	}))
 	f.mux.HandleFunc("GET /v1/projects/{id}/autonomy", f.auth(f.projectAutonomy))
 	f.mux.HandleFunc("GET /v1/ducklings", f.auth(f.ducklings))
 	f.mux.HandleFunc("GET /v1/providers", f.auth(f.providers))

@@ -63,6 +63,8 @@ type fakeEngine struct {
 	adoptedGateProject  string
 	adoptedGateActor    string
 	startReq            map[string]interface{}
+	visualSet           map[string]interface{}
+	visualImport        string
 	noProjects          bool
 }
 
@@ -238,6 +240,17 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 func (f *fakeEngine) ProjectStart(req map[string]interface{}) (map[string]interface{}, error) {
 	f.startReq = req
 	return map[string]interface{}{"run_id": "r-1"}, nil
+}
+func (f *fakeEngine) VisualCheck(projectID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"enforcement": "diagnostic", "recent_captures": []string{"scene-01.png"}}, nil
+}
+func (f *fakeEngine) VisualCheckSet(projectID string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.visualSet = req
+	return map[string]interface{}{"enforcement": req["enforcement"]}, nil
+}
+func (f *fakeEngine) ReferenceImport(projectID, path string) (map[string]interface{}, error) {
+	f.visualImport = path
+	return map[string]interface{}{"id": "REF-IMG-1a2b3c4d"}, nil
 }
 func (f *fakeEngine) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
 	f.adoptedGateProject, f.adoptedGateActor = projectID, actor
@@ -1236,6 +1249,30 @@ func TestProjectStartIsAnOperatorTool(t *testing.T) {
 	}
 	if refs, _ := eng.startReq["refs"].([]interface{}); len(refs) != 1 {
 		t.Fatalf("refs = %v", eng.startReq["refs"])
+	}
+}
+
+// B-460: the operator reads, imports a reference for, and sets the visual
+// gate with one verb; the change is recorded as the operator's.
+func TestVisualCheckIsAnOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "visual_check", `{"project_id":"calc"}`),
+		callFrame(3, "visual_check", `{"project_id":"calc","import_reference":"/tmp/ti36x.png"}`),
+		callFrame(4, "visual_check", `{"project_id":"calc","set":true,"command":"node shot.mjs","enforcement":"required","compare":[{"capture":"scene-01.png","reference":"REF-IMG-1a2b3c4d","tolerance":0.03}]}`),
+	)
+	if text, isErr := toolResultText(t, resps[1]); isErr || !strings.Contains(text, "scene-01.png") {
+		t.Fatalf("read = %s", text)
+	}
+	if text, isErr := toolResultText(t, resps[2]); isErr || !strings.Contains(text, "REF-IMG-1a2b3c4d") || eng.visualImport != "/tmp/ti36x.png" {
+		t.Fatalf("import = %s (%q)", text, eng.visualImport)
+	}
+	if _, isErr := toolResultText(t, resps[3]); isErr {
+		t.Fatal("set failed")
+	}
+	cmp, _ := eng.visualSet["compare"].([]interface{})
+	if eng.visualSet["command"] != "node shot.mjs" || eng.visualSet["enforcement"] != "required" || len(cmp) != 1 || eng.visualSet["actor"] == "" {
+		t.Fatalf("set request = %v", eng.visualSet)
 	}
 }
 

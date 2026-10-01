@@ -240,7 +240,6 @@ func (c *Client) ProjectList() ([]map[string]interface{}, error) {
 	return result.Items, err
 }
 
-// ProjectInit initializes a project.
 // ProjectStart creates a project from an idea and starts its intake (B-456).
 func (c *Client) ProjectStart(req map[string]interface{}) (map[string]interface{}, error) {
 	var result map[string]interface{}
@@ -248,6 +247,28 @@ func (c *Client) ProjectStart(req map[string]interface{}) (map[string]interface{
 	return result, err
 }
 
+// VisualCheck reads a project's visual gate and its building blocks (B-460).
+func (c *Client) VisualCheck(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/visual-check", &result)
+	return result, err
+}
+
+// VisualCheckSet replaces a project's visual gate configuration.
+func (c *Client) VisualCheckSet(projectID string, req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.put("/v1/projects/"+projectID+"/visual-check", req, &result)
+	return result, err
+}
+
+// ReferenceImport copies an image into a project's references.
+func (c *Client) ReferenceImport(projectID, path string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/reference-images", map[string]interface{}{"path": path}, &result)
+	return result, err
+}
+
+// ProjectInit initializes a project.
 func (c *Client) ProjectInit(path, name, describe string, gitInit bool) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects", map[string]interface{}{

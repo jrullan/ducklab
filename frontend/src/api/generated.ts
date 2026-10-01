@@ -1017,6 +1017,18 @@ export interface ServiceProviderView {
   max_concurrent?: number;
 }
 
+export interface ServiceReferenceImageInfo {
+  bytes?: number;
+  height?: number;
+  id?: string;
+  stored?: string;
+  width?: number;
+}
+
+export interface ServiceReferenceImportRequest {
+  path?: string;
+}
+
 export interface ServiceReleaseRequest {
   bump?: string;
   revise?: string;
@@ -1195,6 +1207,30 @@ export interface ServiceTestFirstRequest {
   verify?: string;
 }
 
+export interface ServiceVisualCheckSetRequest {
+  actor?: string;
+  artifacts?: string;
+  command?: string;
+  compare?: ConfigRenderCompare[];
+  enforcement?: string;
+  scenes?: string[];
+  viewport?: string;
+}
+
+export interface ServiceVisualCheckView {
+  artifacts?: string;
+  command?: string;
+  compare?: ConfigRenderCompare[];
+  configured?: boolean;
+  effective_command?: string;
+  enforcement?: string;
+  recent_captures?: string[];
+  recent_run_id?: string;
+  references?: ServiceReferenceImageInfo[];
+  scenes?: string[];
+  viewport?: string;
+}
+
 export interface SkillArg {
   name?: string;
   required?: boolean;
@@ -1273,6 +1309,9 @@ export const OPERATIONS = [
   { id: "ProjectPull", method: "POST", path: "/v1/projects/{id}/pull" },
   { id: "ProjectPush", method: "POST", path: "/v1/projects/{id}/push" },
   { id: "ProjectRecover", method: "POST", path: "/v1/projects/{id}/recover/{action}" },
+  { id: "ReferenceImages", method: "GET", path: "/v1/projects/{id}/reference-images" },
+  { id: "ReferenceImport", method: "POST", path: "/v1/projects/{id}/reference-images" },
+  { id: "ReferenceImage", method: "GET", path: "/v1/projects/{id}/reference-images/{ref}" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
   { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
   { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },
@@ -1305,6 +1344,8 @@ export const OPERATIONS = [
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
   { id: "TraceReport", method: "GET", path: "/v1/projects/{id}/trace/report" },
   { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
+  { id: "VisualCheck", method: "GET", path: "/v1/projects/{id}/visual-check" },
+  { id: "VisualCheckSet", method: "PUT", path: "/v1/projects/{id}/visual-check" },
   { id: "ProviderList", method: "GET", path: "/v1/providers" },
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
   { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
