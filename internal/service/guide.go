@@ -162,12 +162,17 @@ func nextSteps(st projectSnapshot) []NextStep {
 	}
 
 	// A runnable visual replica with an accepted reference is not done merely
-	// because its code gate is green. Surface the comparison while document
-	// work is still next so the requirement does not disappear behind jargon.
-	if st.VisualReference != "" && st.RunURL != "" && !st.HasVisualCheck {
+	// because its code gate is green. Keep this available alongside document
+	// work, but after the immediate document step: the capture recipe normally
+	// comes from the spec/build, so presenting setup first is a dead-end for a
+	// newcomer who has only just accepted requirements.
+	appendVisualStep := func() {
+		if st.VisualReference == "" || st.RunURL == "" || st.HasVisualCheck {
+			return
+		}
 		out = append(out, NextStep{
 			ID:     "visual-check",
-			Action: fmt.Sprintf("Set up a visual check against %s", st.VisualReference),
+			Action: fmt.Sprintf("Set up a visual check against %s (`visual_check`)", st.VisualReference),
 			Reason: fmt.Sprintf("the accepted requirements cite %s and the app has a runnable URL; compare a capture before calling the replica done", st.VisualReference),
 			Kind:   "project",
 			Ref:    "visual-check",
@@ -191,6 +196,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Reason: "requirements are approved but no spec exists to pin the contracts",
 			Kind:   "stage", Ref: "spec",
 		})
+		appendVisualStep()
 		return out
 	case !st.HasPlan && st.OpenSpecSections > 0:
 		out = append(out, NextStep{
@@ -199,8 +205,10 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Reason: fmt.Sprintf("%d spec section(s) are not yet built and no plan exists", st.OpenSpecSections),
 			Kind:   "stage", Ref: "plan",
 		})
+		appendVisualStep()
 		return out
 	}
+	appendVisualStep()
 
 	// Accepted work is not shipped merely because its gate passed. Keep the
 	// release door visible and promote it ahead of new work.

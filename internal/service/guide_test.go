@@ -60,11 +60,11 @@ func TestTheGuideOffersAVisualCheckBeforeTheReplicaCanLookDone(t *testing.T) {
 		RunURL:          "http://127.0.0.1:4173",
 	}
 	steps := nextSteps(st)
-	if strings.Join(ids(steps), ",") != "visual-check,spec" {
+	if strings.Join(ids(steps), ",") != "spec,visual-check" {
 		t.Fatalf("steps = %v, want the visual check alongside the next document step", ids(steps))
 	}
-	if steps[0].Kind != "project" || steps[0].Ref != "visual-check" || !strings.Contains(steps[0].Reason, st.VisualReference) {
-		t.Errorf("visual step = %+v", steps[0])
+	if steps[1].Kind != "project" || steps[1].Ref != "visual-check" || !strings.Contains(steps[1].Reason, st.VisualReference) || !strings.Contains(steps[1].Action, "visual_check") {
+		t.Errorf("visual step = %+v", steps[1])
 	}
 	st.HasVisualCheck = true
 	for _, step := range nextSteps(st) {
