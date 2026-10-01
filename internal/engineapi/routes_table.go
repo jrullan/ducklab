@@ -207,6 +207,7 @@ func routeTable() []Route {
 			ClientMethod: "ProjectGate",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleProjectGate }},
 		{Method: "POST", Path: "/v1/projects/{id}/gate", Auth: true,
+			Request:      service.GateAdoptRequest{},
 			Response:     service.GateStatus{},
 			Summary:      "Adopt the detected gate. Never automatic: a gate decides what a verdict means.",
 			ClientMethod: "ProjectGateAdopt",

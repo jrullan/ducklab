@@ -80,6 +80,9 @@ type projectSnapshot struct {
 	// gate (B-458). A greenfield project is initialised empty, so no gate is
 	// detected then; the first test suite arrives later and nothing said so.
 	AdoptableGate string
+	// AdoptableGateKind is what detection found: tests, build or lint. A card
+	// that always said "tests exist" misdescribed a build or lint gate.
+	AdoptableGateKind string
 }
 
 // nextSteps is the guide's whole brain: the loop's own order, stated.
@@ -143,7 +146,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 		out = append(out, NextStep{
 			ID:     "adopt-gate",
 			Action: fmt.Sprintf("Adopt `%s` as the project gate", st.AdoptableGate),
-			Reason: "the project now has a test or build command, but no gate: every run ends UNVERIFIED until one is adopted",
+			Reason: adoptGateReason(st.AdoptableGateKind),
 			Kind:   "project",
 			Ref:    st.AdoptableGate,
 		})
@@ -468,6 +471,7 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	if projCfg, cerr := config.LoadProject(tomlPath); cerr == nil && verify.Gate(projCfg.Verify.Mode) == verify.GateNone {
 		if gate, gerr := s.ProjectGate(ctx, projectID); gerr == nil && gate.Adoptable {
 			st.AdoptableGate = gate.DetectedCommand
+			st.AdoptableGateKind = gate.Detected
 			if st.AdoptableGate == "" {
 				st.AdoptableGate = gate.Detected
 			}
@@ -536,4 +540,18 @@ func specDebtCount(tasks []TaskView) int {
 		}
 	}
 	return n
+}
+
+// adoptGateReason names what was found in the words a person reads.
+func adoptGateReason(kind string) string {
+	what := "a verification command"
+	switch kind {
+	case "tests":
+		what = "a test command"
+	case "build":
+		what = "a build command"
+	case "lint":
+		what = "a lint command"
+	}
+	return what + " is available, but the project has no gate: every run ends UNVERIFIED until one is adopted"
 }

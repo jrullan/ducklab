@@ -61,6 +61,7 @@ type fakeEngine struct {
 	rosterViews         map[string]map[string]interface{}
 	bugMoveCalls        int
 	adoptedGateProject  string
+	adoptedGateActor    string
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -229,8 +230,8 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 	}
 	return nil, nil
 }
-func (f *fakeEngine) ProjectGateAdopt(projectID string) (map[string]interface{}, error) {
-	f.adoptedGateProject = projectID
+func (f *fakeEngine) ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error) {
+	f.adoptedGateProject, f.adoptedGateActor = projectID, actor
 	return map[string]interface{}{"mode": "tests"}, nil
 }
 func (f *fakeEngine) TaskRemove(projectID, taskID string) (map[string]interface{}, error) {
@@ -1196,5 +1197,8 @@ func TestGateAdoptIsAnOperatorTool(t *testing.T) {
 	}
 	if eng.adoptedGateProject != "calc" {
 		t.Errorf("adopted gate for %q, want calc", eng.adoptedGateProject)
+	}
+	if !strings.HasPrefix(eng.adoptedGateActor, "mcp:") {
+		t.Errorf("gate adopted as %q; an operator's decision must be attributed to it", eng.adoptedGateActor)
 	}
 }

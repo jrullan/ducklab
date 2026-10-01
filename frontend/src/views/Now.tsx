@@ -376,11 +376,14 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         <section className="rounded-card border border-warning bg-surface1 p-4" data-testid="now-adopt-gate">
           <h2 className="text-xs font-medium uppercase tracking-wide text-ink-muted">Your project can be verified now</h2>
           <p className="mt-1 text-sm text-ink">
-            Tests exist, but this project has no gate, so every run ends <strong>UNVERIFIED</strong>. Adopt{" "}
-            <code className="font-mono">{gateOffer.ref}</code> as the project gate?
+            Adopt <code className="font-mono">{gateOffer.ref}</code> as the project gate? Until a gate exists every
+            run ends <strong>UNVERIFIED</strong>.
           </p>
+          {/* The engine says what it found (a test, build or lint command);
+              a card that always said "tests exist" misdescribed the others. */}
+          <p className="mt-1 text-xs text-ink-secondary" data-testid="now-adopt-gate-reason">{gateOffer.reason}.</p>
           <p className="mt-1 text-xs text-ink-secondary">
-            The gate runs after every build and decides PASSED or FAILED. Adopting it changes what later
+            The gate runs after each run&apos;s changes and decides PASSED or FAILED. Adopting it changes what later
             verdicts mean, so Ducklab never does it on its own. You can change it any time in the project&apos;s
             settings.
           </p>

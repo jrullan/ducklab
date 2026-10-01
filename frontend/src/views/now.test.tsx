@@ -350,7 +350,7 @@ describe("Now — the inbox", () => {
   // the offer to adopt one lived only in Project management.
   it("offers to adopt a newly detected gate as a decision, then refreshes the guide", async () => {
     const steps = [
-      [{ kind: "project", id: "adopt-gate", ref: "npm test", action: "Adopt `npm test` as the project gate", reason: "every run ends UNVERIFIED" }],
+      [{ kind: "project", id: "adopt-gate", ref: "npm run build", action: "Adopt `npm run build` as the project gate", reason: "a build command is available, but the project has no gate" }],
       [],
     ];
     let call = 0;
@@ -362,10 +362,13 @@ describe("Now — the inbox", () => {
     render(<Now client={client} projectId="p" />);
     const card = await screen.findByTestId("now-adopt-gate");
     expect(card).toHaveTextContent("UNVERIFIED");
-    expect(card).toHaveTextContent("npm test");
+    expect(card).toHaveTextContent("npm run build");
     expect(card).toHaveTextContent("never does it on its own");
+    // What was found is the engine's word, not an assumption that it is tests.
+    expect(screen.getByTestId("now-adopt-gate-reason")).toHaveTextContent("a build command is available");
+    expect(card).not.toHaveTextContent("Tests exist");
     // Not also rendered as a navigation step.
-    expect(screen.queryByText("Adopt `npm test` as the project gate")).toBeNull();
+    expect(screen.queryByText("Adopt `npm run build` as the project gate")).toBeNull();
     fireEvent.click(screen.getByTestId("now-adopt-gate-button"));
     await waitFor(() => expect(projectGateAdopt).toHaveBeenCalledWith("p"));
     await waitFor(() => expect(screen.queryByTestId("now-adopt-gate")).toBeNull());

@@ -605,7 +605,10 @@ func (s *Server) handleProjectGate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectGateAdopt(w http.ResponseWriter, r *http.Request) {
-	st, err := s.svc.ProjectGateAdopt(r.Context(), r.PathValue("id"))
+	var body service.GateAdoptRequest
+	// An empty body is a person's click from the desktop.
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	st, err := s.svc.ProjectGateAdopt(r.Context(), r.PathValue("id"), body.Actor)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return

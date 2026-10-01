@@ -545,7 +545,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(result), nil
 	case "gate_adopt":
-		out, err := s.eng.ProjectGateAdopt(a.str("project_id"))
+		out, err := s.eng.ProjectGateAdopt(a.str("project_id"), "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}

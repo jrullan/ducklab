@@ -536,7 +536,7 @@ func TestTheGuideSaysWhenTheRepoOutrunsTheRunningBinary(t *testing.T) {
 // B-458: a greenfield project is initialised empty, so no gate is detected at
 // init; when tests appear later the guide must say so, as a decision.
 func TestTheGuideOffersToAdoptAGateOnceTheProjectBecomesTestable(t *testing.T) {
-	steps := nextSteps(projectSnapshot{AdoptableGate: "go test ./..."})
+	steps := nextSteps(projectSnapshot{AdoptableGate: "go test ./...", AdoptableGateKind: "tests"})
 	if len(steps) == 0 || steps[0].ID != "adopt-gate" || steps[0].Ref != "go test ./..." ||
 		!strings.Contains(steps[0].Reason, "UNVERIFIED") {
 		t.Fatalf("first step = %+v", steps)
@@ -586,4 +586,39 @@ func mustNext(t *testing.T, s *Service, id string) []NextStep {
 		t.Fatal(err)
 	}
 	return steps
+}
+
+// Codex on #118: a build or lint gate must not be described as tests.
+func TestTheGateOfferNamesWhatWasDetected(t *testing.T) {
+	for kind, want := range map[string]string{"tests": "a test command", "build": "a build command", "lint": "a lint command", "": "a verification command"} {
+		step := nextSteps(projectSnapshot{AdoptableGate: "x", AdoptableGateKind: kind})[0]
+		if !strings.HasPrefix(step.Reason, want) {
+			t.Errorf("kind %q: reason = %q", kind, step.Reason)
+		}
+	}
+}
+
+// Codex on #118: the adoption is attributed in the config audit.
+func TestAdoptingAGateLeavesAnAttributedReceipt(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "g", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/g\n\ngo 1.22\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "g_test.go"), []byte("package g\n\nimport \"testing\"\n\nfunc TestG(t *testing.T) {}\n"), 0o644)
+	if _, err := s.ProjectGateAdopt(context.Background(), p.ID, "mcp:codex"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".ducklab", "config-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := string(data)
+	for _, want := range []string{`"actor":"mcp:codex"`, `"source":"gate_adopt"`, `"verify.mode"`, `"gate":"tests"`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("receipt lacks %s: %s", want, line)
+		}
+	}
 }
