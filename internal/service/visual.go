@@ -37,10 +37,13 @@ import (
 // the person sees exactly what was compared.
 
 // visualCaptureNames are the stored names of the reference (at the capture's
-// size) and of the difference image for one capture.
-func visualCaptureNames(capture string) (ref, diff string) {
+// size) and of the difference image for comparison n (1-based). The number is
+// part of the name (review of #123): two comparisons of the same capture
+// against different references wrote the same files, and the first result
+// then pointed at the second one's evidence.
+func visualCaptureNames(n int, capture string) (ref, diff string) {
 	base := strings.TrimSuffix(capture, filepath.Ext(capture))
-	return "visual-ref-" + base + ".png", "visual-diff-" + base + ".png"
+	return fmt.Sprintf("visual-%02d-ref-%s.png", n, base), fmt.Sprintf("visual-%02d-diff-%s.png", n, base)
 }
 
 // resolveRenderReference finds the file a compare entry names: a reference
@@ -180,7 +183,7 @@ func runVisualGate(root string, contract config.RenderContract, writer *runlog.W
 	for _, c := range captures {
 		have[c] = true
 	}
-	for _, cmp := range contract.Compare {
+	for i, cmp := range contract.Compare {
 		res := runlog.VisualCompare{
 			Capture: cmp.Capture, Reference: cmp.Reference,
 			Tolerance: cmp.EffectiveTolerance(), Threshold: cmp.EffectiveThreshold(),
@@ -222,7 +225,7 @@ func runVisualGate(root string, contract config.RenderContract, writer *runlog.W
 		mismatch, diffImg := visualDiff(capImg, scaled, res.Threshold)
 		res.Mismatch = mismatch
 		res.Passed = mismatch <= res.Tolerance
-		refName, diffName := visualCaptureNames(cmp.Capture)
+		refName, diffName := visualCaptureNames(i+1, cmp.Capture)
 		if data, err := encodePNG(scaled); err == nil && writer.WriteCapture(refName, data) == nil {
 			res.ReferenceCapture = refName
 		}

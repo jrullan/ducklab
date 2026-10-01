@@ -275,3 +275,31 @@ func TestARequiredVisualMismatchFailsTheBuildAndADiagnosticOneIsACaveat(t *testi
 		})
 	}
 }
+
+// Review of #123: two comparisons of one capture keep their own evidence.
+func TestEachComparisonKeepsItsOwnEvidence(t *testing.T) {
+	w, root := visualFixture(t, func(p string) {
+		paintPNG(t, p, 40, 40, white, black, image.Rect(0, 0, 20, 40))
+	})
+	paintPNG(t, filepath.Join(root, "left.png"), 40, 40, white, black, image.Rect(0, 0, 20, 40))
+	paintPNG(t, filepath.Join(root, "right.png"), 40, 40, black, white, image.Rect(0, 0, 20, 40))
+	gate := runVisualGate(root, config.RenderContract{Compare: []config.RenderCompare{
+		{Capture: "scene-01.png", Reference: "left.png"},
+		{Capture: "scene-01.png", Reference: "right.png"},
+	}}, w, []string{"scene-01.png"})
+	a, b := gate.Results[0], gate.Results[1]
+	if a.Mismatch != 0 || b.Mismatch != 1 {
+		t.Fatalf("mismatches = %v, %v", a.Mismatch, b.Mismatch)
+	}
+	if a.ReferenceCapture == b.ReferenceCapture || a.DiffCapture == b.DiffCapture {
+		t.Fatalf("comparisons share evidence: %+v / %+v", a, b)
+	}
+	// The first comparison's diff is still its own: nothing in red.
+	img, err := decodeImageFile(filepath.Join(w.RunDir(), "captures", a.DiffCapture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, g, _, _ := img.At(5, 5).RGBA(); r>>8 == 230 && g == 0 {
+		t.Fatal("the first comparison's diff shows the second one's mismatch")
+	}
+}
