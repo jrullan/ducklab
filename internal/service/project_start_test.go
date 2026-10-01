@@ -12,6 +12,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
 
@@ -262,5 +263,65 @@ func TestThePresetUsesWhicheverPythonExists(t *testing.T) {
 		rs := s.runs[res.RunID]
 		s.runsMu.RUnlock()
 		<-rs.done
+	}
+}
+
+// Review of #121: a started project is a Ducklab project in git from the first
+// moment (project.toml and housekeeping committed at creation), and accepting
+// the requirements lands the person's own brief (intent.md) with them, so a
+// clone carries the whole project and its origin.
+func TestAStartedProjectIsVersionedAndTheAcceptedIntakeLandsTheBrief(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+		content := "## REQ-001 — Adds numbers\n\n**Priority:** must\n\nIt adds two numbers.\n"
+		for _, m := range req.Messages {
+			if m.Role == "system" && strings.Contains(m.Content, "You are the reviewer") {
+				content = `{"verdict":"approve","findings":[]}`
+			}
+		}
+		return &provider.ChatResponse{Choices: []provider.Choice{{
+			Message:      provider.Message{Role: "assistant", Content: content},
+			FinishReason: provider.FinishStop,
+		}}}
+	}
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{
+		Name: "calc", Brief: "A calculator that adds.", GitName: "Ada", GitEmail: "ada@example.com",
+	})
+	if err != nil || res.RunID == "" {
+		t.Fatalf("start: %v %s", err, res.IntakeError)
+	}
+	git := vcs.New(res.Project.Path)
+	tracked := func() map[string]bool {
+		m := map[string]bool{}
+		for _, f := range git.LsFiles() {
+			m[filepath.ToSlash(f)] = true
+		}
+		return m
+	}
+	before := tracked()
+	for _, f := range []string{".ducklab/project.toml", ".gitignore"} {
+		if !before[f] {
+			t.Errorf("%s not committed at creation; tracked: %v", f, before)
+		}
+	}
+	s.runsMu.RLock()
+	rs := s.runs[res.RunID]
+	s.runsMu.RUnlock()
+	<-rs.done
+	if rs.run.Status == "failed" {
+		t.Fatal("the intake run failed; the fixture no longer speaks the stage contracts")
+	}
+	if _, err := s.RunAccept(context.Background(), res.RunID, ""); err != nil {
+		t.Fatal(err)
+	}
+	after := tracked()
+	intent, _ := filepath.Rel(res.Project.Path, artifact.Path(res.Project.Path, artifact.KindIntent))
+	req, _ := filepath.Rel(res.Project.Path, artifact.Path(res.Project.Path, artifact.KindRequirements))
+	for _, f := range []string{filepath.ToSlash(intent), filepath.ToSlash(req)} {
+		if !after[f] {
+			t.Errorf("%s not committed by the accept; tracked: %v", f, after)
+		}
 	}
 }

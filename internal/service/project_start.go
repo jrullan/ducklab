@@ -182,9 +182,10 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		refs = append(refs, ref)
 		setup = "project setup: " + preset.ID
 	}
-	// The setup is versioned at once (review of #122): project.toml with its
-	// run command, the preset reference and the memory that shaped the first
-	// documents were left untracked, so a clone lost them.
+	// The setup is versioned at once (reviews of #121/#122): project.toml
+	// with its run command, the git housekeeping, the preset reference and the
+	// memory that shaped the first documents were left untracked, so a clone
+	// lost them.
 	if err := commitProjectSetup(project.Path, project.ID, setup); err != nil {
 		return nil, fmt.Errorf("commit the project setup: %w", err)
 	}
@@ -227,7 +228,8 @@ func removeCreatedDirs(dirs []string) {
 }
 
 // commitProjectSetup commits the files a new project is born with: its
-// config, git housekeeping, the preset reference and the project memory.
+// config, git housekeeping, and (when present) a preset reference and the
+// project memory.
 func commitProjectSetup(root, projectID, what string) error {
 	var paths []string
 	for _, rel := range []string{
