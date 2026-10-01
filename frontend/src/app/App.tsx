@@ -7,6 +7,7 @@ import { interruptions, advisorAutoAnswerInterruptions, deliver, setBadge } from
 import type { Run } from "../api/client";
 import { Sidebar } from "../components/Sidebar";
 import { Now } from "../views/Now";
+import { FirstRun } from "../views/FirstRun";
 import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
@@ -144,6 +145,9 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [projects, setProjects] = useState<Project[]>([]);
+  // Whether the project list has answered at least once: an empty list before
+  // the first answer is "unknown", and the first-run page must not flash.
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   // The chosen project survives a reload: a view that silently reset to the
   // first project every refresh would show someone else's cycle.
   const [projectId, setProjectId] = useState<string>(
@@ -153,6 +157,10 @@ export function App() {
   const [engineBuild, setEngineBuild] = useState<EngineBuild | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<EngineClient | null>(null);
+  // The connection the current client was built for. A restart replaces
+  // conn first and the client one effect later; between the two, the old
+  // client still answers (its requests retry through the reconnect).
+  const [clientBase, setClientBase] = useState<string | null>(null);
   // The engine this page talks to. State, not a constant: a restart hands
   // back fresh connection details and everything below rebuilds against them.
   const [conn, setConn] = useState<EngineConnection | null>(() =>
@@ -252,6 +260,7 @@ export function App() {
       },
     });
     setClient(c);
+    setClientBase(cfg.baseUrl);
 
     const refresh = () => {
       // Scoped to the chosen project.
@@ -265,6 +274,7 @@ export function App() {
       c.projects()
         .then((ps) => {
           setProjects(ps);
+          setProjectsLoaded(true);
           // Prefer a project that is actually on disk. Falling back to a
           // missing one shows empty views that read as "nothing to do here".
           const live = ps.filter((p) => !p.missing);
@@ -536,6 +546,17 @@ export function App() {
 
         {route.name === "now" && client && projectId && (
           <Now client={client} projectId={projectId} />
+        )}
+        {/* B-455: a fresh installation used to land on an empty Now with no
+            door. With no project at all, the first-run page; with projects
+            but none selected, a pointer to the selector. Only with the client
+            of the current connection: one a restart has just replaced still
+            answers the project list (it retries through the reconnect), and
+            readiness requests on it would re-raise the stale banner. */}
+        {route.name === "now" && client && !projectId && projectsLoaded && !stale && clientBase === conn?.baseUrl && (
+          projects.length === 0
+            ? <FirstRun client={client} connected={connection === "open"} />
+            : <p className="m-4 text-ink-muted" data-testid="now-choose-project">Choose a project in the sidebar.</p>
         )}
         {route.name === "runs" && (
           <div className="p-4">
