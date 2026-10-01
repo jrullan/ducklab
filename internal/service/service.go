@@ -2216,9 +2216,31 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": true, "note": rendered.Note})
 		}
 	}
+	// The visual gate (B-460): captures held against reference images. A
+	// required mismatch fails the run like a red test; a diagnostic one is a
+	// caveat the person sees with the images side by side.
+	visualGate := ""
+	if projCfg.RenderConfigured && len(render.Compare) > 0 {
+		vg := runVisualGate(ectx.ProjectRoot, render, rs.writer, rs.run.Captures)
+		rs.run.Visual = vg
+		summary := visualGateSummary(vg)
+		verificationOutput += "\n" + summary
+		rs.writer.AppendEvent("visual_compare", map[string]interface{}{
+			"passed": vg.Passed, "enforcement": vg.Enforcement, "results": vg.Results, "summary": summary,
+		})
+		if vg.Passed {
+			visualGate = "green"
+		} else if vg.Enforcement == "required" {
+			visualGate = "red"
+		} else if rs.run.Warning != "" {
+			rs.run.Warning += "; " + summary
+		} else {
+			rs.run.Warning = summary
+		}
+	}
 	effectiveGate := string(gateResult.Gate)
 	effectiveExit := gateResult.ExitCode
-	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" {
+	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" || visualGate == "red" {
 		effectiveGate = "red"
 		if effectiveExit == 0 {
 			effectiveExit = 1
@@ -2297,6 +2319,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		contractGate = "red"
 	}
 	verdict := adjudicateBuildVerdict(projectVerdict, contractGate, dissent)
+	if visualGate == "red" {
+		verdict = "FAILED"
+	}
 	if dissent {
 		detail := fmt.Sprintf("reviewer ended with %s (%d finding(s)); a green command cannot override contractual dissent", reviewVerdict, reviewFindings)
 		rs.writer.AppendEvent("reviewer_dissent", map[string]interface{}{"verdict": reviewVerdict, "findings": reviewFindings, "detail": detail})

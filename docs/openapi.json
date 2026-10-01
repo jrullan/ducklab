@@ -568,12 +568,42 @@
         ],
         "type": "object"
       },
+      "ConfigRenderCompare": {
+        "properties": {
+          "capture": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "tolerance": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "capture",
+          "reference"
+        ],
+        "type": "object"
+      },
       "ConfigRenderContract": {
         "properties": {
           "artifacts": {
             "type": "string"
           },
           "command": {
+            "type": "string"
+          },
+          "compare": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigRenderCompare"
+            },
+            "type": "array"
+          },
+          "enforcement": {
             "type": "string"
           },
           "ready": {
@@ -2141,6 +2171,9 @@
           "verdict": {
             "type": "string"
           },
+          "visual": {
+            "$ref": "#/components/schemas/RunlogVisualGate"
+          },
           "wallclock_ms": {
             "type": "integer"
           },
@@ -2177,6 +2210,77 @@
           "unsafe_writes",
           "verdict",
           "wallclock_ms"
+        ],
+        "type": "object"
+      },
+      "RunlogVisualCompare": {
+        "properties": {
+          "capture": {
+            "type": "string"
+          },
+          "diff_capture": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "mismatch": {
+            "type": "number"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "reference_capture": {
+            "type": "string"
+          },
+          "scaled_from": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "tolerance": {
+            "type": "number"
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "capture",
+          "mismatch",
+          "passed",
+          "reference",
+          "threshold",
+          "tolerance"
+        ],
+        "type": "object"
+      },
+      "RunlogVisualGate": {
+        "properties": {
+          "enforcement": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogVisualCompare"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enforcement",
+          "passed",
+          "results"
         ],
         "type": "object"
       },

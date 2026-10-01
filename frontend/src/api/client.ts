@@ -220,6 +220,28 @@ export async function runCaptureUrl(baseUrl: string, runId: string, name: string
   return URL.createObjectURL(await response.blob());
 }
 
+/** One capture held against one reference image. */
+export interface VisualCompare {
+  capture: string;
+  reference: string;
+  reference_capture?: string;
+  diff_capture?: string;
+  mismatch: number;
+  tolerance: number;
+  threshold: number;
+  width?: number;
+  height?: number;
+  scaled_from?: string;
+  passed: boolean;
+  error?: string;
+}
+
+export interface VisualGate {
+  enforcement: "diagnostic" | "required";
+  passed: boolean;
+  results: VisualCompare[];
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -277,6 +299,8 @@ export interface Run {
   pending_since?: string;
   pending_data?: Record<string, unknown>;
   captures?: string[];
+  /** The visual gate: captures held against reference images (B-460). */
+  visual?: VisualGate;
   resolution?: string;
   warning?: string;
   /** Why the run failed, in the engine's words. Some of these are written to be

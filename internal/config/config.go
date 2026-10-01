@@ -535,6 +535,53 @@ type RenderContract struct {
 	Viewport  string   `toml:"viewport" json:"viewport"`
 	TimeoutS  int      `toml:"timeout_s" json:"timeout_s"`
 	Artifacts string   `toml:"artifacts" json:"artifacts"`
+	// Compare turns captures into a visual gate (B-460): each entry names a
+	// capture and the reference image it must match. The comparison is
+	// PNG against image, so it is the same for a web page, a desktop window
+	// or a device screen; how the capture is made is the project's command.
+	Compare []RenderCompare `toml:"compare,omitempty" json:"compare,omitempty"`
+	// Enforcement is diagnostic (a mismatch is a caveat; the default) or
+	// required (a mismatch fails the run like a red test).
+	Enforcement string `toml:"enforcement,omitempty" json:"enforcement,omitempty"`
+}
+
+// RenderCompare is one capture held against one reference image.
+type RenderCompare struct {
+	// Capture is the capture's file name, e.g. "scene-01.png".
+	Capture string `toml:"capture" json:"capture"`
+	// Reference is a reference image id (REF-IMG-xxxxxxxx, from the
+	// requirements) or a project-relative image path.
+	Reference string `toml:"reference" json:"reference"`
+	// Tolerance is the largest fraction of pixels allowed to differ, 0..1;
+	// empty means DefaultRenderTolerance.
+	Tolerance *float64 `toml:"tolerance,omitempty" json:"tolerance,omitempty"`
+	// Threshold is how different one pixel must look to count, 0..1 of the
+	// largest perceptual colour distance; 0 means DefaultRenderThreshold.
+	Threshold float64 `toml:"threshold,omitempty" json:"threshold,omitempty"`
+}
+
+// Visual gate defaults: a pixel counts as different past 10% of the largest
+// perceptual distance (anti-aliasing and font hinting stay under it), and up
+// to 2% of the pixels may differ.
+const (
+	DefaultRenderTolerance = 0.02
+	DefaultRenderThreshold = 0.1
+)
+
+// EffectiveTolerance is Tolerance or the default.
+func (c RenderCompare) EffectiveTolerance() float64 {
+	if c.Tolerance == nil {
+		return DefaultRenderTolerance
+	}
+	return *c.Tolerance
+}
+
+// EffectiveThreshold is Threshold or the default.
+func (c RenderCompare) EffectiveThreshold() float64 {
+	if c.Threshold <= 0 {
+		return DefaultRenderThreshold
+	}
+	return c.Threshold
 }
 
 // RunApp is how the built application actually starts — the stage the gate
@@ -938,6 +985,29 @@ func (p *Project) Validate(path string) error {
 			if n, err := strconv.Atoi(part); err != nil || n <= 0 {
 				return &Error{File: path, Key: "render.viewport", Msg: "must be WIDTHxHEIGHT"}
 			}
+		}
+	}
+	switch p.Render.Enforcement {
+	case "", "diagnostic", "required":
+	default:
+		return &Error{File: path, Key: "render.enforcement", Msg: "must be diagnostic | required"}
+	}
+	for i, c := range p.Render.Compare {
+		key := fmt.Sprintf("render.compare[%d]", i)
+		if strings.TrimSpace(c.Capture) == "" || filepath.Base(c.Capture) != c.Capture {
+			return &Error{File: path, Key: key + ".capture", Msg: "must be a capture file name such as scene-01.png"}
+		}
+		if strings.TrimSpace(c.Reference) == "" {
+			return &Error{File: path, Key: key + ".reference", Msg: "must name a reference image (REF-IMG-… or a project path)"}
+		}
+		if !strings.HasPrefix(c.Reference, "REF-IMG-") && !cleanRelativePath(c.Reference) {
+			return &Error{File: path, Key: key + ".reference", Msg: fmt.Sprintf("must be REF-IMG-… or a clean path inside the project, got %q", c.Reference)}
+		}
+		if t := c.EffectiveTolerance(); t < 0 || t > 1 {
+			return &Error{File: path, Key: key + ".tolerance", Msg: "must be between 0 and 1 (a fraction of the pixels)"}
+		}
+		if c.Threshold < 0 || c.Threshold > 1 {
+			return &Error{File: path, Key: key + ".threshold", Msg: "must be between 0 and 1"}
 		}
 	}
 	if p.References.PerFileChars < 0 || p.References.TotalChars < 0 || p.References.MaxFiles < 0 {

@@ -29,6 +29,7 @@ import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
+import { VisualCheck } from "../components/VisualCheck";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
 
@@ -2563,6 +2564,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               ))}
             </section>
           )}
+          {run.visual && <VisualCheck run={run} captureClient={client} />}
           {budget && finished && (
             /* A finished run's meters measure nothing any more; one line of
                what it actually spent, spenders beneath. */
