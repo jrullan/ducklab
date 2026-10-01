@@ -4848,6 +4848,12 @@ func stageSharedCheckoutRun(git *vcs.Git, rs *runState, projectRoot string) ([]s
 			artifact.Path(projectRoot, artifact.Kind(kind)),
 			artifact.ProposedPath(projectRoot, artifact.Kind(kind)),
 		)
+		// The reference images the document cites as REF-IMG-n (B-457) land
+		// with it: a requirement pointing at an unversioned file is a
+		// citation that breaks on the next clone.
+		if refs := filepath.Join(projectRoot, ".ducklab", "refs", rs.run.ID); dirExists(refs) {
+			candidates = append(candidates, refs)
+		}
 	}
 	// A durable start snapshot is the fallback for legacy/synthetic tool logs
 	// and for explicitly unsafe shell writes. It compares two tree objects, so

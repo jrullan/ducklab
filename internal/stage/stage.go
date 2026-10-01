@@ -188,6 +188,25 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	if p.Execute == nil {
 		return nil, fmt.Errorf("stage %s: no executor", p.Stage)
 	}
+	// Images reach every path the stage can take (B-457): the fragment and
+	// extend paths attached them themselves, while a greenfield intake or a
+	// spec, sectioned or not, never showed the architect the reference image a
+	// "pixel perfect" requirement depends on. The first architect turn of each
+	// script sees them; the caller has already gated them on vision.
+	if len(p.Images) > 0 {
+		execute, images := p.Execute, p.Images
+		p.Execute = func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			for i := range script.Turns {
+				if script.Turns[i].Role == config.RoleArchitect {
+					if len(script.Turns[i].Images) == 0 {
+						script.Turns[i].Images = images
+					}
+					break
+				}
+			}
+			return execute(ctx, script, prompt)
+		}
+	}
 	kind := p.Stage.Kind()
 
 	current, err := artifact.Load(p.ProjectRoot, kind)

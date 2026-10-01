@@ -10,6 +10,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -467,5 +468,31 @@ func TestRoundsOverridesTheScriptsLimit(t *testing.T) {
 		if s.MaxRounds != c.want {
 			t.Errorf("rounds %d gave MaxRounds %d, want %d", c.rounds, s.MaxRounds, c.want)
 		}
+	}
+}
+
+// B-457: a greenfield intake never showed the architect a reference image;
+// only the amendment paths attached them.
+func TestIntakeShowsReferenceImagesToTheArchitect(t *testing.T) {
+	root := projectWith(t, nil)
+	var seen []string
+	_, err := Run(context.Background(), Params{
+		ProjectRoot: root, Stage: Intake, RunID: "r-img", Seed: "A pixel perfect calculator.",
+		Ducklings: []string{"pato-atom"},
+		Images:    []string{"data:image/png;base64,aGk="},
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			for _, turn := range script.Turns {
+				if turn.Role == config.RoleArchitect {
+					seen = append(seen, turn.Images...)
+				}
+			}
+			return "## REQ-001 — Matches REF-IMG-1\n\n**Priority:** must\n\nBody.\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 || seen[0] != "data:image/png;base64,aGk=" {
+		t.Fatalf("the reference image never reached the architect: %v", seen)
 	}
 }
