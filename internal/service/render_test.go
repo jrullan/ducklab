@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -214,5 +218,76 @@ func TestProductSmokeExpectationCanOverrideDerivedDefault(t *testing.T) {
 	_, _, expectation, _ = productSmokeConfig(config.RunApp{Smoke: "./check", URL: "http://localhost", SmokeExpect: "live"})
 	if expectation != "live" {
 		t.Fatalf("explicit expectation = %q", expectation)
+	}
+}
+
+// B-466: a project whose project.toml carries the empty [render] table that
+// SaveProject writes runs no render step. It used to start [run].command and
+// wait 120 s at every final gate ("render smoke stayed alive for 120s").
+func TestAnEmptyRenderTableRunsNoRenderStep(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"add", "-A"}, {"commit", "-q", "-m", "seed", "--allow-empty"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	marker := filepath.Join(t.TempDir(), "launched")
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"run.command": "touch '" + marker + "' && sleep 30",
+		"run.smoke":   "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, ".ducklab", "project.toml"))
+	if !strings.Contains(string(data), "[render]") {
+		t.Log("project.toml no longer carries an empty [render]")
+	}
+	native := true
+	for did, duck := range s.cfg.Ducklings {
+		duck.Caps.NativeTools = &native
+		s.cfg.Ducklings[did] = duck
+	}
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(req provider.ChatRequest, call int) *provider.ChatResponse {
+		var message provider.Message
+		finish := provider.FinishStop
+		if call == 1 {
+			tc := provider.ToolCall{ID: "call-1", Type: "function"}
+			tc.Function.Name, tc.Function.Arguments = "fs_write", `{"path":"index.html","content":"<p>calc</p>\n"}`
+			message.ToolCalls = []provider.ToolCall{tc}
+			finish = provider.FinishToolCalls
+		} else {
+			message.Content = "Done."
+		}
+		return &provider.ChatResponse{Choices: []provider.Choice{{Message: message, FinishReason: finish}}}
+	}
+	start := time.Now()
+	r, err := s.RunStart(context.Background(), id, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.waitForRun(context.Background(), r.ID); err != nil && !strings.Contains(err.Error(), "waiting for a human") {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("the run took %s: a render step waited on [run].command", took)
+	}
+	detail, err := s.RunGet(context.Background(), r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range detail.Events {
+		if e.Type == "render" {
+			t.Fatalf("an empty [render] produced a render event: %+v", e.Data)
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("[run].command was launched by the gate")
 	}
 }

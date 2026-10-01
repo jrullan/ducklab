@@ -178,8 +178,12 @@ func TestRenderCompareConfigIsValidated(t *testing.T) {
 	bad := -0.5
 	for name, mutate := range map[string]func(*config.Project){
 		"enforcement": func(p *config.Project) { p.Render.Enforcement = "advisory-ish" },
-		"capture":     func(p *config.Project) { p.Render.Compare = []config.RenderCompare{{Capture: "a/b.png", Reference: "r.png"}} },
-		"reference":   func(p *config.Project) { p.Render.Compare = []config.RenderCompare{{Capture: "a.png", Reference: "../r.png"}} },
+		"capture": func(p *config.Project) {
+			p.Render.Compare = []config.RenderCompare{{Capture: "a/b.png", Reference: "r.png"}}
+		},
+		"reference": func(p *config.Project) {
+			p.Render.Compare = []config.RenderCompare{{Capture: "a.png", Reference: "../r.png"}}
+		},
 		"tolerance": func(p *config.Project) {
 			p.Render.Compare = []config.RenderCompare{{Capture: "a.png", Reference: "r.png", Tolerance: &bad}}
 		},

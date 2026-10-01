@@ -422,6 +422,10 @@ capture command and attaches the PNGs it writes to the run as evidence. The
 engine does not know how a product is captured — a browser, a window grab and a
 device screenshot are all just a command that writes PNGs.
 
+A bare `[render]` with no keys declares the section and captures with
+`[run].command`. A `[render]` whose keys are all empty (what versions before
+B-466 wrote into every file) declares nothing, and Ducklab no longer writes it.
+
 ```toml
 [render]
 command   = "node capture.mjs"            # empty: [run].command
