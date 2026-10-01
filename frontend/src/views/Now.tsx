@@ -509,7 +509,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
               )}
             </div>
           ) : (
-            nowList.length > 0 && (
+            nowList.length > 0 && actionSteps.length === 0 && (
               <p className="mt-1 text-xs text-ink-muted" data-testid="now-all-done">
                 Nothing is ready to start either: everything is done, running, or waiting
                 on something.

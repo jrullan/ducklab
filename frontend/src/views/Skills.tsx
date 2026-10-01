@@ -215,14 +215,14 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
                   {sk.runnable ? "runnable" : "documentation"}
                 </span>
                 {sk.pending && (
-                  <span className="text-[10px] text-warn" data-testid="skill-pending">
+                  <span className="text-[10px] text-warning" data-testid="skill-pending">
                     pending acceptance — unusable until its run is accepted
                   </span>
                 )}
               </div>
               <p className="mt-1 text-xs text-ink-secondary">{sk.description}</p>
               {(sk.problems?.length ?? 0) > 0 && (
-                <ul className="mt-1 text-xs text-warn" data-testid="skill-problems">
+                <ul className="mt-1 text-xs text-warning" data-testid="skill-problems">
                   {sk.problems!.map((p) => (
                     <li key={p}>⚠ {p}</li>
                   ))}
@@ -278,7 +278,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
                   )}
                   {saveProblems !== null &&
                     (saveProblems.length > 0 ? (
-                      <ul className="mt-1 text-xs text-warn" data-testid="skill-save-problems">
+                      <ul className="mt-1 text-xs text-warning" data-testid="skill-save-problems">
                         {saveProblems.map((p) => (
                           <li key={p}>⚠ {p}</li>
                         ))}
@@ -307,7 +307,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
                             type="button"
                             onClick={() => void remove(sk.name ?? "")}
                             data-testid="skill-delete-confirm"
-                            className="rounded border border-serious px-3 py-1 text-xs text-warn"
+                            className="rounded border border-serious px-3 py-1 text-xs text-warning"
                           >
                             Delete {sk.name} — for real
                           </button>

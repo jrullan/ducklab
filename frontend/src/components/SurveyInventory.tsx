@@ -18,7 +18,7 @@ export function SurveyCoverageLine({ run, testId }: { run?: Run | null; testId?:
   const items = unaccounted(run);
   if (items.length === 0) return null;
   return (
-    <p data-testid={testId} className="mb-2 text-xs text-warn">
+    <p data-testid={testId} className="mb-2 text-xs text-warning">
       ⚠ {items.length} surface areas unaccounted: {items.map((item) => item.name).filter(Boolean).join(", ")}
     </p>
   );

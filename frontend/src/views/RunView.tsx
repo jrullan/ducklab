@@ -1043,8 +1043,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const decisionSurface = decisionOpen ? (
     <section className="m-2 rounded-card border border-serious p-3" data-testid="run-decision">
       {(proposalBlockers.length > 0 || inheritedProposalDebt.length > 0) && (
-        <div className="mb-3 rounded border border-warn p-2" data-testid="proposal-mechanical-findings">
-          <div className="text-xs font-medium text-warn">Deterministic proposal checks</div>
+        <div className="mb-3 rounded border border-warning p-2" data-testid="proposal-mechanical-findings">
+          <div className="text-xs font-medium text-warning">Deterministic proposal checks</div>
           <p className="mt-1 text-sm text-ink">
             These findings come from Ducklab's mechanical checks, not from the reviewer's opinion.
           </p>
@@ -1108,7 +1108,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             data-testid="accept-union-additive"
             disabled={acceptState.kind === "pending"}
             onClick={() => void acceptRun(true)}
-            className="rounded border border-warn px-3 py-1 text-sm text-ink disabled:opacity-50"
+            className="rounded border border-warning px-3 py-1 text-sm text-ink disabled:opacity-50"
           >
             Retry with additive merge
           </button>
@@ -1178,7 +1178,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         const unread = (run.pending_data?.unread_refs as string[] | undefined) ?? [];
         if (unread.length === 0) return null;
         return (
-          <p data-testid="run-unread-refs" className="mt-2 text-xs text-warn">
+          <p data-testid="run-unread-refs" className="mt-2 text-xs text-warning">
             ⚠ {unread.length} reference document{unread.length === 1 ? " was" : "s were"} digested
             but never opened during this run: {unread.map((r) => r.split("/").pop()).join(", ")} — the draft may miss their detail.
           </p>
@@ -1410,7 +1410,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               (remove, chat) the person was hunting: the phantom with a title
               and nothing else. An empty brief is a fact worth stating. */}
           {task.spec_debt ? (
-            <p className="mt-1 text-xs text-warn" data-testid="task-spec-debt">
+            <p className="mt-1 text-xs text-warning" data-testid="task-spec-debt">
               spec-debt — no spec section covers this task; it settles into the spec after its build is accepted
             </p>
           ) : (task.implements?.length ?? 0) > 0 ? (
@@ -1425,7 +1425,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               <Prose body={task.body} />
             </div>
           ) : (
-            <p className="mt-1 text-xs text-warn" data-testid="task-empty-body">
+            <p className="mt-1 text-xs text-warning" data-testid="task-empty-body">
               this task has no body — a model working it would have to guess what it means
             </p>
           )}
@@ -1443,7 +1443,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <button type="button" onClick={() => { void client.stageStart(run.project_id, "plan", { splitTask: task.id }).then((started) => { window.location.hash = routeHref({ name: "run", id: started.id }); }).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }} className="rounded border border-hairline px-2 py-1">Split this task</button>
             <span className="self-center text-xs text-ink-muted">Starts an amendment proposal: it must preview two sections with disjoint Owns lanes before the plan changes.</span>
           </div>
-          {taskBodySaved && <div className="mt-2 rounded border border-warn p-2 text-sm" data-testid="task-relaunch-offer">
+          {taskBodySaved && <div className="mt-2 rounded border border-warning p-2 text-sm" data-testid="task-relaunch-offer">
             <p>This click accepts the amendment, aborts this run, then starts a new attributed run against the amended body. Relaunch re-rolls the dice; the spent {money(run.budget?.usd ?? 0)} stays on the record.</p>
             <button type="button" disabled={taskBodyBusy} className="mt-2 rounded border border-hairline px-2 py-1" onClick={() => {
               setTaskBodyBusy(true); setActionError(null);
@@ -2068,7 +2068,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         const data = event.data ?? {};
         const author = String(data.author ?? "advisor").replace(/^advisor:/, "").replace(" (yolo)", "");
         return (
-          <section key={`${event.seq ?? ""}:${String(data.question_id ?? "")}`} className="m-2 rounded-card border border-warn p-3" data-testid="advisor-auto-answer">
+          <section key={`${event.seq ?? ""}:${String(data.question_id ?? "")}`} className="m-2 rounded-card border border-warning p-3" data-testid="advisor-auto-answer">
             <StatusChip role="warning" label={`answered by ${author} under yolo`} />
             <p className="mt-2 text-sm text-ink">{String(data.question ?? "")}</p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-ink-secondary">{String(data.answer ?? "")}</p>
@@ -2530,14 +2530,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   ))}
                 </div>
               )}
-              {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warn">{run.harness_profile.detection_error}</p>}
+              {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warning">{run.harness_profile.detection_error}</p>}
             </section>
           )}
           {run.review_evidence && (
             <section className="rounded-card border border-hairline p-3" data-testid="run-review-evidence">
               <h2 className="text-sm font-medium text-ink">semantic review</h2>
               {run.review_evidence.status === "not_seated" ? (
-                <p className="mt-1 text-xs text-warn">No reviewer was seated. A green gate proves only that the configured commands passed.</p>
+                <p className="mt-1 text-xs text-warning">No reviewer was seated. A green gate proves only that the configured commands passed.</p>
               ) : (
                 <>
                   <p className="mt-1 text-xs text-ink-secondary">
@@ -2552,8 +2552,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </section>
           )}
           {(run.gate_coverage?.length ?? 0) > 0 && (
-            <section className={`rounded-card border p-3 ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "border-critical" : "border-warn"}`} data-testid="run-gate-coverage">
-              <h2 className={`text-sm font-medium ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "text-critical" : "text-warn"}`}>
+            <section className={`rounded-card border p-3 ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "border-critical" : "border-warning"}`} data-testid="run-gate-coverage">
+              <h2 className={`text-sm font-medium ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "text-critical" : "text-warning"}`}>
                 {run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "gate coverage failure" : "gate coverage caveat"}
               </h2>
               {run.gate_coverage!.map((finding) => (
@@ -2671,7 +2671,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   </span>
                 </div>
                 {events.some((e) => e.type === "reply_call" && Boolean((e.data as { reserve_lifted?: boolean }).reserve_lifted)) && (
-                  <p className="text-xs text-warn" data-testid="pair-reserve-warning">
+                  <p className="text-xs text-warning" data-testid="pair-reserve-warning">
                     The small-seat pair reserve was lifted; the independent reviewer's slot may starve before review begins.
                   </p>
                 )}

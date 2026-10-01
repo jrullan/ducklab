@@ -9,6 +9,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bug"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/release"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/vcs"
@@ -50,6 +51,65 @@ func TestTheGuideWalksTheDocumentPipeline(t *testing.T) {
 	if !strings.Contains(first.Action, "Describe what you want to build") {
 		t.Errorf("intake step leads with jargon: %q", first.Action)
 	}
+}
+
+func TestTheGuideOffersAVisualCheckBeforeTheReplicaCanLookDone(t *testing.T) {
+	st := projectSnapshot{
+		HasRequirements: true,
+		VisualReference: "REF-IMG-1a2b3c4d",
+		RunURL:          "http://127.0.0.1:4173",
+	}
+	steps := nextSteps(st)
+	if strings.Join(ids(steps), ",") != "visual-check,spec" {
+		t.Fatalf("steps = %v, want the visual check alongside the next document step", ids(steps))
+	}
+	if steps[0].Kind != "project" || steps[0].Ref != "visual-check" || !strings.Contains(steps[0].Reason, st.VisualReference) {
+		t.Errorf("visual step = %+v", steps[0])
+	}
+	st.HasVisualCheck = true
+	for _, step := range nextSteps(st) {
+		if step.ID == "visual-check" {
+			t.Fatalf("configured project still offered visual setup: %+v", step)
+		}
+	}
+}
+
+func TestProjectNextFindsAStoredReferenceAndRunnableURL(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "calc", GitInit: true, GitName: "Ada", GitEmail: "a@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirements := "## REQ-001 — Match the calculator\n\nCompare the app with REF-IMG-1a2b3c4d.\n\n**Priority:** must\n"
+	if err := os.MkdirAll(filepath.Dir(artifact.Path(p.Path, artifact.KindRequirements)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(p.Path, artifact.KindRequirements), []byte(requirements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refDir := filepath.Join(p.Path, ".ducklab", "refs", "images")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "1a2b3c4d.png"), []byte("stored reference"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tomlPath := filepath.Join(p.Path, ".ducklab", "project.toml")
+	cfg, err := config.LoadProject(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Run.URL = "http://127.0.0.1:4173"
+	if err := config.SaveProject(tomlPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, step := range mustNext(t, s, p.ID) {
+		if step.ID == "visual-check" {
+			return
+		}
+	}
+	t.Fatal("ProjectNext did not offer a visual check for the accepted reference and run URL")
 }
 
 // Work already paid for outranks everything: a paused run waits on one click,

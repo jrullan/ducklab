@@ -914,7 +914,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       </div>
 
       {Object.entries(modes.turn_ceilings ?? {}).length > 0 && (
-        <p className="mt-2 text-xs text-warn" data-testid="turn-ceilings">
+        <p className="mt-2 text-xs text-warning" data-testid="turn-ceilings">
           Hard ceilings: {Object.entries(modes.turn_ceilings ?? {}).map(([turn, cap]) => `${turn} ${cap}`).join(", ")}. Higher defaults, run overrides, and live no-cap are clamped here.
         </p>
       )}
