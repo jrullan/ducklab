@@ -630,10 +630,15 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	// project behind.
 	git := vcs.New(absPath)
 	if !git.HasGit() && req.GitInit {
-		if err := os.MkdirAll(absPath, 0o755); err != nil {
+		created, err := mkdirAllTracked(absPath)
+		if err != nil {
 			return nil, err
 		}
 		if !gitIdentityKnown(git) && (strings.TrimSpace(req.GitName) == "" || strings.TrimSpace(req.GitEmail) == "") {
+			// The check needs an existing directory to run git in; undo the
+			// directories this call made, so a refusal leaves nothing behind
+			// (review of #121: an empty phantom folder remained).
+			removeCreatedDirs(created)
 			return nil, ErrGitIdentityRequired
 		}
 	}

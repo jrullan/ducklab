@@ -23,13 +23,14 @@ func TestProjectInitAsksForAGitIdentityAndSetsItForThatRepositoryOnly(t *testing
 	defer func() { gitIdentityKnown = orig }()
 
 	s := serviceWithDucklings(t, "pato-uno")
-	dir := filepath.Join(t.TempDir(), "calc")
+	dir := filepath.Join(t.TempDir(), "nested", "calc")
 	_, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "calc", GitInit: true})
 	if !errors.Is(err, ErrGitIdentityRequired) {
 		t.Fatalf("err = %v, want ErrGitIdentityRequired", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, ".ducklab")); !os.IsNotExist(statErr) {
-		t.Fatal("a refused init left a half-made project")
+	// Review of #121: nothing at all, not even the empty folders.
+	if _, statErr := os.Stat(filepath.Dir(dir)); !os.IsNotExist(statErr) {
+		t.Fatal("a refused init left the folders it created")
 	}
 
 	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "calc", GitInit: true, GitName: "Ada Lovelace", GitEmail: "ada@example.com"}); err != nil {
@@ -140,5 +141,64 @@ func TestProjectStartRefusesAnUnknownPresetBeforeCreatingAnything(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(home, "Ducklab", "calc")); !os.IsNotExist(err) {
 		t.Fatal("an unknown preset still created the project")
+	}
+}
+
+// Jose, reviewing B-456: the default folder is the person's preference, with
+// ~/Ducklab only as the starting point.
+func TestTheProjectsFolderIsAPreference(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	s.configPath = filepath.Join(t.TempDir(), "config.toml")
+	if v := s.ProjectDefaults(); v.ProjectsDir != "" || v.Effective != filepath.Join(home, "Ducklab") {
+		t.Fatalf("starting point = %+v", v)
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{ProjectsDir: "relative/dir"}); err == nil {
+		t.Fatal("a relative folder was accepted")
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{ProjectsDir: "~/code"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.ProjectDefaults(); v.Effective != filepath.Join(home, "code") {
+		t.Fatalf("~ not expanded once at set time: %+v", v)
+	}
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "calc", GitName: "Ada", GitEmail: "ada@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Project.Path != filepath.Join(home, "code", "calc") {
+		t.Fatalf("project went to %s", res.Project.Path)
+	}
+	if res.RunID != "" {
+		s.runsMu.RLock()
+		rs := s.runs[res.RunID]
+		s.runsMu.RUnlock()
+		<-rs.done
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.ProjectDefaults(); v.ProjectsDir != "" || v.Effective != filepath.Join(home, "Ducklab") {
+		t.Fatalf("empty did not restore the starting point: %+v", v)
+	}
+}
+
+// Review of #121: "Create" must not reopen an existing project and start a
+// second intake on it under a new name.
+func TestProjectStartRefusesAnExistingDucklabProject(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	dir := t.TempDir()
+	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "original", GitInit: true, GitName: "Ada", GitEmail: "ada@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.RunList(context.Background(), RunFilter{})
+	_, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "replacement", Path: dir, Brief: "something else"})
+	if err == nil || !strings.Contains(err.Error(), "already a Ducklab project") {
+		t.Fatalf("err = %v", err)
+	}
+	after, _ := s.RunList(context.Background(), RunFilter{})
+	if len(after) != len(before) {
+		t.Fatalf("a refused start launched %d run(s)", len(after)-len(before))
 	}
 }

@@ -160,6 +160,7 @@ export function Projects({
 
   return (
     <div data-testid="projects-view" className="space-y-4">
+      <ProjectsFolderPreference client={client} />
       <section className="rounded-card border border-hairline p-3">
         <h3 className="mb-2 text-ink">New project</h3>
         <div className="flex flex-wrap items-center gap-2">
@@ -649,5 +650,71 @@ function GateChip({
       )}
       {editor}
     </div>
+  );
+}
+
+/** Where projects started from an idea go when no folder is named (a
+ * preference, per Jose's review of B-456; ~/Ducklab is only the starting
+ * point). */
+function ProjectsFolderPreference({ client }: { client: EngineClient }) {
+  const [view, setView] = useState<{ projects_dir: string; effective: string } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof client.projectDefaults !== "function") return;
+    client.projectDefaults().then((v) => { setView(v); setDraft(v.projects_dir); }).catch(() => {});
+  }, [client]);
+  if (!view) return null;
+  const save = (dir: string) => {
+    setBusy(true);
+    setProblem(null);
+    client
+      .projectDefaultsSet({ projects_dir: dir })
+      .then((v) => { setView(v); setDraft(v.projects_dir); })
+      .catch((e) => setProblem(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="rounded-card border border-hairline p-3" data-testid="projects-folder">
+      <h3 className="mb-1 text-ink">Folder for new projects</h3>
+      <p className="mb-2 text-xs text-ink-muted">
+        A project started from an idea goes here when you do not choose a folder. Now: <code>{view.effective}</code>
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          aria-label="folder for new projects"
+          data-testid="projects-folder-input"
+          value={draft}
+          placeholder={view.effective}
+          onChange={(e) => setDraft(e.target.value)}
+          className="min-w-64 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs"
+        />
+        {canChooseDirectory() && (
+          <button
+            type="button"
+            onClick={() => void chooseDirectory("Choose the folder for new projects").then((p) => p && setDraft(p))}
+            className="rounded border border-hairline px-2 py-1 text-sm"
+          >
+            Choose…
+          </button>
+        )}
+        <button
+          type="button"
+          data-testid="projects-folder-save"
+          disabled={busy || draft.trim() === view.projects_dir}
+          onClick={() => save(draft.trim())}
+          className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+        >
+          Save
+        </button>
+        {view.projects_dir && (
+          <button type="button" disabled={busy} onClick={() => save("")} className="text-xs text-ink-muted underline">
+            Use the default
+          </button>
+        )}
+      </div>
+      {problem && <p className="mt-2 text-sm text-critical" data-testid="projects-folder-problem">{problem}</p>}
+    </section>
   );
 }

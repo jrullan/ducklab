@@ -77,6 +77,12 @@ export interface ProjectPreset {
   summary: string;
 }
 
+/** Mirrors service.ProjectDefaultsView. */
+export interface ProjectDefaultsView {
+  projects_dir: string;
+  effective: string;
+}
+
 /** Mirrors service.ProjectStartRequest. */
 export interface ProjectStartRequest {
   name: string;
@@ -1303,6 +1309,14 @@ export class EngineClient {
   }
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
+  }
+  /** Where projects started from an idea go (B-456): the stored preference
+   * (empty = built-in) and the folder actually in effect. */
+  projectDefaults() {
+    return this.request<ProjectDefaultsView>("GET", "/v1/defaults/projects");
+  }
+  projectDefaultsSet(body: { projects_dir: string }) {
+    return this.request<ProjectDefaultsView>("PUT", "/v1/defaults/projects", body);
   }
   engineDefaults() {
     return this.request<EngineDefaultsView>("GET", "/v1/defaults/engine");

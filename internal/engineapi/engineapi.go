@@ -1176,6 +1176,23 @@ func (s *Server) handleProjectPresets(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProjectPresets()})
 }
 
+func (s *Server) handleProjectDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.ProjectDefaults())
+}
+
+func (s *Server) handleProjectDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var view service.ProjectDefaultsView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.ProjectDefaultsSet(view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.ProjectDefaults())
+}
+
 // handleProjectStart creates a project from an idea and starts its intake
 // (B-456). A missing git identity is a question for the person, not a 500.
 func (s *Server) handleProjectStart(w http.ResponseWriter, r *http.Request) {

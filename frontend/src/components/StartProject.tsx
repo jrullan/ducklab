@@ -45,6 +45,15 @@ export function StartProject({
     client.projectPresets().then((items) => { if (live) setPresets(items); }).catch(() => {});
     return () => { live = false; };
   }, [client]);
+  // The folder preference (Settings → Projects); "~/Ducklab" until it loads
+  // or when the engine predates the preference.
+  const [projectsDir, setProjectsDir] = useState("~/Ducklab");
+  useEffect(() => {
+    if (typeof client.projectDefaults !== "function") return;
+    let live = true;
+    client.projectDefaults().then((v) => { if (live && v.effective) setProjectsDir(v.effective); }).catch(() => {});
+    return () => { live = false; };
+  }, [client]);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -152,7 +161,7 @@ export function StartProject({
             data-testid="start-path"
             value={path}
             onChange={(e) => setPath(e.target.value)}
-            placeholder={`~/Ducklab/${slug || "<name>"}`}
+            placeholder={`${projectsDir}/${slug || "<name>"}`}
             className={`${field} font-mono text-xs`}
           />
           {canChooseDirectory() && (

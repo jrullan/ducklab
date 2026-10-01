@@ -72,3 +72,13 @@ describe("StartProject presets", () => {
     await waitFor(() => expect(projectStart).toHaveBeenCalledWith(expect.objectContaining({ preset: "web-page" })));
   });
 });
+
+// The default folder is the person's preference.
+describe("StartProject folder preference", () => {
+  it("previews the new project under the preferred folder", async () => {
+    const projectDefaults = vi.fn(() => Promise.resolve({ projects_dir: "/srv/work", effective: "/srv/work" }));
+    render(<StartProject client={{ projectStart: vi.fn(), projectDefaults } as unknown as EngineClient} onStarted={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("start-name"), { target: { value: "Calc" } });
+    await waitFor(() => expect(screen.getByTestId("start-path")).toHaveAttribute("placeholder", "/srv/work/calc"));
+  });
+});

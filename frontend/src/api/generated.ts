@@ -948,6 +948,11 @@ export interface ServiceProject {
   path?: string;
 }
 
+export interface ServiceProjectDefaultsView {
+  effective?: string;
+  projects_dir?: string;
+}
+
 export interface ServiceProjectStartRequest {
   brief?: string;
   git_email?: string;
@@ -1178,6 +1183,8 @@ export const OPERATIONS = [
   { id: "EngineDefaultsSet", method: "PUT", path: "/v1/defaults/engine" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
   { id: "ModeDefaultsSet", method: "PUT", path: "/v1/defaults/modes" },
+  { id: "ProjectDefaults", method: "GET", path: "/v1/defaults/projects" },
+  { id: "ProjectDefaultsSet", method: "PUT", path: "/v1/defaults/projects" },
   { id: "GlobalRosterGet", method: "GET", path: "/v1/defaults/roster" },
   { id: "GlobalRosterSet", method: "PUT", path: "/v1/defaults/roster" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
