@@ -29,6 +29,8 @@ export type Readiness = {
   noProviders: boolean;
   /** A configured OpenRouter provider whose key is already available. */
   openRouter?: string;
+  /** Every configured id, including ducklings whose provider is unavailable. */
+  ducklingIDs: string[];
 };
 
 export function readiness(providers: readonly ProviderView[], ducklings: readonly Duckling[]): Readiness {
@@ -45,13 +47,21 @@ export function readiness(providers: readonly ProviderView[], ducklings: readonl
   const openRouter = providers.find((p) =>
     p.key_present && (p.id === "openrouter" || p.base_url.includes("openrouter.ai")),
   )?.id;
-  return { usable, missingKeys, noDucklings: ducklings.length === 0, noProviders: providers.length === 0, openRouter };
+  return { usable, missingKeys, noDucklings: ducklings.length === 0, noProviders: providers.length === 0, openRouter, ducklingIDs: ducklings.map((d) => d.id) };
 }
 
 export const OPENROUTER_STARTERS = [
-  { id: "pato-sonnet", model: "anthropic/claude-sonnet-4.5", label: "Claude Sonnet 4.5", vision: true },
-  { id: "pato-qwen", model: "qwen/qwen3.6", label: "Qwen 3.6", vision: false },
+  { id: "pato-gemini", model: "google/gemini-3.7-flash", label: "Gemini 3.7 Flash", vision: true, note: "recommended · lower cost" },
+  { id: "pato-qwen", model: "qwen/qwen3.6-flash", label: "Qwen 3.6 Flash", vision: true, note: "alternative" },
 ] as const;
+
+export function availableDucklingID(base: string, existing: readonly string[]): string {
+  const used = new Set(existing);
+  if (!used.has(base)) return base;
+  let suffix = 2;
+  while (used.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
 
 export function friendlyProbeError(id: string, message: string): string {
   if (id === "pato-local" && /404|not found|localhost|127\.0\.0\.1/i.test(message)) {
@@ -77,12 +87,25 @@ export function FirstRun({
   const [failed, setFailed] = useState(false);
   const [adding, setAdding] = useState("");
   const [addFailure, setAddFailure] = useState("");
+  const [providerModels, setProviderModels] = useState<string[] | null>(null);
 
   const load = useCallback(() => {
     let live = true;
     Promise.all([client.providers(), client.ducklings()])
-      .then(([providers, ducklings]) => {
-        if (live) setState(readiness(providers, ducklings));
+      .then(async ([providers, ducklings]) => {
+        const next = readiness(providers, ducklings);
+        if (live) setState(next);
+        if (!next.openRouter) {
+          if (live) setProviderModels(null);
+          return;
+        }
+		if (live) setProviderModels(null);
+        try {
+          const models = await client.providerModels(next.openRouter);
+          if (live) setProviderModels(models);
+        } catch {
+          if (live) setProviderModels([]);
+        }
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -96,16 +119,19 @@ export function FirstRun({
 
   const addStarter = (starter: (typeof OPENROUTER_STARTERS)[number]) => {
     if (!state?.openRouter) return;
-    setAdding(starter.id);
+    const id = availableDucklingID(starter.id, state.ducklingIDs);
+    setAdding(id);
     setAddFailure("");
-    void client.ducklingSet(starter.id, {
+    void client.ducklingSet(id, {
       provider: state.openRouter,
       model: starter.model,
       caps: { native_tools: true, vision: starter.vision },
+      actor: "human",
+      create_only: true,
     })
-      .then(() => client.ducklingProbe(starter.id))
+      .then(() => client.ducklingProbe(id))
       .then(() => {
-        setTests((current) => ({ ...current, [starter.id]: "ok" }));
+        setTests((current) => ({ ...current, [id]: "ok" }));
         load();
       })
       .catch((error) => setAddFailure(error instanceof Error ? error.message : String(error)))
@@ -203,7 +229,7 @@ export function FirstRun({
               <p className="text-sm font-medium text-ink">OpenRouter key found — pick a model</p>
               <p className="mt-1 text-xs text-ink-secondary">Ducklab will create and test it here; no settings detour required.</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {OPENROUTER_STARTERS.map((starter) => (
+                {OPENROUTER_STARTERS.filter((starter) => providerModels?.includes(starter.model)).map((starter) => (
                   <button
                     key={starter.id}
                     type="button"
@@ -214,10 +240,15 @@ export function FirstRun({
                   >
                     <span className="font-medium">{starter.label}</span>
                     {starter.vision ? <span title="accepts image references"> · vision</span> : null}
+                    <span> · {starter.note}</span>
                     <span className="block font-mono text-ink-muted">{starter.model}</span>
+                    <span className="block text-ink-muted">save as {availableDucklingID(starter.id, state.ducklingIDs)}</span>
                   </button>
                 ))}
               </div>
+              {providerModels !== null && !OPENROUTER_STARTERS.some((starter) => providerModels.includes(starter.model)) && (
+                <p className="mt-2 text-xs text-ink-secondary">No verified starter is in the provider catalog right now. Add a current model in Settings.</p>
+              )}
               {addFailure && <p className="mt-2 text-xs text-critical" data-testid="first-run-add-failure">{addFailure}</p>}
             </li>
           )}

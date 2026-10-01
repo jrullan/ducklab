@@ -4,6 +4,7 @@ package duckling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -152,6 +153,21 @@ func (r *Registry) clearProbeFailure(id config.DucklingID) {
 	r.probeMu.Lock()
 	defer r.probeMu.Unlock()
 	delete(r.probeFailures, id)
+}
+
+// RecordProviderResult folds real run traffic into the same short-lived
+// health signal as a capability probe. A declared native-tools capability can
+// skip launch-time probing, but a 404/refused/DNS failure from the actual chat
+// still proves that endpoint should not be selected automatically again.
+// Contract/content errors do not: they say nothing about reachability.
+func (r *Registry) RecordProviderResult(id config.DucklingID, err error) {
+	if err == nil {
+		r.clearProbeFailure(id)
+		return
+	}
+	if errors.Is(err, provider.ErrProviderUnavailable) || errors.Is(err, provider.ErrAuth) {
+		r.recordProbeFailure(id, err)
+	}
 }
 
 // RegisterProvider registers a provider for ducklings.

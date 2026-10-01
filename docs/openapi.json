@@ -2846,6 +2846,9 @@
       },
       "ServiceDucklingUpdate": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "caps": {
             "$ref": "#/components/schemas/ServiceCapsUpdate"
           },
@@ -2854,6 +2857,9 @@
           },
           "cost": {
             "$ref": "#/components/schemas/ServiceCostUpdate"
+          },
+          "create_only": {
+            "type": "boolean"
           },
           "fallback": {
             "type": "string"
@@ -8404,6 +8410,57 @@
           }
         ],
         "summary": "Concrete OpenRouter serving endpoints for a model, with exact price, quantization, and disclosed data policy"
+      }
+    },
+    "/v1/providers/{id}/models": {
+      "get": {
+        "operationId": "ProviderModels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Live model ids from a configured provider"
       }
     },
     "/v1/restart": {

@@ -40,6 +40,36 @@ func TestAutomaticSeatingSkipsTheDucklingWhoseLastProbeFailed(t *testing.T) {
 	}
 }
 
+type unavailableChatProvider struct{ selectiveProbeProvider }
+
+func (unavailableChatProvider) Chat(context.Context, provider.ChatRequest) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("%w: 404 Not Found", provider.ErrProviderUnavailable)
+}
+
+func (unavailableChatProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("%w: 404 Not Found", provider.ErrProviderUnavailable)
+}
+
+func TestActualChatFailureMakesNextAutomaticSeatSkipDuckling(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-local", "pato-openrouter")
+	s.ducklings.RegisterProvider(unavailableChatProvider{})
+	native := true
+	cfg := s.cfg.Ducklings["pato-local"]
+	cfg.Caps.NativeTools = &native // the replay path: declared, so no launch probe
+	s.cfg.Ducklings["pato-local"] = cfg
+	loop, err := s.buildLoop(context.Background(), "pato-local", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loop.Provider.ChatStream(context.Background(), provider.ChatRequest{Model: cfg.Model}, make(chan provider.Delta, 1)); err == nil {
+		t.Fatal("dead endpoint unexpectedly answered")
+	}
+	roster, _ := s.resolveCanonicalRoster(nil, "solo")
+	if got := roster[config.RoleImplementer]; got != "pato-openrouter" {
+		t.Fatalf("implementer after real 404 = %q, want pato-openrouter", got)
+	}
+}
+
 // An omitted mode is an engine decision, not a launcher convenience. Desktop,
 // autopilot, and MCP all enter through RunStart, so each must receive the same
 // phase setting, project habit, and final solo fallback, persisted with why.

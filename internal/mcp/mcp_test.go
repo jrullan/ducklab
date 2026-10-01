@@ -1343,4 +1343,19 @@ func TestDucklingAddIsAnOperatorToolAndTestsWhatItSaved(t *testing.T) {
 	if eng.ducklingSetID != "pato-sonnet" || eng.ducklingSetBody["provider"] != "openrouter" || eng.ducklingSetBody["model"] != "anthropic/claude-sonnet-4.5" {
 		t.Fatalf("saved = %q %#v", eng.ducklingSetID, eng.ducklingSetBody)
 	}
+	if eng.ducklingSetBody["actor"] != "mcp:claude" || eng.ducklingSetBody["create_only"] != true {
+		t.Fatalf("add lacks create-only attribution: %#v", eng.ducklingSetBody)
+	}
+}
+
+func TestDucklingAddRefusesAnExistingID(t *testing.T) {
+	eng := &fakeEngine{ducklings: []map[string]interface{}{{"id": "pato-sonnet"}}}
+	resps := drive(t, eng, initFrame, callFrame(2, "duckling", `{"action":"add","id":"pato-sonnet","provider":"openrouter","model":"anthropic/claude-sonnet-4.5"}`))
+	text, isErr := toolResultText(t, resps[1])
+	if !isErr || !strings.Contains(text, "already exists") {
+		t.Fatalf("duplicate add = error %v, %s", isErr, text)
+	}
+	if eng.ducklingSetID != "" {
+		t.Fatalf("duplicate add reached write API: %q", eng.ducklingSetID)
+	}
 }

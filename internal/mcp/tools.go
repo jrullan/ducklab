@@ -568,7 +568,19 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			if id == "" || providerID == "" || model == "" {
 				return nil, fmt.Errorf("duckling add requires id, provider, and model")
 			}
-			body := map[string]interface{}{"provider": providerID, "model": model}
+			ducklings, err := s.eng.DucklingList()
+			if err != nil {
+				return nil, err
+			}
+			for _, existing := range ducklings {
+				if existingID, _ := existing["id"].(string); existingID == id {
+					return nil, fmt.Errorf("duckling %q already exists; choose another id or edit it explicitly", id)
+				}
+			}
+			body := map[string]interface{}{
+				"provider": providerID, "model": model,
+				"actor": "mcp:" + s.client, "create_only": true,
+			}
 			if vision, present := a["vision"]; present {
 				body["caps"] = map[string]interface{}{"vision": vision}
 			}

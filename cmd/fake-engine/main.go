@@ -152,6 +152,11 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects/{id}/autonomy", f.auth(f.projectAutonomy))
 	f.mux.HandleFunc("GET /v1/ducklings", f.auth(f.ducklings))
 	f.mux.HandleFunc("GET /v1/providers", f.auth(f.providers))
+	f.mux.HandleFunc("GET /v1/providers/{id}/models", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"items": []string{
+			"google/gemini-3.7-flash", "qwen/qwen3.6-flash",
+		}})
+	}))
 	f.mux.HandleFunc("GET /v1/providers/{id}/model-endpoints", f.auth(f.providerModelEndpoints))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
@@ -393,7 +398,7 @@ func (f *fakeEngine) ducklings(w http.ResponseWriter, r *http.Request) {
 			{"id": "pato-uno", "provider": "beelink", "model": "gemma-4-26b",
 				"caps": map[string]interface{}{"native_tools": false, "context_tokens": 65536},
 				"cost": map[string]interface{}{"input_per_mtok": 0.0, "output_per_mtok": 0.0}},
-			{"id": "pato-dos", "provider": "openrouter", "model": "qwen/qwen3.6",
+			{"id": "pato-dos", "provider": "openrouter", "model": "qwen/qwen3.6-flash",
 				"caps": map[string]interface{}{"native_tools": true, "context_tokens": 131072},
 				"cost": map[string]interface{}{"input_per_mtok": 0.2, "output_per_mtok": 0.6}},
 		}, "total": 2,

@@ -833,9 +833,11 @@ export interface ServiceDiagnosticDefaultsView {
 }
 
 export interface ServiceDucklingUpdate {
+  actor?: string;
   caps?: ServiceCapsUpdate;
   color?: number;
   cost?: ServiceCostUpdate;
+  create_only?: boolean;
   fallback?: string;
   model?: string;
   notes?: string;
@@ -1350,6 +1352,7 @@ export const OPERATIONS = [
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
   { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
   { id: "ProviderModelEndpoints", method: "GET", path: "/v1/providers/{id}/model-endpoints" },
+  { id: "ProviderModels", method: "GET", path: "/v1/providers/{id}/models" },
   { id: "Restart", method: "POST", path: "/v1/restart" },
   { id: "RunList", method: "GET", path: "/v1/runs" },
   { id: "RunGet", method: "GET", path: "/v1/runs/{id}" },

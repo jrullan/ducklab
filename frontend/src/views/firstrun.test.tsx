@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { FirstRun, friendlyProbeError, readiness } from "./FirstRun";
+import { availableDucklingID, FirstRun, friendlyProbeError, readiness } from "./FirstRun";
 import type { Duckling, EngineClient, ProviderView } from "../api/client";
 
 const provider = (over: Partial<ProviderView>): ProviderView => ({ id: "or", kind: "openai", base_url: "https://x", key_present: true, ...over });
@@ -12,6 +12,7 @@ function clientWith(providers: ProviderView[], ducklings: Duckling[], probe: (id
     ducklings: vi.fn(() => Promise.resolve(ducklings)),
     ducklingProbe: vi.fn(probe),
     ducklingSet: vi.fn(() => Promise.resolve({})),
+    providerModels: vi.fn(() => Promise.resolve(["google/gemini-3.7-flash", "qwen/qwen3.6-flash"])),
   } as unknown as EngineClient;
 }
 
@@ -54,14 +55,29 @@ describe("FirstRun", () => {
     render(<FirstRun client={client} connected onStarted={vi.fn()} />);
     expect(await screen.findByTestId("first-run-openrouter")).toHaveTextContent("OpenRouter key found");
     expect(screen.getByTestId("first-run-openrouter")).toHaveTextContent("vision");
-    fireEvent.click(screen.getByTestId("first-run-add-pato-sonnet"));
+    fireEvent.click(screen.getByTestId("first-run-add-pato-gemini"));
     await waitFor(() => {
-      expect(client.ducklingSet).toHaveBeenCalledWith("pato-sonnet", expect.objectContaining({
+      expect(client.ducklingSet).toHaveBeenCalledWith("pato-gemini", expect.objectContaining({
         provider: "openrouter",
-        model: "anthropic/claude-sonnet-4.5",
+        model: "google/gemini-3.7-flash",
+        create_only: true,
       }));
-      expect(client.ducklingProbe).toHaveBeenCalledWith("pato-sonnet");
+      expect(client.ducklingProbe).toHaveBeenCalledWith("pato-gemini");
     });
+  });
+
+  it("uses a non-colliding id for an existing starter name", () => {
+    expect(availableDucklingID("pato-gemini", ["pato-gemini", "pato-gemini-2"]))
+      .toBe("pato-gemini-3");
+  });
+
+  it("never offers a stale starter that is absent from the live catalog", async () => {
+    const openrouter = provider({ id: "openrouter", base_url: "https://openrouter.ai/api/v1", key_present: true });
+    const client = clientWith([openrouter], [duckling({ id: "pato-local", provider: "local" })]);
+    vi.mocked(client.providerModels).mockResolvedValue(["qwen/qwen3.6"]);
+    render(<FirstRun client={client} connected onStarted={vi.fn()} />);
+    expect(await screen.findByText(/No verified starter is in the provider catalog/)).toBeInTheDocument();
+    expect(screen.queryByTestId("first-run-add-pato-qwen")).not.toBeInTheDocument();
   });
 
   it("translates the starter local 404 into an actionable explanation", () => {
