@@ -161,9 +161,18 @@ export interface ConfigRemote {
   on_accept?: string;
 }
 
+export interface ConfigRenderCompare {
+  capture?: string;
+  reference?: string;
+  threshold?: number;
+  tolerance?: number;
+}
+
 export interface ConfigRenderContract {
   artifacts?: string;
   command?: string;
+  compare?: ConfigRenderCompare[];
+  enforcement?: string;
   ready?: string;
   scenes?: string[];
   timeout_s?: number;
@@ -624,10 +633,32 @@ export interface RunlogRun {
   tree_snapshot_head?: string;
   unsafe_writes?: boolean;
   verdict?: string;
+  visual?: RunlogVisualGate;
   wallclock_ms?: number;
   warning?: string;
   worktree_cleanup_failure?: string;
   worktree_path?: string;
+}
+
+export interface RunlogVisualCompare {
+  capture?: string;
+  diff_capture?: string;
+  error?: string;
+  height?: number;
+  mismatch?: number;
+  passed?: boolean;
+  reference?: string;
+  reference_capture?: string;
+  scaled_from?: string;
+  threshold?: number;
+  tolerance?: number;
+  width?: number;
+}
+
+export interface RunlogVisualGate {
+  enforcement?: string;
+  passed?: boolean;
+  results?: RunlogVisualCompare[];
 }
 
 export interface ServiceAcceptResult {

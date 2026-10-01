@@ -2201,7 +2201,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if projCfg.RenderConfigured && render.Command != "" {
 		rendered, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
 		if len(rendered.Captures) > 0 {
+			rs.wmu.Lock()
 			rs.run.Captures = rendered.Captures
+			rs.wmu.Unlock()
 			event := map[string]interface{}{"ok": true, "captures": rendered.Captures}
 			if renderErr != nil {
 				event["note"] = "captures attached despite dirty render exit: " + renderErr.Error()
@@ -2210,15 +2212,49 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 			rs.writer.AppendEvent("render", event)
 		} else if renderErr != nil {
+			rs.wmu.Lock()
 			rs.run.Warning = "render failed: " + renderErr.Error()
+			rs.wmu.Unlock()
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": false, "reason": renderErr.Error()})
 		} else if rendered.Note != "" {
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": true, "note": rendered.Note})
 		}
 	}
+	// The visual gate (B-460): captures held against reference images. A
+	// required mismatch fails the run like a red test; a diagnostic one is a
+	// caveat the person sees with the images side by side.
+	visualGate := ""
+	if projCfg.RenderConfigured && len(render.Compare) > 0 {
+		rs.wmu.Lock()
+		captures := append([]string(nil), rs.run.Captures...)
+		rs.wmu.Unlock()
+		vg := runVisualGate(ectx.ProjectRoot, render, rs.writer, captures)
+		summary := visualGateSummary(vg)
+		// The run is visible to RunGet while the gate runs; its record is
+		// changed only under the lock snapshotRun takes (review of #123).
+		rs.wmu.Lock()
+		rs.run.Visual = vg
+		if !vg.Passed && vg.Enforcement != "required" {
+			if rs.run.Warning != "" {
+				rs.run.Warning += "; " + summary
+			} else {
+				rs.run.Warning = summary
+			}
+		}
+		rs.wmu.Unlock()
+		verificationOutput += "\n" + summary
+		rs.writer.AppendEvent("visual_compare", map[string]interface{}{
+			"passed": vg.Passed, "enforcement": vg.Enforcement, "results": vg.Results, "summary": summary,
+		})
+		if vg.Passed {
+			visualGate = "green"
+		} else if vg.Enforcement == "required" {
+			visualGate = "red"
+		}
+	}
 	effectiveGate := string(gateResult.Gate)
 	effectiveExit := gateResult.ExitCode
-	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" {
+	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" || visualGate == "red" {
 		effectiveGate = "red"
 		if effectiveExit == 0 {
 			effectiveExit = 1
@@ -2297,6 +2333,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		contractGate = "red"
 	}
 	verdict := adjudicateBuildVerdict(projectVerdict, contractGate, dissent)
+	if visualGate == "red" {
+		verdict = "FAILED"
+	}
 	if dissent {
 		detail := fmt.Sprintf("reviewer ended with %s (%d finding(s)); a green command cannot override contractual dissent", reviewVerdict, reviewFindings)
 		rs.writer.AppendEvent("reviewer_dissent", map[string]interface{}{"verdict": reviewVerdict, "findings": reviewFindings, "detail": detail})

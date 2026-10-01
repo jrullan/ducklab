@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { runCaptureUrl, type Run, type Artifact } from "../api/client";
 import { money, moneyOrZero } from "../lib/format";
+import { VisualCheck } from "./VisualCheck";
 
 type Evidence = Record<string, unknown>;
 
@@ -78,6 +79,7 @@ export function EvidenceDrawer({ run, plan, open = true, onClose, captureClient 
         </div>
         <p className="mt-4 text-sm text-ink-secondary">{text(run.subject, "This run is waiting for your decision.")}</p>
         {captures.length > 0 && <section className="mt-5" aria-label="How it looks"><h3 className="text-sm font-medium text-ink">How it looks</h3><div className="mt-2 flex gap-3 overflow-x-auto" data-testid="render-captures">{captures.map((capture) => <img key={capture} src={captureURLs[capture]} alt={capture} className="h-32 w-auto rounded border border-hairline object-cover" />)}</div></section>}
+        {run.visual && <div className="mt-5"><VisualCheck run={run} captureClient={captureClient} /></div>}
         <div className="mt-4 grid gap-2 sm:grid-cols-3" data-testid="evidence-tiles">
           <div className="rounded border border-hairline p-3"><p className="text-xs text-ink-muted">Tests</p><p className="mt-1 font-medium text-ink">{testStatus}</p><p className="mt-1 text-xs text-ink-secondary">{testNote}</p></div>
           <div className="rounded border border-hairline p-3"><p className="text-xs text-ink-muted">Reviewer verdict</p><p className="mt-1 text-sm text-ink">“{verdict.replace(/^“|”$/g, "") }”</p></div>

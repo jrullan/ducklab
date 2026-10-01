@@ -119,10 +119,13 @@ type Run struct {
 	// paused the same long build after every subsequent turn.
 	HistoryDurationEscalated bool     `json:"history_duration_escalated,omitempty"`
 	Captures                 []string `json:"captures,omitempty"`
-	UnsafeWrites             bool     `json:"unsafe_writes"`
-	Stream                   bool     `json:"stream"`
-	DryRun                   bool     `json:"dry_run"`
-	Autonomy                 string   `json:"autonomy"`
+	// Visual is the visual gate: each capture held against its reference
+	// image (B-460). Its reference and diff images are captures too.
+	Visual       *VisualGate `json:"visual,omitempty"`
+	UnsafeWrites bool        `json:"unsafe_writes"`
+	Stream       bool        `json:"stream"`
+	DryRun       bool        `json:"dry_run"`
+	Autonomy     string      `json:"autonomy"`
 	// Origin says who started the run when it was not a person at a button:
 	// "autopilot" today. Empty means human-initiated.
 	Origin             string      `json:"origin,omitempty"`
@@ -271,6 +274,36 @@ type GateCoverageFinding struct {
 	Detail      string   `json:"detail"`
 	Files       []string `json:"files,omitempty"`
 	Enforcement string   `json:"enforcement,omitempty"`
+}
+
+// VisualGate is the outcome of comparing captures with reference images.
+type VisualGate struct {
+	// Enforcement is diagnostic (a mismatch is a caveat) or required.
+	Enforcement string          `json:"enforcement"`
+	Passed      bool            `json:"passed"`
+	Results     []VisualCompare `json:"results"`
+}
+
+// VisualCompare is one capture held against one reference.
+type VisualCompare struct {
+	Capture   string `json:"capture"`
+	Reference string `json:"reference"`
+	// ReferenceCapture and DiffCapture name the reference (at the capture's
+	// size) and the highlighted difference, served like any capture.
+	ReferenceCapture string  `json:"reference_capture,omitempty"`
+	DiffCapture      string  `json:"diff_capture,omitempty"`
+	Mismatch         float64 `json:"mismatch"`
+	Tolerance        float64 `json:"tolerance"`
+	Threshold        float64 `json:"threshold"`
+	Width            int     `json:"width,omitempty"`
+	Height           int     `json:"height,omitempty"`
+	// ScaledFrom is the reference's own size when it differed from the
+	// capture's and was scaled to compare ("390x844").
+	ScaledFrom string `json:"scaled_from,omitempty"`
+	Passed     bool   `json:"passed"`
+	// Error says why no comparison was possible (missing capture, unreadable
+	// reference); it counts as a failure.
+	Error string `json:"error,omitempty"`
 }
 
 // InterruptedTurn is a durable checkpoint for resuming the same role.

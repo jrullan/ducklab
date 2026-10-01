@@ -415,6 +415,54 @@ a missing binary (`exec.ErrNotFound`) as "rung does not apply", falling through.
 The chosen gate is displayed to the user before the first run and stored in
 `project.toml` as an explicit value so detection does not silently change later.
 
+### 3.2 Render captures and the visual gate — `[render]`
+
+`[render]` is optional. When present, the final gate runs the project's own
+capture command and attaches the PNGs it writes to the run as evidence. The
+engine does not know how a product is captured — a browser, a window grab and a
+device screenshot are all just a command that writes PNGs.
+
+```toml
+[render]
+command   = "node capture.mjs"            # empty: [run].command
+url       = "http://127.0.0.1:5173/"      # {engine} and {token} are substituted
+ready     = "http://127.0.0.1:5173/"      # empty: [run].health
+scenes    = ["/", "/settings"]            # passed through, newline-joined
+viewport  = "1440x900"
+timeout_s = 120
+artifacts = ".ducklab-render-captures/*.png"   # glob of the PNGs to attach
+
+enforcement = "diagnostic"                # diagnostic (default) | required
+
+[[render.compare]]
+capture   = "scene-01.png"                # a captured file name
+reference = "REF-IMG-1a2b3c4d"            # a reference image id, or a project path
+tolerance = 0.02                          # largest fraction of pixels that may differ
+threshold = 0.1                           # how different one pixel must look (0..1)
+```
+
+The command receives `DUCKLAB_RENDER_URL`, `DUCKLAB_RENDER_READY`,
+`DUCKLAB_RENDER_SCENES`, `DUCKLAB_RENDER_VIEWPORT`, `DUCKLAB_RENDER_OUTPUT`
+(write captures here), `DUCKLAB_RENDER_TIMEOUT_S`, `DUCKLAB_RUN_ID` and
+`DUCKLAB_PROJECT_ID`. A render failure is a caveat, never a verdict.
+
+**Visual gate (B-460).** Each `[[render.compare]]` holds one capture against
+one reference image: a `REF-IMG-…` id the requirements cite (stored under
+`.ducklab/refs/images/`) or a project-relative PNG/JPEG/GIF/WebP. A pixel
+differs when its perceptual (YIQ) colour distance exceeds `threshold` of the
+largest possible distance; the comparison passes when the differing fraction is
+at most `tolerance`. A reference of another size is scaled to the capture's size
+and the result records the original size. A capture that was not produced or a
+reference that cannot be read fails that comparison with the reason.
+
+With `enforcement = "required"` a failed comparison turns the gate red and the
+verdict FAILED, like a failing test. With `diagnostic` it becomes the run's
+caveat. Either way the run records `visual` (enforcement, passed, and per
+comparison the mismatch, tolerance, sizes and error) and stores
+`visual-NN-ref-<capture>` (the reference at the capture's size, NN the comparison's number) and
+`visual-NN-diff-<capture>` (differing pixels in red) beside the captures, served by
+`GET /v1/runs/{id}/captures/{name}`; event `visual_compare` carries the same.
+
 ---
 
 ## 4. SQLite schema — `.ducklab/ducklab.db`
