@@ -459,8 +459,8 @@ With `enforcement = "required"` a failed comparison turns the gate red and the
 verdict FAILED, like a failing test. With `diagnostic` it becomes the run's
 caveat. Either way the run records `visual` (enforcement, passed, and per
 comparison the mismatch, tolerance, sizes and error) and stores
-`visual-ref-<capture>` (the reference at the capture's size) and
-`visual-diff-<capture>` (differing pixels in red) beside the captures, served by
+`visual-NN-ref-<capture>` (the reference at the capture's size, NN the comparison's number) and
+`visual-NN-diff-<capture>` (differing pixels in red) beside the captures, served by
 `GET /v1/runs/{id}/captures/{name}`; event `visual_compare` carries the same.
 
 ---

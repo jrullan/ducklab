@@ -47,7 +47,7 @@ export function VisualCheck({ run, captureClient }: { run: Run; captureClient?: 
           ? "This check is required: a mismatch fails the run like a failing test."
           : "This check is diagnostic: a mismatch is reported but does not fail the run."}
       </p>
-      {gate.results.map((r) => <VisualRow key={`${r.capture}:${r.reference}`} r={r} urls={urls} />)}
+      {gate.results.map((r, i) => <VisualRow key={i} r={r} urls={urls} />)}
     </section>
   );
 }
