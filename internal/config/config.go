@@ -521,8 +521,8 @@ type Project struct {
 	Shell     ShellPolicy                    `toml:"shell" json:"shell"`
 	Run       RunApp                         `toml:"run" json:"run"`
 	Render    RenderContract                 `toml:"render,omitempty" json:"render,omitempty"`
-	// RenderConfigured distinguishes an absent optional [render] section from a
-	// declared section whose command intentionally reuses [run].
+	// RenderConfigured is true when [render] has any content; a declared
+	// section with no command reuses [run].command. An empty table is absent.
 	RenderConfigured bool `toml:"-" json:"-"`
 }
 
@@ -543,6 +543,15 @@ type RenderContract struct {
 	// Enforcement is diagnostic (a mismatch is a caveat; the default) or
 	// required (a mismatch fails the run like a red test).
 	Enforcement string `toml:"enforcement,omitempty" json:"enforcement,omitempty"`
+}
+
+// HasContent reports whether any render setting is set. An empty [render]
+// table is the same as none.
+func (r RenderContract) HasContent() bool {
+	return strings.TrimSpace(r.Command) != "" || strings.TrimSpace(r.URL) != "" ||
+		strings.TrimSpace(r.Ready) != "" || len(r.Scenes) > 0 || strings.TrimSpace(r.Viewport) != "" ||
+		r.TimeoutS != 0 || strings.TrimSpace(r.Artifacts) != "" || len(r.Compare) > 0 ||
+		strings.TrimSpace(r.Enforcement) != ""
 }
 
 // RenderCompare is one capture held against one reference image.
@@ -898,16 +907,15 @@ func LoadProject(path string) (*Project, error) {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
 	p := DefaultProject("", "")
-	md, err := toml.Decode(string(data), p)
+	_, err = toml.Decode(string(data), p)
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
-	for _, key := range md.Keys() {
-		if key.String() == "render" || strings.HasPrefix(key.String(), "render.") {
-			p.RenderConfigured = true
-			break
-		}
-	}
+	// Content, not the table's presence (B-466): SaveProject writes an empty
+	// [render] into every project.toml (the encoder cannot omit a struct with
+	// an int field), and reading that as "declared" made every final gate run
+	// [run].command as a 120 s render smoke nobody asked for.
+	p.RenderConfigured = p.Render.HasContent()
 	// Tolerant at READ, strict at WRITE. An unknown key here used to refuse
 	// the whole project — which turned every schema-extending task into a
 	// self-deadlock: T-071's implementer declared the very key it was adding

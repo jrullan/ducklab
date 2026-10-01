@@ -83,7 +83,7 @@ func SetKey(cfg *Project, key, value string) error {
 				return err
 			}
 			if strings.HasPrefix(key, "render.") {
-				cfg.RenderConfigured = true
+				cfg.RenderConfigured = cfg.Render.HasContent()
 			}
 			return nil
 		}
