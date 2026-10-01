@@ -47,6 +47,7 @@ type Engine interface {
 	TaskList(projectID string) ([]map[string]interface{}, error)
 	TaskRemove(projectID, taskID string) (map[string]interface{}, error)
 	ProjectGateAdopt(projectID, actor string) (map[string]interface{}, error)
+	ProjectStart(req map[string]interface{}) (map[string]interface{}, error)
 	TaskLand(projectID, taskID, sha, reason string, confirmTask bool, actor string) (map[string]interface{}, error)
 	BugAdd(projectID string, req map[string]string) (map[string]interface{}, error)
 	BugList(projectID string, openOnly bool) ([]map[string]interface{}, error)

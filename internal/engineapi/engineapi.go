@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1160,10 +1161,34 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := s.svc.ProjectInit(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, service.ErrGitIdentityRequired) {
+			s.error(w, http.StatusBadRequest, "git_identity_required", err.Error())
+			return
+		}
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
 	s.json(w, http.StatusCreated, project)
+}
+
+// handleProjectStart creates a project from an idea and starts its intake
+// (B-456). A missing git identity is a question for the person, not a 500.
+func (s *Server) handleProjectStart(w http.ResponseWriter, r *http.Request) {
+	var req service.ProjectStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	out, err := s.svc.ProjectStart(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, service.ErrGitIdentityRequired) {
+			s.error(w, http.StatusBadRequest, "git_identity_required", err.Error())
+			return
+		}
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusCreated, out)
 }
 
 func (s *Server) remoteRequest(r *http.Request) (service.RemoteRequest, error) {

@@ -846,7 +846,9 @@ export interface ServiceGateStatus {
 
 export interface ServiceInitRequest {
   describe?: string;
+  git_email?: string;
   git_init?: boolean;
+  git_name?: string;
   name?: string;
   path?: string;
 }
@@ -944,6 +946,21 @@ export interface ServiceProject {
   missing?: boolean;
   name?: string;
   path?: string;
+}
+
+export interface ServiceProjectStartRequest {
+  brief?: string;
+  git_email?: string;
+  git_name?: string;
+  name?: string;
+  path?: string;
+  refs?: string[];
+}
+
+export interface ServiceProjectStartResult {
+  intake_error?: string;
+  project?: ServiceProject;
+  run_id?: string;
 }
 
 export interface ServiceProviderView {
@@ -1173,6 +1190,7 @@ export const OPERATIONS = [
   { id: "Health", method: "GET", path: "/v1/health" },
   { id: "ProjectList", method: "GET", path: "/v1/projects" },
   { id: "ProjectInit", method: "POST", path: "/v1/projects" },
+  { id: "ProjectStart", method: "POST", path: "/v1/projects/start" },
   { id: "ProjectForget", method: "DELETE", path: "/v1/projects/{id}" },
   { id: "ProjectGet", method: "GET", path: "/v1/projects/{id}" },
   { id: "ProjectUpdate", method: "PATCH", path: "/v1/projects/{id}" },

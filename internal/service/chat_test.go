@@ -592,6 +592,13 @@ func TestChatImagesReachSeeingConsultantAndRemainWithTheirMessage(t *testing.T) 
 			mu.Lock()
 			requests = append(requests, string(body))
 			mu.Unlock()
+		} else {
+			// The duckling probe's plain chat is not streamed (B-464 made the
+			// probe require one answer before trusting any capability); a real
+			// endpoint answers it with JSON, not with an event stream.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"seen\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
@@ -705,6 +712,15 @@ func TestChatImagesProbeAndCacheMMProjLessEndpointBeforeStartingChat(t *testing.
 		visionProbe = visionProbe || strings.Contains(string(body), `"image_url"`)
 		streamedChat = streamedChat || strings.Contains(string(body), `"stream":true`)
 		mu.Unlock()
+		// An mmproj-less llama.cpp answers text and rejects images. The
+		// fixture used to reject everything; since B-464 the probe requires a
+		// text answer before trusting any capability, so it models the real
+		// server: text succeeds, an image request fails.
+		if !strings.Contains(string(body), `"image_url"`) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("image input is not supported: no vision projector (mmproj) loaded"))
 	}))

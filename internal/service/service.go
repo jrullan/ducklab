@@ -556,7 +556,19 @@ type InitRequest struct {
 	Name     string `json:"name"`
 	Describe string `json:"describe"`
 	GitInit  bool   `json:"git_init"`
+	// GitName and GitEmail are recorded in the new repository's own config
+	// when the machine has no git identity (B-463). Never written globally.
+	GitName  string `json:"git_name,omitempty"`
+	GitEmail string `json:"git_email,omitempty"`
 }
+
+// ErrGitIdentityRequired: git cannot attribute the root commit on this
+// machine and no name/email came with the request. The API answers it with
+// code git_identity_required so a client can ask once instead of showing
+// git's raw "Author identity unknown" (B-463).
+var gitIdentityKnown = func(g *vcs.Git) bool { return g.IdentityKnown() }
+
+var ErrGitIdentityRequired = errors.New("git needs a name and email to record the project's first commit; this machine has none configured. Ducklab sets them for this project only")
 
 // ProjectOpen opens a project.
 func (s *Service) ProjectOpen(ctx context.Context, path string) (*Project, error) {
@@ -614,15 +626,29 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 		// Already exists; open it
 		return s.ProjectOpen(ctx, absPath)
 	}
+	// Checked before anything is created, so a refusal leaves no half-made
+	// project behind.
+	git := vcs.New(absPath)
+	if !git.HasGit() && req.GitInit {
+		if err := os.MkdirAll(absPath, 0o755); err != nil {
+			return nil, err
+		}
+		if !gitIdentityKnown(git) && (strings.TrimSpace(req.GitName) == "" || strings.TrimSpace(req.GitEmail) == "") {
+			return nil, ErrGitIdentityRequired
+		}
+	}
 	// Create .ducklab
 	if err := os.MkdirAll(ducklabDir, 0o755); err != nil {
 		return nil, err
 	}
 	// Git init if needed
-	git := vcs.New(absPath)
 	if !git.HasGit() {
 		if req.GitInit {
-			if err := git.Init(); err != nil {
+			name, email := "", ""
+			if !gitIdentityKnown(git) {
+				name, email = strings.TrimSpace(req.GitName), strings.TrimSpace(req.GitEmail)
+			}
+			if err := git.InitWithIdentity(name, email); err != nil {
 				return nil, fmt.Errorf("git init: %w", err)
 			}
 		} else {

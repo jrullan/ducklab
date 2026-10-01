@@ -63,3 +63,35 @@ func TestProbeRecordsMandatoryOpenRouterReasoning(t *testing.T) {
 		t.Fatalf("fleet did not expose probed control: %#v", listed)
 	}
 }
+
+// deadEndpoint answers every chat with an error, like a non-LLM service on
+// the starter duckling's localhost:8080.
+type deadEndpoint struct{}
+
+func (deadEndpoint) ID() string                               { return "local" }
+func (deadEndpoint) Models(context.Context) ([]string, error) { return nil, nil }
+func (deadEndpoint) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("404 Not Found: No context found for request")
+}
+func (deadEndpoint) Chat(context.Context, provider.ChatRequest) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("404 Not Found: No context found for request")
+}
+
+// B-464: an endpoint that answers no chat used to "probe" fine — every
+// capability probe read the error as "unsupported", vision was inferred true,
+// and the result was cached for a month.
+func TestProbeFailsAndCachesNothingWhenTheEndpointAnswersNoChat(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	r := NewRegistry()
+	r.RegisterProvider(deadEndpoint{})
+	if err := r.Register(&Duckling{ID: "pato-local", Provider: "local", Model: "local-model"}); err != nil {
+		t.Fatal(err)
+	}
+	caps, err := r.ProbeForce(context.Background(), "pato-local")
+	if err == nil {
+		t.Fatalf("a dead endpoint probed as %+v", caps)
+	}
+	if _, cached := r.CachedCaps("pato-local"); cached {
+		t.Fatal("a failed probe was cached")
+	}
+}

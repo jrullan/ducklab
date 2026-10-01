@@ -241,6 +241,13 @@ func (c *Client) ProjectList() ([]map[string]interface{}, error) {
 }
 
 // ProjectInit initializes a project.
+// ProjectStart creates a project from an idea and starts its intake (B-456).
+func (c *Client) ProjectStart(req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/start", req, &result)
+	return result, err
+}
+
 func (c *Client) ProjectInit(path, name, describe string, gitInit bool) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects", map[string]interface{}{

@@ -555,7 +555,20 @@ export function App() {
             readiness requests on it would re-raise the stale banner. */}
         {route.name === "now" && client && !projectId && projectsLoaded && !stale && clientBase === conn?.baseUrl && (
           projects.length === 0
-            ? <FirstRun client={client} connected={connection === "open"} />
+            ? <FirstRun
+                client={client}
+                connected={connection === "open"}
+                onStarted={(result) => {
+                  // The new project becomes the selected one, and the person
+                  // lands where the work is: the run drafting the requirements,
+                  // or Documents when it could not start.
+                  setProjectId(result.project.id);
+                  void client.projects().then((ps) => setProjects(ps));
+                  location.hash = result.run_id
+                    ? routeHref({ name: "run", id: result.run_id })
+                    : routeHref({ name: "cycle" });
+                }}
+              />
             : <p className="m-4 text-ink-muted" data-testid="now-choose-project">Choose a project in the sidebar.</p>
         )}
         {route.name === "runs" && (

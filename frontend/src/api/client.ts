@@ -70,6 +70,24 @@ export interface ProjectLifecycle {
   next: string;
 }
 
+/** Mirrors service.ProjectStartRequest. */
+export interface ProjectStartRequest {
+  name: string;
+  /** Absolute folder; empty means ~/Ducklab/<name-slug>. */
+  path?: string;
+  brief: string;
+  refs?: string[];
+  git_name?: string;
+  git_email?: string;
+}
+
+/** Mirrors service.ProjectStartResult. */
+export interface ProjectStartResult {
+  project: Project;
+  run_id?: string;
+  intake_error?: string;
+}
+
 /** The committed acceptance and its independently retryable publication outcome. */
 export interface AcceptResult {
   commit_sha: string;
@@ -969,6 +987,12 @@ export class EngineClient {
   /** Create or adopt a project at a path. A folder that is already a project
    * is opened rather than refused, so pointing at an existing one is not a
    * mistake the person has to undo. */
+  /** Start a project from an idea (B-456): create it, git included, and start
+   * the intake run. A machine with no git identity answers ApiError code
+   * `git_identity_required`; send git_name and git_email to continue. */
+  projectStart(req: ProjectStartRequest) {
+    return this.request<ProjectStartResult>("POST", "/v1/projects/start", req);
+  }
   projectInit(path: string, name: string, gitInit: boolean) {
     return this.request<Project>("POST", "/v1/projects", {
       path,
