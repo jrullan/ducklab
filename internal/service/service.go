@@ -769,7 +769,9 @@ func (s *Service) ProjectList(ctx context.Context) ([]*Project, error) {
 // file is still a greenfield, and git already knows the difference.
 func projectHasCode(path string) bool {
 	for _, f := range vcs.New(path).LsFiles() {
-		if f != "" && !strings.HasPrefix(f, ".ducklab/") && f != ".gitignore" {
+		// The scaffold Ducklab commits at creation is not code: counting
+		// .gitattributes told a brand-new project "code exists" (G7 replay).
+		if f != "" && !strings.HasPrefix(f, ".ducklab/") && f != ".gitignore" && f != ".gitattributes" {
 			return true
 		}
 	}
