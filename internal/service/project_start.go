@@ -33,6 +33,9 @@ type ProjectStartRequest struct {
 	Brief string `json:"brief"`
 	// Refs are reference documents or images (B-457).
 	Refs []string `json:"refs,omitempty"`
+	// Preset sets up a kind of project (B-459): "web-page", "web-app", or
+	// empty for none.
+	Preset string `json:"preset,omitempty"`
 	// GitName and GitEmail answer git_identity_required (B-463).
 	GitName  string `json:"git_name,omitempty"`
 	GitEmail string `json:"git_email,omitempty"`
@@ -122,6 +125,22 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	if name == "" {
 		return nil, fmt.Errorf("a project name is required")
 	}
+	var preset ProjectPreset
+	if req.Preset != "" {
+		p, ok := presetByID(req.Preset)
+		if !ok {
+			return nil, fmt.Errorf("unknown preset %q", req.Preset)
+		}
+		preset = p
+	}
+	python := ""
+	if preset.ID != "" {
+		py, err := presetPython()
+		if err != nil {
+			return nil, err
+		}
+		python = py
+	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
 		base, err := s.projectsDir()
@@ -153,14 +172,28 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		return nil, err
 	}
 	out := &ProjectStartResult{Project: project}
-	// The scaffold is versioned at once (review of #121): project.toml and
-	// the git housekeeping were left untracked even after accepting the
-	// requirements, so a clone was not a Ducklab project.
-	if err := commitProjectSetup(project.Path, project.ID, "project setup"); err != nil {
+	refs := append([]string(nil), req.Refs...)
+	setup := "project setup"
+	if preset.ID != "" {
+		// Serialised: two starts at once must not both pick the same port.
+		s.presetPortMu.Lock()
+		ref, err := applyPreset(project.Path, project.ID, req.Brief, python, preset, s.claimedRunPorts(project.ID))
+		s.presetPortMu.Unlock()
+		if err != nil {
+			return nil, fmt.Errorf("preset %s: %w", preset.ID, err)
+		}
+		refs = append(refs, ref)
+		setup = "project setup: " + preset.ID
+	}
+	// The setup is versioned at once (reviews of #121/#122): project.toml
+	// with its run command, the git housekeeping, the preset reference and the
+	// memory that shaped the first documents were left untracked, so a clone
+	// lost them.
+	if err := commitProjectSetup(project.Path, project.ID, setup); err != nil {
 		return nil, fmt.Errorf("commit the project setup: %w", err)
 	}
 	run, err := s.StageStart(ctx, project.ID, StageRequest{
-		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: req.Refs,
+		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: refs,
 	})
 	if err != nil {
 		out.IntakeError = err.Error()

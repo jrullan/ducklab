@@ -50,13 +50,16 @@ type Service struct {
 	configPath string
 	// cfgMu guards cfg and the registries it feeds, which a config edit
 	// rebuilds while runs may be reading them.
-	cfgMu     sync.RWMutex
-	bus       *bus.Bus
-	runs      map[string]*runState
-	runsMu    sync.RWMutex
-	providers map[config.ProviderID]provider.Provider
-	projects  map[string]*projectState
-	projMu    sync.RWMutex
+	cfgMu sync.RWMutex
+	// presetPortMu serialises choosing a preset port and saving it, so two
+	// starts at once cannot claim the same one (review of #122).
+	presetPortMu sync.Mutex
+	bus          *bus.Bus
+	runs         map[string]*runState
+	runsMu       sync.RWMutex
+	providers    map[config.ProviderID]provider.Provider
+	projects     map[string]*projectState
+	projMu       sync.RWMutex
 	// shuttingDown makes an in-flight run's cancellation read as a deliberate
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool

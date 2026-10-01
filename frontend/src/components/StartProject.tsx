@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ApiError, type EngineClient, type ProjectStartResult } from "../api/client";
+import { ApiError, type EngineClient, type ProjectPreset, type ProjectStartResult } from "../api/client";
 import { canChooseDirectory, canChooseFile, chooseDirectory, chooseFile } from "../lib/picker";
 
 const isImageRef = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
@@ -45,6 +45,14 @@ export function StartProject({
   const [needIdentity, setNeedIdentity] = useState(false);
   const [gitName, setGitName] = useState("");
   const [gitEmail, setGitEmail] = useState("");
+  const [presets, setPresets] = useState<ProjectPreset[]>([]);
+  const [preset, setPreset] = useState("");
+  useEffect(() => {
+    if (typeof client.projectPresets !== "function") return;
+    let live = true;
+    client.projectPresets().then((items) => { if (live) setPresets(items); }).catch(() => {});
+    return () => { live = false; };
+  }, [client]);
   // The folder preference (Settings → Projects); "~/Ducklab" until it loads
   // or when the engine predates the preference.
   const [projectsDir, setProjectsDir] = useState("~/Ducklab");
@@ -75,6 +83,7 @@ export function StartProject({
         brief: brief.trim(),
         ...(path.trim() ? { path: path.trim() } : {}),
         ...(refs.length ? { refs } : {}),
+        ...(preset ? { preset } : {}),
         ...(needIdentity ? { git_name: gitName.trim(), git_email: gitEmail.trim() } : {}),
       });
       onStarted(result);
@@ -109,6 +118,29 @@ export function StartProject({
         <span className="text-sm font-medium text-ink">Name</span>
         <input data-testid="start-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="TI-36X calculator" className={field} />
       </label>
+
+      {presets.length > 0 && (
+        <fieldset className="space-y-1" data-testid="start-presets">
+          <legend className="text-sm font-medium text-ink">What kind of project?</legend>
+          {[{ id: "", label: "Something else", summary: "Ducklab sets nothing up; you configure how it runs later." }, ...presets].map((p) => (
+            <label key={p.id || "none"} className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="start-preset"
+                value={p.id}
+                checked={preset === p.id}
+                onChange={() => setPreset(p.id)}
+                data-testid={`start-preset-${p.id || "none"}`}
+                className="mt-1"
+              />
+              <span>
+                <span className="text-ink">{p.label}</span>
+                <span className="block text-xs text-ink-secondary">{p.summary}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <div className="space-y-1">
         <span className="text-sm font-medium text-ink">References <span className="font-normal text-ink-muted">(optional)</span></span>

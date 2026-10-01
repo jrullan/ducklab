@@ -953,12 +953,19 @@ export interface ServiceProjectDefaultsView {
   projects_dir?: string;
 }
 
+export interface ServiceProjectPreset {
+  id?: string;
+  label?: string;
+  summary?: string;
+}
+
 export interface ServiceProjectStartRequest {
   brief?: string;
   git_email?: string;
   git_name?: string;
   name?: string;
   path?: string;
+  preset?: string;
   refs?: string[];
 }
 
@@ -1195,6 +1202,7 @@ export const OPERATIONS = [
   { id: "Engine", method: "GET", path: "/v1/engine" },
   { id: "get_events", method: "GET", path: "/v1/events" },
   { id: "Health", method: "GET", path: "/v1/health" },
+  { id: "ProjectPresets", method: "GET", path: "/v1/project-presets" },
   { id: "ProjectList", method: "GET", path: "/v1/projects" },
   { id: "ProjectInit", method: "POST", path: "/v1/projects" },
   { id: "ProjectStart", method: "POST", path: "/v1/projects/start" },

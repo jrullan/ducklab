@@ -3292,6 +3292,25 @@
         ],
         "type": "object"
       },
+      "ServiceProjectPreset": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ServiceProjectStartRequest": {
         "properties": {
           "brief": {
@@ -3307,6 +3326,9 @@
             "type": "string"
           },
           "path": {
+            "type": "string"
+          },
+          "preset": {
             "type": "string"
           },
           "refs": {
@@ -4909,6 +4931,47 @@
           }
         },
         "summary": "Engine liveness. No auth: a client must reach it before reading the token file."
+      }
+    },
+    "/v1/project-presets": {
+      "get": {
+        "operationId": "ProjectPresets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceProjectPreset"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The kinds of project the start flow can set up (run command, URL, smoke, conventions)"
       }
     },
     "/v1/projects": {

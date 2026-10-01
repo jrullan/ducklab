@@ -70,6 +70,13 @@ export interface ProjectLifecycle {
   next: string;
 }
 
+/** Mirrors service.ProjectPreset. */
+export interface ProjectPreset {
+  id: string;
+  label: string;
+  summary: string;
+}
+
 /** Mirrors service.ProjectDefaultsView. */
 export interface ProjectDefaultsView {
   projects_dir: string;
@@ -83,6 +90,8 @@ export interface ProjectStartRequest {
   path?: string;
   brief: string;
   refs?: string[];
+  /** A kind of project to set up (B-459); empty sets nothing up. */
+  preset?: string;
   git_name?: string;
   git_email?: string;
 }
@@ -998,6 +1007,10 @@ export class EngineClient {
    * `git_identity_required`; send git_name and git_email to continue. */
   projectStart(req: ProjectStartRequest) {
     return this.request<ProjectStartResult>("POST", "/v1/projects/start", req);
+  }
+  /** The kinds of project the start flow can set up (B-459). */
+  projectPresets() {
+    return this.request<{ items: ProjectPreset[] }>("GET", "/v1/project-presets").then((r) => r.items ?? []);
   }
   projectInit(path: string, name: string, gitInit: boolean) {
     return this.request<Project>("POST", "/v1/projects", {

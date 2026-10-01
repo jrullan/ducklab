@@ -65,6 +65,23 @@ describe("StartProject", () => {
   });
 });
 
+// B-459: a kind of project is chosen up front, so the result is previewable.
+describe("StartProject presets", () => {
+  it("offers the engine's presets, defaults to none, and sends the choice", async () => {
+    const projectStart = vi.fn(() => Promise.resolve(started));
+    const projectPresets = vi.fn(() => Promise.resolve([
+      { id: "web-page", label: "A web page that runs locally (one file)", summary: "One self-contained index.html." },
+    ]));
+    render(<StartProject client={{ projectStart, projectPresets } as unknown as EngineClient} onStarted={vi.fn()} />);
+    expect(await screen.findByTestId("start-presets")).toHaveTextContent("A web page that runs locally");
+    expect(screen.getByTestId("start-preset-none")).toBeChecked();
+    fireEvent.click(screen.getByTestId("start-preset-web-page"));
+    fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
+    fireEvent.click(screen.getByTestId("start-submit"));
+    await waitFor(() => expect(projectStart).toHaveBeenCalledWith(expect.objectContaining({ preset: "web-page" })));
+  });
+});
+
 // The default folder is the person's preference.
 describe("StartProject folder preference", () => {
   it("previews the new project under the preferred folder", async () => {

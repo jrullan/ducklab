@@ -127,6 +127,11 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/health", f.health)
 	f.mux.HandleFunc("GET /v1/engine", f.auth(f.engine))
 	f.mux.HandleFunc("GET /v1/projects", f.auth(f.projects))
+	f.mux.HandleFunc("GET /v1/project-presets", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]string{
+			{"id": "web-page", "label": "A web page that runs locally (one file)", "summary": "One self-contained index.html, opened from a small local server."},
+		}})
+	}))
 	f.mux.HandleFunc("GET /v1/defaults/projects", f.auth(func(w http.ResponseWriter, r *http.Request) {
 		f.write(w, http.StatusOK, map[string]interface{}{"projects_dir": "", "effective": "/tmp/Ducklab"})
 	}))

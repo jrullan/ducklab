@@ -1171,6 +1171,12 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, project)
 }
 
+// handleProjectPresets lists the kinds of project the start flow can set up.
+func (s *Server) handleProjectPresets(w http.ResponseWriter, r *http.Request) {
+	items := s.svc.ProjectPresets()
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
 func (s *Server) handleProjectDefaults(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.ProjectDefaults())
 }
