@@ -3294,6 +3294,9 @@
           "path": {
             "type": "string"
           },
+          "preset": {
+            "type": "string"
+          },
           "refs": {
             "items": {
               "type": "string"
@@ -4834,6 +4837,25 @@
           }
         },
         "summary": "Engine liveness. No auth: a client must reach it before reading the token file."
+      }
+    },
+    "/v1/project-presets": {
+      "get": {
+        "operationId": "ProjectPresets",
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The kinds of project the start flow can set up (run command, URL, smoke, conventions)"
       }
     },
     "/v1/projects": {

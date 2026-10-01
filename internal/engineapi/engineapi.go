@@ -1171,6 +1171,11 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, project)
 }
 
+// handleProjectPresets lists the kinds of project the start flow can set up.
+func (s *Server) handleProjectPresets(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProjectPresets()})
+}
+
 // handleProjectStart creates a project from an idea and starts its intake
 // (B-456). A missing git identity is a question for the person, not a 500.
 func (s *Server) handleProjectStart(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
 
@@ -81,5 +83,62 @@ func TestProjectStartRefusesAFolderWithSomeoneElsesFiles(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, ".ducklab")); !os.IsNotExist(statErr) {
 		t.Fatal("refusal created a project anyway")
+	}
+}
+
+// B-459: a local web page is previewable from the first run, and every later
+// prompt knows what is being delivered.
+func TestProjectStartWithTheWebPagePresetSetsUpServingAndConventions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{
+		Name: "calc", Brief: "A calculator.", Preset: "web-page", GitName: "Ada", GitEmail: "ada@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := res.Project.Path
+	cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cfg.Run.Command, "python3 -m http.server ") || !strings.HasPrefix(cfg.Run.URL, "http://127.0.0.1:") ||
+		cfg.Run.Health != cfg.Run.URL || cfg.Run.Smoke != "test -f index.html" || cfg.Run.SmokeExpect != "exit" {
+		t.Fatalf("run = %+v", cfg.Run)
+	}
+	mem, err := artifact.LoadMemory(root)
+	if err != nil || !strings.Contains(mem.Conventions, "self-contained `index.html`") || !strings.Contains(mem.Conventions, "node --test tests/") {
+		t.Fatalf("memory conventions = %q (%v)", mem.Conventions, err)
+	}
+	if res.RunID == "" {
+		t.Fatalf("no intake: %s", res.IntakeError)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[res.RunID]
+	s.runsMu.RUnlock()
+	<-rs.done
+	brief, _ := os.ReadFile(filepath.Join(root, ".ducklab", "preset.md"))
+	if !strings.Contains(string(brief), "These are settled") {
+		t.Fatalf("preset reference = %q", brief)
+	}
+	found := false
+	for _, f := range rs.refFiles() {
+		found = found || strings.HasSuffix(f, filepath.Join(".ducklab", "preset.md"))
+	}
+	if !found {
+		t.Fatalf("the intake did not receive the preset as a reference: %v", rs.refFiles())
+	}
+}
+
+func TestProjectStartRefusesAnUnknownPresetBeforeCreatingAnything(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := serviceWithDucklings(t, "pato-uno")
+	if _, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "calc", Preset: "rocket"}); err == nil {
+		t.Fatal("unknown preset accepted")
+	}
+	if _, err := os.Stat(filepath.Join(home, "Ducklab", "calc")); !os.IsNotExist(err) {
+		t.Fatal("an unknown preset still created the project")
 	}
 }

@@ -29,6 +29,9 @@ type ProjectStartRequest struct {
 	Brief string `json:"brief"`
 	// Refs are reference documents or images (B-457).
 	Refs []string `json:"refs,omitempty"`
+	// Preset sets up a kind of project (B-459): "web-page", "web-app", or
+	// empty for none.
+	Preset string `json:"preset,omitempty"`
 	// GitName and GitEmail answer git_identity_required (B-463).
 	GitName  string `json:"git_name,omitempty"`
 	GitEmail string `json:"git_email,omitempty"`
@@ -59,6 +62,14 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	if name == "" {
 		return nil, fmt.Errorf("a project name is required")
 	}
+	var preset ProjectPreset
+	if req.Preset != "" {
+		p, ok := presetByID(req.Preset)
+		if !ok {
+			return nil, fmt.Errorf("unknown preset %q", req.Preset)
+		}
+		preset = p
+	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
 		base, err := DefaultProjectsDir()
@@ -86,8 +97,16 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		return nil, err
 	}
 	out := &ProjectStartResult{Project: project}
+	refs := append([]string(nil), req.Refs...)
+	if preset.ID != "" {
+		ref, err := applyPreset(project.Path, project.ID, req.Brief, preset)
+		if err != nil {
+			return nil, fmt.Errorf("preset %s: %w", preset.ID, err)
+		}
+		refs = append(refs, ref)
+	}
 	run, err := s.StageStart(ctx, project.ID, StageRequest{
-		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: req.Refs,
+		Stage: "intake", From: strings.TrimSpace(req.Brief), Refs: refs,
 	})
 	if err != nil {
 		out.IntakeError = err.Error()

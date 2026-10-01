@@ -132,6 +132,7 @@ func toolList() []map[string]interface{} {
 				"refs":      map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reference documents or images"},
 				"git_name":  str("git user.name for this project only, when asked"),
 				"git_email": str("git user.email for this project only, when asked"),
+				"preset":    str("optional kind of project: web-page (one self-contained index.html served locally) or web-app (several files, no build step)"),
 			}, "name"),
 		},
 		{
@@ -561,7 +562,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 	case "project_start":
 		req := map[string]interface{}{
 			"name": a.str("name"), "brief": a.str("brief"), "path": a.str("path"),
-			"git_name": a.str("git_name"), "git_email": a.str("git_email"),
+			"git_name": a.str("git_name"), "git_email": a.str("git_email"), "preset": a.str("preset"),
 		}
 		if refs, ok := a["refs"].([]interface{}); ok {
 			req["refs"] = refs
