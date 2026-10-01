@@ -23,7 +23,8 @@ import (
 type ProjectStartRequest struct {
 	// Name is required: it names the project and, without Path, its folder.
 	Name string `json:"name"`
-	// Path is optional; empty means ~/Ducklab/<name-slug>.
+	// Path is optional; empty means <defaults.projects_dir>/<name-slug>
+	// (~/Ducklab unless the person chose another folder).
 	Path string `json:"path,omitempty"`
 	// Brief is what to build. Empty starts the intake as an interview.
 	Brief string `json:"brief"`
@@ -44,13 +45,72 @@ type ProjectStartResult struct {
 	IntakeError string `json:"intake_error,omitempty"`
 }
 
-// DefaultProjectsDir is where a project goes when the person names no folder.
+// DefaultProjectsDir is the built-in starting point: ~/Ducklab.
 func DefaultProjectsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, "Ducklab"), nil
+}
+
+// projectsDir is the person's preference (defaults.projects_dir), else the
+// built-in starting point.
+func (s *Service) projectsDir() (string, error) {
+	s.cfgMu.RLock()
+	dir := strings.TrimSpace(s.cfg.Defaults.ProjectsDir)
+	s.cfgMu.RUnlock()
+	if dir != "" {
+		return dir, nil
+	}
+	return DefaultProjectsDir()
+}
+
+// ProjectDefaultsView is the preference behind the start flow's folder.
+type ProjectDefaultsView struct {
+	// ProjectsDir is the stored preference; empty means the built-in default.
+	ProjectsDir string `json:"projects_dir"`
+	// Effective is the folder new projects actually go under.
+	Effective string `json:"effective"`
+}
+
+func (s *Service) ProjectDefaults() ProjectDefaultsView {
+	s.cfgMu.RLock()
+	stored := s.cfg.Defaults.ProjectsDir
+	s.cfgMu.RUnlock()
+	effective, _ := s.projectsDir()
+	return ProjectDefaultsView{ProjectsDir: stored, Effective: effective}
+}
+
+// ProjectDefaultsSet stores the folder; empty restores the built-in default.
+// A leading ~/ is expanded here, once: the engine never interprets ~ later.
+func (s *Service) ProjectDefaultsSet(v ProjectDefaultsView) error {
+	if err := s.canWriteConfig(); err != nil {
+		return err
+	}
+	dir := strings.TrimSpace(v.ProjectsDir)
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		dir = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(dir, "~"), "/"))
+	}
+	if dir != "" && !filepath.IsAbs(dir) {
+		return fmt.Errorf("projects_dir must be an absolute folder (or start with ~/); got %q", v.ProjectsDir)
+	}
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	previous := s.cfg.Defaults.ProjectsDir
+	s.cfg.Defaults.ProjectsDir = filepath.Clean(dir)
+	if dir == "" {
+		s.cfg.Defaults.ProjectsDir = ""
+	}
+	if err := s.saveConfig(); err != nil {
+		s.cfg.Defaults.ProjectsDir = previous
+		return err
+	}
+	return nil
 }
 
 // ProjectStart creates the project (git included) and starts its intake.
@@ -61,7 +121,7 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
-		base, err := DefaultProjectsDir()
+		base, err := s.projectsDir()
 		if err != nil {
 			return nil, err
 		}

@@ -83,3 +83,43 @@ func TestProjectStartRefusesAFolderWithSomeoneElsesFiles(t *testing.T) {
 		t.Fatal("refusal created a project anyway")
 	}
 }
+
+// Jose, reviewing B-456: the default folder is the person's preference, with
+// ~/Ducklab only as the starting point.
+func TestTheProjectsFolderIsAPreference(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	s.configPath = filepath.Join(t.TempDir(), "config.toml")
+	if v := s.ProjectDefaults(); v.ProjectsDir != "" || v.Effective != filepath.Join(home, "Ducklab") {
+		t.Fatalf("starting point = %+v", v)
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{ProjectsDir: "relative/dir"}); err == nil {
+		t.Fatal("a relative folder was accepted")
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{ProjectsDir: "~/code"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.ProjectDefaults(); v.Effective != filepath.Join(home, "code") {
+		t.Fatalf("~ not expanded once at set time: %+v", v)
+	}
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "calc", GitName: "Ada", GitEmail: "ada@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Project.Path != filepath.Join(home, "code", "calc") {
+		t.Fatalf("project went to %s", res.Project.Path)
+	}
+	if res.RunID != "" {
+		s.runsMu.RLock()
+		rs := s.runs[res.RunID]
+		s.runsMu.RUnlock()
+		<-rs.done
+	}
+	if err := s.ProjectDefaultsSet(ProjectDefaultsView{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.ProjectDefaults(); v.ProjectsDir != "" || v.Effective != filepath.Join(home, "Ducklab") {
+		t.Fatalf("empty did not restore the starting point: %+v", v)
+	}
+}

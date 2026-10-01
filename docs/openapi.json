@@ -3277,6 +3277,21 @@
         ],
         "type": "object"
       },
+      "ServiceProjectDefaultsView": {
+        "properties": {
+          "effective": {
+            "type": "string"
+          },
+          "projects_dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effective",
+          "projects_dir"
+        ],
+        "type": "object"
+      },
       "ServiceProjectStartRequest": {
         "properties": {
           "brief": {
@@ -4485,6 +4500,59 @@
           }
         ],
         "summary": "Replace the per-mode defaults"
+      }
+    },
+    "/v1/defaults/projects": {
+      "get": {
+        "operationId": "ProjectDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProjectDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Where projects started from an idea go when no folder is named"
+      },
+      "put": {
+        "operationId": "ProjectDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceProjectDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the folder for new projects; empty restores ~/Ducklab"
       }
     },
     "/v1/defaults/roster": {
