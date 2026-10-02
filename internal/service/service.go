@@ -1890,7 +1890,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// to install, asked for by name, now (toolchain.go).
 	if req.TaskID != "" {
 		if missing := s.missingToolchainFor(entry.Path, req.TaskID); len(missing) > 0 {
-			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing))
+			_, recheck := rs.answers()["toolchain-"+req.TaskID]
+			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing, recheck))
 			return
 		}
 	}
@@ -5243,6 +5244,21 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 		event["author"] = author
 	}
 	w.AppendEvent("human", event)
+	if strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer) {
+		// This option must route away from the build, not resume into the same
+		// preflight. The paused build has no live worker to unwind.
+		rs.wmu.Lock()
+		rs.run.Status = "superseded"
+		rs.run.Verdict = ""
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		clearPending(rs.run)
+		w.AppendEvent("human", map[string]interface{}{"action": "plan_revision_requested", "task_id": rs.run.TaskID, "detail": questionText})
+		_ = w.WriteState()
+		projectID := rs.run.ProjectID
+		rs.wmu.Unlock()
+		_, err := s.StageStart(ctx, projectID, StageRequest{Stage: "plan", Revise: "Resolve the missing toolchain capability before build work: " + questionText})
+		return err
+	}
 	if author != "" {
 		// This is an attention event, not another human decision: unattended
 		// runs continue, but the operator can inspect and correct the answer.
@@ -5254,6 +5270,10 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 
 	_, err = s.RunResume(ctx, id)
 	return err
+}
+
+func toolchainPlanRevisionAnswer(answer string) bool {
+	return strings.EqualFold(strings.TrimSpace(answer), "Change the plan (revise it) instead")
 }
 
 // writeProjectTOML persists a project config. Delegates to config.SaveProject
