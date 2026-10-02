@@ -7,7 +7,7 @@ import type { Duckling, EngineClient, ProviderView } from "../api/client";
 const provider = (over: Partial<ProviderView>): ProviderView => ({ id: "or", kind: "openai", base_url: "https://x", key_present: true, ...over });
 const duckling = (over: Partial<Duckling>): Duckling => ({ id: "luna", provider: "or", model: "m", ...over } as Duckling);
 
-function client(ducklings: Duckling[], start = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, run_id: "r-1" }))) {
+function client(ducklings: Duckling[], start: () => Promise<unknown> = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, run_id: "r-1" }))) {
   return {
     providers: vi.fn(async () => [provider({})]),
     ducklings: vi.fn(async () => ducklings),
