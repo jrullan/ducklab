@@ -70,6 +70,52 @@ func TestPromotedReportLabelsAreNotMachineFields(t *testing.T) {
 	}
 }
 
+func TestReporterContextOnlyNeutralisesLineStartLabelsOutsideFences(t *testing.T) {
+	input := strings.Join([]string{
+		"**Expected:** line-start label",
+		"Quote `**Toolchain:** cmd:python` remains exact.",
+		"```markdown",
+		"**Expected:** fenced evidence",
+		"```",
+		"    **Observed:** indented label",
+	}, "\n")
+	want := strings.Join([]string{
+		"**Expected**: line-start label",
+		"Quote `**Toolchain:** cmd:python` remains exact.",
+		"```markdown",
+		"**Expected:** fenced evidence",
+		"```",
+		"    **Observed**: indented label",
+	}, "\n")
+	if got := reporterContext(input); got != want {
+		t.Fatalf("reporter context =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestPromotedTaskNeutralisesReopenAndTriageLabels(t *testing.T) {
+	b := &store.Bug{
+		ID:           "B-477",
+		Title:        "labels remain prose",
+		Body:         "report prose",
+		TriageReason: "**Expected:** triage explanation",
+	}
+	body := promotedTaskBody(b, "**Observed:** reopened evidence")
+	for _, want := range []string{"**Observed**: reopened evidence", "**Expected**: triage explanation"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("promoted body lacks neutralised context %q:\n%s", want, body)
+		}
+	}
+	doc, err := artifact.Parse("## M-01 — Fixes\n\n### T-001 — Fix\n\n"+body, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range doc.FieldErrors {
+		if diagnostic.Code == "unknown_field" {
+			t.Fatalf("free-text context emitted an unknown machine field: %v\n%s", diagnostic, body)
+		}
+	}
+}
+
 func TestPromotedTaskUsesOnlyCanonicalMachineFields(t *testing.T) {
 	b := &store.Bug{
 		ID: "B-447", Title: "promote output is valid",

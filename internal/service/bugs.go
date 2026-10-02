@@ -945,13 +945,30 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion, reopenContext s
 	return sb.String()
 }
 
-// reporterBoldFieldLabel moves the colon outside reporter-authored bold labels.
-// The artifact grammar reserves `**Key:**` for machine fields, while markdown
-// renders `**Key**:` equivalently for report context.
-var reporterBoldFieldLabel = regexp.MustCompile(`\*\*([^*\n]+):\*\*`)
+// reporterBoldFieldLabel moves the colon outside reporter-authored labels only
+// where the artifact grammar would read one: at the start of a prose line.
+// Inline quotations and fenced examples are evidence and stay byte-for-byte.
+var reporterBoldFieldLabel = regexp.MustCompile(`^(\s*)\*\*([^*\n]+):\*\*`)
 
 func reporterContext(body string) string {
-	return reporterBoldFieldLabel.ReplaceAllString(body, "**$1**:")
+	lines := strings.Split(body, "\n")
+	fence := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			marker := trimmed[:3]
+			if fence == "" {
+				fence = marker
+			} else if fence == marker {
+				fence = ""
+			}
+			continue
+		}
+		if fence == "" {
+			lines[i] = reporterBoldFieldLabel.ReplaceAllString(line, "$1**$2**:")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func promotedTaskBody(b *store.Bug, reopenContext string) string {
@@ -959,7 +976,7 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	fmt.Fprintf(&sb, "Fixes %s.\n\n", b.ID)
 	if strings.TrimSpace(reopenContext) != "" {
 		sb.WriteString(reopenEvidenceHeading + "\n\n")
-		sb.WriteString(strings.TrimSpace(reopenContext))
+		sb.WriteString(strings.TrimSpace(reporterContext(reopenContext)))
 		sb.WriteString("\n\nAn unchanged tree cannot satisfy this task: it exists because the previous fix did not hold.\n\n")
 	}
 	if strings.TrimSpace(b.Body) != "" {
@@ -990,7 +1007,7 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 				strings.Join(strings.Split(b.SuspectedFiles, "\n"), ", "))
 		}
 		if b.TriageReason != "" {
-			sb.WriteString("\n" + strings.TrimSpace(b.TriageReason) + "\n")
+			sb.WriteString("\n" + strings.TrimSpace(reporterContext(b.TriageReason)) + "\n")
 		}
 		if b.TestStrategy != "" {
 			fmt.Fprintf(&sb, "\n- **Verification (triage recommends)**: %s", b.TestStrategy)
