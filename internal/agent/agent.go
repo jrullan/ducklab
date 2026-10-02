@@ -726,7 +726,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				if req.MaxTokens != nil {
 					cap = *req.MaxTokens
 				}
-				if resp.Upstream != "" && req.MaxTokens != nil && resp.Usage.CompletionTokens < *req.MaxTokens {
+				if resp.Upstream != "" && req.MaxTokens != nil && resp.Usage.CompletionTokens > 0 && resp.Usage.CompletionTokens < *req.MaxTokens {
 					return outcome, fmt.Errorf("%w: the whole document did not fit: the serving endpoint (%s via OpenRouter) stopped at %d output tokens; pin a provider with a higher cap in this duckling's OpenRouter endpoint, or draft with another duckling", ErrTruncated, resp.Upstream, resp.Usage.CompletionTokens)
 				}
 				return outcome, fmt.Errorf("%w: the whole document did not fit in %s's output cap "+
@@ -753,6 +753,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				cap := 0
 				if req.MaxTokens != nil {
 					cap = *req.MaxTokens
+				}
+				if resp2.Upstream != "" && req.MaxTokens != nil && resp2.Usage.CompletionTokens > 0 && resp2.Usage.CompletionTokens < *req.MaxTokens {
+					return outcome, fmt.Errorf("%w: the serving endpoint (%s via OpenRouter) stopped at %d output tokens twice; pin a provider with a higher cap in this duckling's OpenRouter endpoint, or use another duckling", ErrTruncated, resp2.Upstream, resp2.Usage.CompletionTokens)
 				}
 				return outcome, fmt.Errorf("%w: %s filled its output cap (%d tokens) twice. "+
 					"Raise max_tokens on this duckling (Ducklings → sampling params)",
