@@ -91,7 +91,7 @@ export function EscalationSuggestionCard({
   }
 
   return (
-    <section className="m-2 rounded-card border border-warn p-3" data-testid="escalation-suggestion">
+    <section className="m-2 rounded-card border border-warning p-3" data-testid="escalation-suggestion">
       <h2 className="text-sm font-medium text-ink">escalation suggestion</h2>
       {content}
     </section>

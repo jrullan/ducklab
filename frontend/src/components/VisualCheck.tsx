@@ -43,13 +43,13 @@ export function VisualCheck({ run, captureClient }: { run: Run; captureClient?: 
   if (!gate || gate.results.length === 0) return null;
 
   const required = gate.enforcement === "required";
-  const tone = gate.passed ? "border-good" : required ? "border-critical" : "border-warn";
+  const tone = gate.passed ? "border-good" : required ? "border-critical" : "border-warning";
   const title = gate.passed
     ? "Looks like the reference"
     : required ? "Does not look like the reference — the run fails" : "Does not look like the reference (caveat)";
   return (
     <section className={`rounded-card border p-3 ${tone}`} data-testid="visual-check" aria-label="Visual check">
-      <h2 className={`text-sm font-medium ${gate.passed ? "text-good" : required ? "text-critical" : "text-warn"}`}>{title}</h2>
+      <h2 className={`text-sm font-medium ${gate.passed ? "text-good" : required ? "text-critical" : "text-warning"}`}>{title}</h2>
       <p className="mt-1 text-xs text-ink-secondary">
         Each capture is compared pixel by pixel with its reference image. {required
           ? "This check is required: a mismatch fails the run like a failing test."

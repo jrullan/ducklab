@@ -100,7 +100,7 @@ export function WaitingCard({
         {waitingExplanation(run)}
       </p>
       {landedAs && (
-        <p className="mt-1 rounded border border-warn px-2 py-1 text-xs text-ink" data-testid="landed-notice">
+        <p className="mt-1 rounded border border-warning px-2 py-1 text-xs text-ink" data-testid="landed-notice">
           This task already landed as <span className="font-mono">{landedAs.slice(0, 7)}</span> — accepting this re-run lands a second change on top of it. Only accept a deliberate redo.
         </p>
       )}

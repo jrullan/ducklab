@@ -571,6 +571,22 @@ describe("Now — the inbox", () => {
     await screen.findByTestId("now-quiet");
     expect(screen.getByTestId("now-all-done").textContent).toContain("done, running, or waiting");
   });
+
+  it("does not say nothing is ready while the guide offers a document step", async () => {
+    seed([{ ...base, id: "r-d", status: "done", accepted: true, pending_kind: undefined }]);
+    const client = clientWith({
+      projectNext: vi.fn(() => Promise.resolve([{
+        id: "spec",
+        action: "Turn the requirements into a spec",
+        reason: "requirements are approved",
+        kind: "stage" as const,
+        ref: "spec",
+      }])),
+    });
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-next-steps");
+    expect(screen.queryByTestId("now-all-done")).toBeNull();
+  });
 });
 
 // Overview's job, absorbed when it retired. Spend used to be a prop there, and

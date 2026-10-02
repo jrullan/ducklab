@@ -371,7 +371,7 @@ export function Board({
             accepted card stops meaning anything. The count and the door to
             settle it, above the board. */}
         {!isBugs && specDebtCount > 0 && (
-          <p className="mb-3 text-xs text-warn" data-testid="spec-debt-banner">
+          <p className="mb-3 text-xs text-warning" data-testid="spec-debt-banner">
             {specDebtCount} accepted task{specDebtCount === 1 ? "" : "s"} carr{specDebtCount === 1 ? "ies" : "y"} spec-debt — no spec section covers {specDebtCount === 1 ? "it" : "them"} yet;{" "}
             <a href="#/cycle/spec" className="underline">settle the spec</a> to teach it what was built.
           </p>
@@ -779,7 +779,7 @@ export function Board({
                         {!isBugs && (it as Task).spec_debt && (it as Task).status !== "accepted" && (
                           <div
                             data-testid="spec-debt"
-                            className="mt-1 text-xs text-warn"
+                            className="mt-1 text-xs text-warning"
                             title="no spec section covers this task — the plan amendment's toll; the scribe settles it by teaching the spec what was built"
                           >
                             spec-debt

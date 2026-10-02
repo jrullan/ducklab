@@ -8,6 +8,7 @@ export function nextStepHref(step: NextStep): string {
   if (step.kind === "bug") return routeHref({ name: "board", tab: "bugs" });
   if (step.kind === "task") return routeHref({ name: "board" });
   if (step.kind === "release") return routeHref({ name: "release" });
+  if (step.kind === "project" && step.ref === "visual-check") return routeHref({ name: "projects" });
   return routeHref({ name: "cycle" });
 }
 

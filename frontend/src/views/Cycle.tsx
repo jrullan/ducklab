@@ -631,7 +631,7 @@ export function Cycle({
   const inspectorContent = !inspectedSection ? <div className="mt-4 rounded border border-dashed border-hairline p-4"><p className="text-sm font-medium text-ink">No section selected</p><p className="mt-1 text-xs text-ink-muted">Select an {active.stage === "intent" ? "intention" : active.stage === "intake" ? "requirement" : active.stage === "spec" ? "spec section" : "plan section"} to inspect its traceability.</p></div> : <>
     <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{active.stage === "intent" ? "Recorded intention" : artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
     <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Document chain</h3>
-      {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warn">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warn">⚠ No planned task yet</p>}</div>}
+      {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warning">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warning">⚠ No planned task yet</p>}</div>}
       <div className="mt-4 space-y-3" data-testid="cycle-document-chain">
         {(["intent", "requirement", "spec_section", "milestone", "task"] as const).map((kind) => {
           const nodes = traceChain.filter((node) => node.kind === kind);
@@ -744,7 +744,7 @@ export function Cycle({
                 <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => selectDocumentSection(s.id)} className={"w-full rounded-r border-l-4 px-2 py-1.5 text-left text-xs transition-colors " + (selectedSection === s.id ? "border-warning bg-surface1 font-medium text-ink shadow-sm" : "border-transparent text-ink-secondary hover:bg-surface2 hover:text-ink")}>
                   <span className="font-mono text-ink-muted">{s.id}</span><span className="ml-2">{s.title}</span>
                   {hasBreak && <span className="ml-1 text-serious" title="break">break</span>}
-                  {noTask && <span className="ml-1 text-warn" title="no task yet">no task yet</span>}
+                  {noTask && <span className="ml-1 text-warning" title="no task yet">no task yet</span>}
                   {artifact?.proposal && !proposalDecided && <span className="ml-1 text-ink-muted" title="proposal pending">proposal pending</span>}
                 </button>
               </li>;
@@ -858,7 +858,7 @@ export function Cycle({
             </p>
             <SurveyCoverageLine run={proposalRun} testId="proposal-unaccounted" />
             {(artifact.proposal.unread_refs?.length ?? 0) > 0 && (
-              <p data-testid="proposal-unread-refs" className="mb-2 text-xs text-warn">
+              <p data-testid="proposal-unread-refs" className="mb-2 text-xs text-warning">
                 ⚠ {artifact.proposal.unread_refs!.length} reference document
                 {artifact.proposal.unread_refs!.length === 1 ? " was" : "s were"} digested but never
                 opened during this run:{" "}
@@ -1185,7 +1185,7 @@ export function Cycle({
                   ))}
                 </div>
                 {amendImages.length > 0 && architectSees === false && (
-                  <p className="mb-1 text-xs text-warn" data-testid="plan-extend-vision-warn">
+                  <p className="mb-1 text-xs text-warning" data-testid="plan-extend-vision-warn">
                     the architect seated for amendments cannot see images — these will be
                     dropped. Seat a vision model (Settings → my ducklings) for the screenshot
                     to count.

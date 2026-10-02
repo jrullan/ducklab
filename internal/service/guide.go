@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/vcs"
-	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bug"
@@ -83,7 +84,15 @@ type projectSnapshot struct {
 	// AdoptableGateKind is what detection found: tests, build or lint. A card
 	// that always said "tests exist" misdescribed a build or lint gate.
 	AdoptableGateKind string
+	// VisualReference and RunURL together mean the replica can be compared
+	// with the image its accepted requirements cite. HasVisualCheck suppresses
+	// the offer after that comparison is configured.
+	VisualReference string
+	RunURL          string
+	HasVisualCheck  bool
 }
+
+var visualReferenceID = regexp.MustCompile(`\bREF-IMG-[0-9A-Fa-f]{8}\b`)
 
 // nextSteps is the guide's whole brain: the loop's own order, stated.
 // selfAheadCount is nonzero only when the project at root IS this binary's
@@ -152,6 +161,24 @@ func nextSteps(st projectSnapshot) []NextStep {
 		})
 	}
 
+	// A runnable visual replica with an accepted reference is not done merely
+	// because its code gate is green. Keep this available alongside document
+	// work, but after the immediate document step: the capture recipe normally
+	// comes from the spec/build, so presenting setup first is a dead-end for a
+	// newcomer who has only just accepted requirements.
+	appendVisualStep := func() {
+		if st.VisualReference == "" || st.RunURL == "" || st.HasVisualCheck {
+			return
+		}
+		out = append(out, NextStep{
+			ID:     "visual-check",
+			Action: fmt.Sprintf("Set up a visual check against %s (`visual_check`)", st.VisualReference),
+			Reason: fmt.Sprintf("the accepted requirements cite %s and the app has a runnable URL; compare a capture before calling the replica done", st.VisualReference),
+			Kind:   "project",
+			Ref:    "visual-check",
+		})
+	}
+
 	// 2. The document pipeline, until the project has a plan to build from.
 	switch {
 	case !st.HasRequirements:
@@ -169,6 +196,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Reason: "requirements are approved but no spec exists to pin the contracts",
 			Kind:   "stage", Ref: "spec",
 		})
+		appendVisualStep()
 		return out
 	case !st.HasPlan && st.OpenSpecSections > 0:
 		out = append(out, NextStep{
@@ -177,8 +205,10 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Reason: fmt.Sprintf("%d spec section(s) are not yet built and no plan exists", st.OpenSpecSections),
 			Kind:   "stage", Ref: "plan",
 		})
+		appendVisualStep()
 		return out
 	}
+	appendVisualStep()
 
 	// Accepted work is not shipped merely because its gate passed. Keep the
 	// release door visible and promote it ahead of new work.
@@ -422,8 +452,11 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	// to excavate per-run. Broken config outranks every other suggestion,
 	// and nothing else the guide would say is trustworthy while it stands.
 	tomlPath := filepath.Join(entry.Path, ".ducklab", "project.toml")
+	var projCfg *config.Project
 	if _, statErr := os.Stat(tomlPath); statErr == nil {
-		if _, cfgErr := config.LoadProject(tomlPath); cfgErr != nil {
+		var cfgErr error
+		projCfg, cfgErr = config.LoadProject(tomlPath)
+		if cfgErr != nil {
 			return []NextStep{{
 				ID:     "config",
 				Action: "Fix .ducklab/project.toml — it does not parse, and every run will fail at load",
@@ -437,6 +470,15 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 
 	if doc, lerr := artifact.Load(entry.Path, artifact.KindRequirements); lerr == nil && doc != nil && len(doc.Sections) > 0 {
 		st.HasRequirements = true
+		if projCfg != nil {
+			st.RunURL = strings.TrimSpace(projCfg.Run.URL)
+			st.HasVisualCheck = len(projCfg.Render.Compare) > 0
+			if ref := visualReferenceID.FindString(doc.Raw); ref != "" {
+				if _, rerr := resolveRenderReference(entry.Path, ref); rerr == nil {
+					st.VisualReference = ref
+				}
+			}
+		}
 	}
 	if doc, lerr := artifact.Load(entry.Path, artifact.KindSpec); lerr == nil && doc != nil && len(doc.Sections) > 0 {
 		st.HasSpec = true
@@ -468,7 +510,7 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	st.SelfAhead = selfAheadCount(entry.Path)
 	// Detection walks the project; ProjectNext is polled by Now and by MCP
 	// status. Only a project with no gate can have one to adopt.
-	if projCfg, cerr := config.LoadProject(tomlPath); cerr == nil && verify.Gate(projCfg.Verify.Mode) == verify.GateNone {
+	if projCfg != nil && verify.Gate(projCfg.Verify.Mode) == verify.GateNone {
 		if gate, gerr := s.ProjectGate(ctx, projectID); gerr == nil && gate.Adoptable {
 			st.AdoptableGate = gate.DetectedCommand
 			st.AdoptableGateKind = gate.Detected
