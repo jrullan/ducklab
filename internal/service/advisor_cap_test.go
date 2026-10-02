@@ -18,6 +18,9 @@ func TestOneShotCapFollowsWhetherThinkingIsReallySuppressed(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	s.cfg.Providers["openrouter"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1"}
 	s.cfg.Providers["local"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8080/v1"}
+	s.cfg.Providers["lan"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "http://10.0.0.5:8000/v1"}
+	s.cfg.Providers["remote"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}
+	s.cfg.Providers["anthropic"] = config.Provider{Kind: config.ProviderKindAnthropic, BaseURL: "https://api.anthropic.com"}
 	big, small := 131072, 500
 	seat := func(prov string, suppress bool, max *int) *duckling.Duckling {
 		return &duckling.Duckling{Provider: config.ProviderID(prov), Params: config.SamplingParams{DisableThinking: suppress, MaxTokens: max}}
@@ -32,6 +35,11 @@ func TestOneShotCapFollowsWhetherThinkingIsReallySuppressed(t *testing.T) {
 		// Verified suppression: the floor.
 		{"openrouter, disabled verified", seat("openrouter", true, &big), control("disabled"), 2000},
 		{"local template server, suppressed", seat("local", true, &big), control(""), 2000},
+		{"LAN template server (aitopatom), suppressed", seat("lan", true, &big), control(""), 2000},
+		// Review of #134: a remote endpoint that is not OpenRouter is not a
+		// local template server; unknown control there is unverified.
+		{"remote OpenAI-compatible, control unknown", seat("remote", true, &big), control(""), 131072},
+		{"anthropic, control unknown", seat("anthropic", true, &big), control(""), 131072},
 		// Reasoning cannot be assumed off: the configured room.
 		{"openrouter, mandatory (B-479)", seat("openrouter", true, &big), control("mandatory"), 131072},
 		{"openrouter, control never probed", seat("openrouter", true, &big), control(""), 131072},

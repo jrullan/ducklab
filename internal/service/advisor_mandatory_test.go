@@ -142,3 +142,71 @@ func readLLMLog(runDir string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(runDir, "llm.jsonl"))
 	return string(data), err
 }
+
+// reasonThenFail reasons through its whole cap on the first call and errors on
+// the repair, the path where the original response is the only evidence.
+type reasonThenFail struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *reasonThenFail) ID() string                               { return "local" }
+func (r *reasonThenFail) Models(context.Context) ([]string, error) { return nil, nil }
+func (r *reasonThenFail) ChatStream(ctx context.Context, req provider.ChatRequest, _ chan<- provider.Delta) (provider.ChatResponse, error) {
+	return r.Chat(ctx, req)
+}
+func (r *reasonThenFail) Chat(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	r.mu.Lock()
+	r.calls++
+	n := r.calls
+	r.mu.Unlock()
+	if n == 1 {
+		return provider.ChatResponse{
+			Choices: []provider.Choice{{Message: provider.Message{Reasoning: strings.Repeat("thinking ", 900)}, FinishReason: provider.FinishLength}},
+			Usage:   provider.Usage{PromptTokens: 9000, CompletionTokens: 2000, ReasoningTokens: 2000},
+		}, nil
+	}
+	return provider.ChatResponse{}, fmt.Errorf("chat: 504 Gateway Timeout")
+}
+
+// Review of #134: when the repair itself errors, the failed-advice record
+// still carries the response that triggered it — finish, usage, reasoning —
+// through the real executeAdvice path.
+func TestAFailedRepairKeepsTheOriginalResponseAsEvidence(t *testing.T) {
+	isolate(t)
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{
+		"local": {Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8080/v1"},
+	}
+	native := true
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{
+		"pato-local": {Provider: "local", Model: "local-model",
+			Params: config.SamplingParams{DisableThinking: true}, Caps: config.Caps{NativeTools: &native}},
+	}
+	s, err := New(cfg, Options{Bus: bus.New(16)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ducklings.RegisterProvider(&reasonThenFail{})
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-repair", ProjectID: "p", Stage: "build", Status: "paused", PendingKind: "question",
+		Roster: map[string]string{"advisor": "pato-local"}, StartedAt: "2026-10-02T20:00:00Z"}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which script?"}); err == nil {
+		t.Fatal("advice succeeded although the repair errored")
+	}
+	w.Close()
+	raw, err := readLLMLog(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"finish_reason":"length"`, `"reasoning_tokens":2000`, `"completion_tokens":2000`, `"reasoning_chars":`, `504 Gateway Timeout`} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("failed-advice record lacks %s:\n%s", want, raw)
+		}
+	}
+}

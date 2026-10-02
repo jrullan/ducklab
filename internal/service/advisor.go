@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -276,7 +278,7 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.PendingQuestion, call *preparedAdvice) (string, string, error) {
 	resp, err := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, call.user, call.maxTok)
 	if err != nil {
-		s.logFailedOneShot(rs, call.advisor, call.duckling, "advisor", q.Question, err)
+		s.logFailedOneShot(rs, call.advisor, call.duckling, "advisor", q.Question, err, bestResponse(resp))
 		return "", string(call.advisor), err
 	}
 
@@ -292,14 +294,16 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 			". Reply with only the corrected answer text."
 		repair, repairErr := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, repairPrompt, call.maxTok)
 		if repairErr != nil {
-			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, repairErr, nil)
+			// The response that triggered the repair is the evidence when the
+			// repair itself returns nothing (review of #134).
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, repairErr, bestResponse(repair, resp))
 			return "", string(call.advisor), repairErr
 		}
 		raw = answerText(repair)
 		answer = truncateAdvisorAnswer(stripAdvisorThinking(raw))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
-			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, err, &repair)
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, err, bestResponse(repair, resp))
 			return "", string(call.advisor), err
 		}
 	}
@@ -419,10 +423,33 @@ func (s *Service) thinkingSuppressed(d *duckling.Duckling, caps *duckling.Capabi
 	case "mandatory":
 		return false
 	}
+	// Unknown control: only a server Ducklab can reasonably assume is a local
+	// template server (llama.cpp, vLLM on this machine or the LAN) honours
+	// chat_template_kwargs. Any other endpoint — a remote OpenAI-compatible
+	// host, Anthropic — is unverified, and assuming suppression there recreates
+	// the empty answer this cap exists to prevent (review of #134).
 	s.cfgMu.RLock()
 	prov, ok := s.cfg.Providers[d.Provider]
 	s.cfgMu.RUnlock()
-	return ok && !config.IsOpenRouter(prov)
+	return ok && localTemplateServer(prov)
+}
+
+// localTemplateServer reports whether a provider is a self-hosted
+// OpenAI-compatible server on a loopback or private address.
+func localTemplateServer(p config.Provider) bool {
+	if config.IsOpenRouter(p) || (p.Kind != "" && p.Kind != config.ProviderKindOpenAI) {
+		return false
+	}
+	u, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
 }
 
 // wireAdvisor arms ask_advisor on an ExecContext, guarded so the tool can
@@ -445,8 +472,21 @@ func (s *Service) wireAdvisor(rs *runState, ectx *tools.ExecContext) {
 // appended to llm.jsonl on success, so the very calls a person needs to see
 // — the ones behind "advisor recommendation failed" — were invisible and
 // the diagnosis required guessing (B-123).
-func (s *Service) logFailedOneShot(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request string, callErr error) {
-	s.logFailedAdvisorAnswer(rs, seat, d, role, request, "", callErr, nil)
+func (s *Service) logFailedOneShot(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request string, callErr error, resp *provider.ChatResponse) {
+	s.logFailedAdvisorAnswer(rs, seat, d, role, request, "", callErr, resp)
+}
+
+// bestResponse is the first response that carries anything: a provider can
+// return a partial response beside an error, and a failed repair leaves the
+// original response as the only evidence.
+func bestResponse(candidates ...provider.ChatResponse) *provider.ChatResponse {
+	for i := range candidates {
+		r := candidates[i]
+		if len(r.Choices) > 0 || r.Usage.CompletionTokens > 0 || r.FinishReason != "" {
+			return &r
+		}
+	}
+	return nil
 }
 
 // logFailedAdvisorAnswer records rejected provider output as well as its cause,

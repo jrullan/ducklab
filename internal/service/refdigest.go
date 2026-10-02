@@ -277,7 +277,7 @@ func (s *Service) refDigestCall(ctx context.Context, rs *runState, seat config.D
 	caps := s.effectiveCaps(ctx, seat, false)
 	resp, err := oneShotChat(ctx, p, d, caps, "You distill reference documents for a software team. Return only the digest.", prompt, s.oneShotCap(d, caps, 700))
 	if err != nil {
-		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err)
+		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err, bestResponse(resp))
 		return "", err
 	}
 	calc := provider.CostCalculator{InputPerMTok: cost.InputPerMTok, OutputPerMTok: cost.OutputPerMTok}
