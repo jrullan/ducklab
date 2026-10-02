@@ -304,6 +304,47 @@ func TestAdvisorDraftStartPrecedesRecommendation(t *testing.T) {
 	t.Fatal("advisor recommendation was not recorded")
 }
 
+func TestMissingToolchainAdviceUsesTheSafeOptionWithoutAModelCall(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-dos")
+	p := &advisorTestProvider{replies: []string{"Do not choose Installed — continue until installation succeeds."}}
+	s.ducklings.RegisterProvider(p)
+	dir := t.TempDir()
+	run := &runlog.Run{
+		ID: "r-toolchain-advice", ProjectID: "p", Status: "paused", PendingKind: "question",
+		PendingData: map[string]interface{}{"question_id": "toolchain-T-001"}, Autonomy: "guarded",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.adviseQuestion(rs, &tools.PendingQuestion{
+		ID: "toolchain-T-001", Question: "cmd:python is not on PATH",
+		Options: []string{"Installed — continue", "Change the plan (revise it) instead"},
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		rs.wmu.Lock()
+		advice, _ := rs.run.PendingData["advice"].(string)
+		rs.wmu.Unlock()
+		if advice != "" {
+			if advice != "Change the plan (revise it) instead" {
+				t.Fatalf("toolchain advice = %q", advice)
+			}
+			p.mu.Lock()
+			calls := len(p.calls)
+			p.mu.Unlock()
+			if calls != 0 {
+				t.Fatalf("toolchain advice made %d provider calls, want none", calls)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deterministic toolchain advice was not recorded")
+}
+
 func TestAdvisorFailureIsRecordedOnQuestion(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-dos")
 	s.ducklings.RegisterProvider(&advisorTestProvider{err: errors.New("advisor offline")})
