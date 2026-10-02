@@ -10,6 +10,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/store"
 )
@@ -514,5 +515,37 @@ func TestBugPromotionKeepsGoTestRegistrationOutOfFrontendLane(t *testing.T) {
 	}
 	if collisions := artifact.LaneCollisions(plan); len(collisions) != 0 {
 		t.Fatalf("promoted Go-only lanes collide: %v", collisions)
+	}
+}
+
+func TestPromotionStackLaneHintsFallsBackForDirectoryOwnedPortion(t *testing.T) {
+	profile := capability.Profile{
+		LaneHints: capability.LaneHints{
+			TestRoots:             []string{"tests"},
+			TestRegistrationFiles: []string{"go.mod", "frontend/package.json"},
+		},
+		StackLaneHints: map[string]capability.LaneHints{
+			"node": {TestExtensions: []string{".ts"}, TestRegistrationFiles: []string{"frontend/package.json"}},
+			"go":   {TestExtensions: []string{".go"}, TestRegistrationFiles: []string{"go.mod"}},
+		},
+	}
+
+	got := promotionStackLaneHints(profile, []string{"internal/service/"})
+	if len(got) != 1 || !slices.Equal(got[0].TestRoots, profile.LaneHints.TestRoots) ||
+		!slices.Equal(got[0].TestRegistrationFiles, profile.LaneHints.TestRegistrationFiles) {
+		t.Fatalf("directory-owned hints = %#v, want aggregate fallback %#v", got, profile.LaneHints)
+	}
+}
+
+func TestPromotionStackLaneHintsUsesDeterministicStackOrder(t *testing.T) {
+	profile := capability.Profile{StackLaneHints: map[string]capability.LaneHints{
+		"node": {TestExtensions: []string{".ts"}, TestRegistrationFiles: []string{"frontend/package.json"}},
+		"go":   {TestExtensions: []string{".go"}, TestRegistrationFiles: []string{"go.mod"}},
+	}}
+
+	got := promotionStackLaneHints(profile, []string{"internal/service/service.go", "frontend/src/App.ts"})
+	if len(got) != 2 || !slices.Equal(got[0].TestRegistrationFiles, []string{"go.mod"}) ||
+		!slices.Equal(got[1].TestRegistrationFiles, []string{"frontend/package.json"}) {
+		t.Fatalf("stack hints = %#v, want go then node", got)
 	}
 }

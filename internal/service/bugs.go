@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -820,13 +821,25 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 // registration merely because the repository also has a frontend.
 func promotionStackLaneHints(profile capability.Profile, owns []string) []capability.LaneHints {
 	var hints []capability.LaneHints
-	for _, stackHints := range profile.StackLaneHints {
+	stackIDs := make([]string, 0, len(profile.StackLaneHints))
+	for id := range profile.StackLaneHints {
+		stackIDs = append(stackIDs, id)
+	}
+	sort.Strings(stackIDs)
+	for _, id := range stackIDs {
+		stackHints := profile.StackLaneHints[id]
 		for _, owned := range owns {
 			if slices.Contains(stackHints.TestExtensions, strings.ToLower(filepath.Ext(owned))) {
 				hints = append(hints, stackHints)
 				break
 			}
 		}
+	}
+	// Triagers may assign directories rather than concrete files. With no
+	// extension evidence, keep the historical aggregate hints so a test-owning
+	// portion still receives a writable test root and registration file.
+	if len(hints) == 0 {
+		return []capability.LaneHints{profile.LaneHints}
 	}
 	return hints
 }
