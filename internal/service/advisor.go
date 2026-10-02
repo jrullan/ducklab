@@ -256,9 +256,6 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 		b.WriteString("## Active harness/stack invariants — authoritative\n\n" + strings.TrimSpace(rs.execCtx.HarnessContext) +
 			"\n\nResolve any conflict between memory, task prose and these detected environment facts in favor of these invariants.\n\n")
 	}
-	if strings.HasPrefix(q.ID, "toolchain-") {
-		b.WriteString("## Live toolchain check — authoritative\n\nThe question text is the current PATH result. Do not recommend Installed — continue while it says a capability is not on PATH; choose plan revision or instruct the person to install the missing capability first.\n\n")
-	}
 	b.WriteString(header + "\n\n" + q.Question + "\n")
 	if len(q.Options) > 0 {
 		b.WriteString("\nOffered options:\n")
@@ -287,7 +284,7 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 	// and the failure could not be diagnosed (Neocapture intake, 2026-08-29).
 	raw := answerText(resp)
 	answer := truncateAdvisorAnswer(stripAdvisorThinking(raw))
-	if violation := advisorViolation(q, answer); violation != "" {
+	if violation := advisorViolation(answer); violation != "" {
 		repairPrompt := call.user + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
@@ -563,12 +560,8 @@ func stripAdvisorThinking(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func advisorViolation(q *tools.PendingQuestion, text string) string {
+func advisorViolation(text string) string {
 	text = stripAdvisorThinking(text)
-	if q != nil && strings.HasPrefix(q.ID, "toolchain-") &&
-		(strings.Contains(strings.ToLower(text), "installed — continue") || strings.Contains(strings.ToLower(text), "install and continue") || strings.Contains(strings.ToLower(text), "continue with the plan")) {
-		return "do not recommend continuing while the live toolchain check reports a missing capability"
-	}
 	if text == "" {
 		return "empty answer"
 	}

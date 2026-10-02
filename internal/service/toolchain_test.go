@@ -32,7 +32,7 @@ func TestDeclaredToolchainComesFromTheTasksMilestone(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("no sh on PATH")
 	}
-	q := toolchainQuestion("T-001", missing, false)
+	q := toolchainQuestion("T-001", missing)
 	if !strings.Contains(q.Question, "definitely-not-a-binary-xyz") || len(q.Options) != 2 {
 		t.Fatalf("question = %+v", q)
 	}

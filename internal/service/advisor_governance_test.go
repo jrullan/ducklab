@@ -118,18 +118,11 @@ func TestAdvisorSentenceCountUsesProseBoundaries(t *testing.T) {
 
 func TestAdvisorAllowsRecommendationVocabularyAndTruncatesOverlength(t *testing.T) {
 	text := "I recommend option A. Keep the queue tests we need. One. Two. Three. Four. Five. Six. Nine."
-	if violation := advisorViolation(nil, text); violation != "" {
+	if violation := advisorViolation(text); violation != "" {
 		t.Fatalf("advisor rejected useful recommendation: %s", violation)
 	}
 	if got := advisorSentenceCount(truncateAdvisorAnswer(text)); got != 8 {
 		t.Fatalf("truncated sentence count = %d, want 8", got)
-	}
-}
-
-func TestAdvisorRejectsContinuationWhileToolchainIsMissing(t *testing.T) {
-	q := &tools.PendingQuestion{ID: "toolchain-T-001", Question: "cmd:python is still not on PATH; python3 is available."}
-	if violation := advisorViolation(q, "Installed — continue."); violation == "" {
-		t.Fatal("advisor continuation was allowed despite missing live toolchain capability")
 	}
 }
 

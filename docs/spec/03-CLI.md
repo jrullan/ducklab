@@ -153,7 +153,7 @@ ducklab task next
 ### 3.6 `run`
 
 ```
-ducklab run <task-id> [--note <text>] [--mode solo|pair|tournament|council|split]
+ducklab run <task-id> [--mode solo|pair|tournament|council|split]
                       [--ducklings a,b,c] [--rounds n]
                       [--verify "<cmd>"|auto|none]
                       [--budget-usd f] [--max-tokens n] [--timeout s]
@@ -169,17 +169,6 @@ ducklab run answer <run-id> --question <qid> --answer <text>
 ducklab run abort <run-id>
 ducklab run gc [--older-than 30d] [--keep-accepted]
 ```
-
-To retry rejected work with its correction, start a new run explicitly:
-
-```
-ducklab run T-286 --note "require a positive completion-token observation"
-```
-
-The CLI labels the supplied text as **run-specific feedback** when it starts the
-run. The new run retains it and receives it with the human-feedback provenance;
-it does **not** amend the authoritative task body shown by `ducklab task show`.
-A launch without `--note` is intentionally fresh.
 
 `--dry-run` renders every prompt that would be sent, prints them, and exits 0
 without any model call. It is the primary debugging tool and ships in v0.1.

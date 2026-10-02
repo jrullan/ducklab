@@ -153,18 +153,6 @@ describe("event application", () => {
     expect(run.status).toBe("running");
     expect(run.pending_kind).toBeUndefined();
   });
-
-  it("does not resume a paused build for a plan-revision answer before its terminal event", () => {
-    const s = useRuns.getState();
-    s.setRun({ ...baseRun, status: "paused", pending_kind: "question" });
-    s.applyEvent({ type: "human", run_id: "r-1", seq: 1, data: { action: "plan_revision_requested", resolution: "plan_revision" } });
-    expect(useRuns.getState().runs["r-1"]!.status).toBe("paused");
-
-    s.applyEvent({ type: "run_end", run_id: "r-1", seq: 2, data: { verdict: "", resolution: "plan_revision" } });
-    const run = useRuns.getState().runs["r-1"]!;
-    expect(run.status).toBe("done");
-    expect(run.pending_kind).toBeUndefined();
-  });
 });
 
 describe("accept flow", () => {

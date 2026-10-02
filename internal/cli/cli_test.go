@@ -396,64 +396,17 @@ func TestRunStartOmitsModeUnlessThePersonNamesOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := runStart("T-004", "", "", false, false, true, false, repo, nil, 0, 0); code != 0 {
+	if code := runStart("T-004", "", false, false, true, false, repo, nil, 0, 0); code != 0 {
 		t.Fatalf("omitted-mode run exit code = %d", code)
 	}
 	if _, present := requests[0]["mode"]; present {
 		t.Errorf("omitted mode was serialized as an explicit request: %#v", requests[0])
 	}
-	if code := runStart("T-004", "pair", "", false, false, true, false, repo, nil, 0, 0); code != 0 {
+	if code := runStart("T-004", "pair", false, false, true, false, repo, nil, 0, 0); code != 0 {
 		t.Fatalf("explicit-mode run exit code = %d", code)
 	}
 	if got := requests[1]["mode"]; got != "pair" {
 		t.Errorf("explicit mode = %#v, want pair", got)
-	}
-}
-
-func TestRunNoteReachesRunStartAndIsRetained(t *testing.T) {
-	repo := t.TempDir()
-	const note = "require a positive completion-token observation"
-	var received map[string]interface{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/projects":
-			_, _ = w.Write([]byte(`{"items":[{"id":"calc","path":"` + filepath.ToSlash(repo) + `"}]}`))
-		case "/v1/projects/calc/runs":
-			if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-				t.Fatal(err)
-			}
-			_, _ = w.Write([]byte(`{"id":"r-retry","status":"running","note":"` + note + `"}`))
-		default:
-			t.Fatalf("unexpected engine request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	endpoint, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, err := strconv.Atoi(endpoint.Port())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	enginePath, err := daemon.EngineJSONPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(enginePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	engine, _ := json.Marshal(daemon.EngineInfo{Port: port, Token: "test"})
-	if err := os.WriteFile(enginePath, engine, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := runCmd("", []string{"T-291", "--note", note, "--no-wait"}, repo); code != 0 {
-		t.Fatalf("retry exit code = %d", code)
-	}
-	if got := received["note"]; got != note {
-		t.Errorf("RunStart note = %#v, want %q", got, note)
 	}
 }
 
