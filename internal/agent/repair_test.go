@@ -1261,6 +1261,37 @@ func TestNoAnswerAtSmallSeatReserveNamesRaiseableControls(t *testing.T) {
 	}
 }
 
+func TestDocumentTruncationNamesTheUpstreamCap(t *testing.T) {
+	p := provider.NewFake("openrouter")
+	p.ScriptFunc = func(_ provider.ChatRequest, _ int) *provider.ChatResponse {
+		return &provider.ChatResponse{
+			Choices: []provider.Choice{{
+				Message:      provider.Message{Role: "assistant", Content: "## SPEC-001 — Partial"},
+				FinishReason: provider.FinishLength,
+			}},
+			Usage:    provider.Usage{PromptTokens: 100, CompletionTokens: 16384},
+			Upstream: "DeepInfra",
+		}
+	}
+	loop := testLoop(p, 0)
+	maxTokens := 131072
+	loop.Duckling.Params.MaxTokens = &maxTokens
+	turn := &Turn{Role: config.RoleArchitect, Prompt: "write the spec", Contract: "markdown_sections:SPEC", MaxTurns: 2}
+
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("err = %v, want ErrTruncated", err)
+	}
+	for _, want := range []string{"DeepInfra", "16384", "OpenRouter"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("upstream-cap diagnosis does not name %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "Raise max_tokens") {
+		t.Errorf("upstream-cap diagnosis recommends raising max_tokens: %v", err)
+	}
+}
+
 // A spec regeneration hit pato-sonnet's 8192 output cap, and the truncation
 // retry — "stop deliberating, be brief" — cannot shrink a whole document into
 // the same budget: it burned a duplicate call and died on the same wall,
