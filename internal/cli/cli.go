@@ -671,7 +671,7 @@ func runCmd(verb string, args []string, repo string) int {
 	if verb == "" {
 		// ducklab run <task-id>
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament|split] [--ducklings a,b] [--rounds n] [--max-tokens N] [--dry-run] [--yes] [--no-wait]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--note <text>] [--mode solo|pair|tournament|split] [--ducklings a,b] [--rounds n] [--max-tokens N] [--dry-run] [--yes] [--no-wait]")
 			return 2
 		}
 		taskID := args[0]
@@ -687,8 +687,14 @@ func runCmd(verb string, args []string, repo string) int {
 		var ducklings []string
 		rounds := 0
 		maxTokens := 0
+		note := ""
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
+			case "--note":
+				if i+1 < len(args) {
+					note = args[i+1]
+					i++
+				}
 			case "--mode":
 				if i+1 < len(args) {
 					mode = args[i+1]
@@ -726,7 +732,7 @@ func runCmd(verb string, args []string, repo string) int {
 				noStream = true
 			}
 		}
-		return runStart(taskID, mode, dryRun, yes, noWait, noStream, repo, ducklings, rounds, maxTokens)
+		return runStart(taskID, mode, note, dryRun, yes, noWait, noStream, repo, ducklings, rounds, maxTokens)
 	}
 	switch verb {
 	case "list":
@@ -1018,7 +1024,7 @@ func asStrings(v interface{}) []string {
 	return out
 }
 
-func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds, maxTokens int) int {
+func runStart(taskID, mode, note string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds, maxTokens int) int {
 	if repo == "" {
 		repo = "."
 	}
@@ -1057,6 +1063,9 @@ func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo stri
 	if mode != "" {
 		req["mode"] = mode
 	}
+	if note != "" {
+		req["note"] = note
+	}
 	if noStream {
 		req["no_stream"] = true
 	}
@@ -1080,6 +1089,9 @@ func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo stri
 		return 1
 	}
 	fmt.Printf("run %s started (status: %s)\n", run["id"], run["status"])
+	if note != "" {
+		fmt.Printf("  run-specific feedback: %s\n", note)
+	}
 	if dryRun {
 		fmt.Println("(dry run — no model calls made)")
 		return 0
