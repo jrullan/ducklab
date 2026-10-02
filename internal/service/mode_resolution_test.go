@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,19 +43,14 @@ func TestAutomaticSeatingSkipsTheDucklingWhoseLastProbeFailed(t *testing.T) {
 	}
 }
 
-type unavailableChatProvider struct{ selectiveProbeProvider }
-
-func (unavailableChatProvider) Chat(context.Context, provider.ChatRequest) (provider.ChatResponse, error) {
-	return provider.ChatResponse{}, fmt.Errorf("%w: 404 Not Found", provider.ErrProviderUnavailable)
-}
-
-func (unavailableChatProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
-	return provider.ChatResponse{}, fmt.Errorf("%w: 404 Not Found", provider.ErrProviderUnavailable)
-}
-
 func TestActualChatFailureMakesNextAutomaticSeatSkipDuckling(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<h1>404 Not Found</h1>No context found for request")
+	}))
+	defer srv.Close()
 	s := serviceWithDucklings(t, "pato-local", "pato-openrouter")
-	s.ducklings.RegisterProvider(unavailableChatProvider{})
+	s.ducklings.RegisterProvider(provider.NewOpenAICompat("fake", srv.URL, ""))
 	native := true
 	cfg := s.cfg.Ducklings["pato-local"]
 	cfg.Caps.NativeTools = &native // the replay path: declared, so no launch probe
@@ -61,8 +59,8 @@ func TestActualChatFailureMakesNextAutomaticSeatSkipDuckling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loop.Provider.ChatStream(context.Background(), provider.ChatRequest{Model: cfg.Model}, make(chan provider.Delta, 1)); err == nil {
-		t.Fatal("dead endpoint unexpectedly answered")
+	if _, err := loop.Provider.ChatStream(context.Background(), provider.ChatRequest{Model: cfg.Model}, make(chan provider.Delta, 1)); !errors.Is(err, provider.ErrChatUnavailable) {
+		t.Fatalf("real 404 = %v, want ErrChatUnavailable", err)
 	}
 	roster, _ := s.resolveCanonicalRoster(nil, "solo")
 	if got := roster[config.RoleImplementer]; got != "pato-openrouter" {

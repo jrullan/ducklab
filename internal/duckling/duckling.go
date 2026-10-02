@@ -165,7 +165,7 @@ func (r *Registry) RecordProviderResult(id config.DucklingID, err error) {
 		r.clearProbeFailure(id)
 		return
 	}
-	if errors.Is(err, provider.ErrProviderUnavailable) || errors.Is(err, provider.ErrAuth) {
+	if errors.Is(err, provider.ErrProviderUnavailable) || errors.Is(err, provider.ErrChatUnavailable) || errors.Is(err, provider.ErrAuth) {
 		r.recordProbeFailure(id, err)
 	}
 }

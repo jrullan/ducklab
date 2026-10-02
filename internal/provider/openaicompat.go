@@ -370,6 +370,17 @@ func classifiedChatError(operation, status string, code int, body []byte) error 
 		strings.Contains(lower, "vision projector") {
 		return fmt.Errorf("%w: model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling", ErrVisionUnsupported)
 	}
+	// Streaming takes this common classifier before the non-streaming path's
+	// explicit auth checks. Both forms must retain the same error identity.
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return fmt.Errorf("%w: %s: %s: %s", ErrAuth, operation, status, message)
+	}
+	// A 404 is not transient provider weather: retrying the same URL does not
+	// help. It does prove that this configured duckling cannot chat, whether
+	// the address serves no chat API or the selected model does not exist.
+	if code == http.StatusNotFound {
+		return fmt.Errorf("%w: %s: %s: %s", ErrChatUnavailable, operation, status, message)
+	}
 	// A 5xx — a Cloudflare 520 from a flaky OpenRouter upstream, a 503/504
 	// from a gateway — is the provider being unavailable, weather worth
 	// retrying, never a verdict on the work. Mid-stream in particular one such

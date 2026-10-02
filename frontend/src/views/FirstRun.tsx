@@ -99,7 +99,7 @@ export function FirstRun({
           if (live) setProviderModels(null);
           return;
         }
-		if (live) setProviderModels(null);
+        if (live) setProviderModels(null);
         try {
           const models = await client.providerModels(next.openRouter);
           if (live) setProviderModels(models);

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -92,6 +93,36 @@ func TestATransientUpstreamFailureIsRetried(t *testing.T) {
 			}
 			if resp.Choices[0].Message.Content != "ok" {
 				t.Errorf("content = %q", resp.Choices[0].Message.Content)
+			}
+		})
+	}
+}
+
+func TestChat404IsUnavailableForBothCallPathsButNotTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<h1>404 Not Found</h1>No context found for request")
+	}))
+	defer srv.Close()
+	p := NewOpenAICompat("local", srv.URL, "")
+	req := ChatRequest{Model: "starter", Messages: []Message{{Role: "user", Content: "go"}}}
+	for _, call := range []struct {
+		name string
+		fn   func() error
+	}{
+		{name: "chat", fn: func() error { _, err := p.Chat(context.Background(), req); return err }},
+		{name: "chat stream", fn: func() error {
+			_, err := p.ChatStream(context.Background(), req, make(chan Delta, 1))
+			return err
+		}},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			err := call.fn()
+			if !errors.Is(err, ErrChatUnavailable) {
+				t.Fatalf("404 error = %v, want ErrChatUnavailable", err)
+			}
+			if IsTransient(err) {
+				t.Fatalf("404 should not be retried as provider weather: %v", err)
 			}
 		})
 	}

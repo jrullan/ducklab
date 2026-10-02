@@ -282,6 +282,11 @@ var ErrInvalidResponse = errors.New("invalid response")
 // ErrProviderUnavailable is returned when the provider cannot be reached.
 var ErrProviderUnavailable = errors.New("provider unavailable")
 
+// ErrChatUnavailable means the configured endpoint answered, but cannot serve
+// this duckling's chat route or model. Unlike provider weather it is not
+// transient, but automatic seating must still stop selecting that duckling.
+var ErrChatUnavailable = errors.New("chat endpoint unavailable")
+
 // ErrVisionUnsupported means the endpoint rejected image content because the
 // selected model/server has no vision support (for llama.cpp, commonly no
 // mmproj projector).
