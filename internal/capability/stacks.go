@@ -34,7 +34,10 @@ func (Go) Detect(ctx Context) Contributions {
 	if !hasModule && !hasLint {
 		return Contributions{}
 	}
-	c := Contributions{Detection: Detection{Capability: "go"}}
+	c := Contributions{
+		Detection: Detection{Capability: "go"},
+		LaneHints: LaneHints{TestExtensions: []string{".go"}},
+	}
 	if hasModule {
 		c.Detection.Evidence = append(c.Detection.Evidence, "go.mod")
 		if commandSucceeds(ctx.ProjectRoot, "go test ./... -run XXX -count=1") {
@@ -69,7 +72,7 @@ func (Python) Detect(ctx Context) Contributions {
 	}
 	c := Contributions{
 		Detection: Detection{Capability: "python", Evidence: markers},
-		LaneHints: LaneHints{TestRoots: testRoots, TestRegistrationFiles: existing(ctx.ProjectRoot, "pytest.ini", "pyproject.toml")},
+		LaneHints: LaneHints{TestRoots: testRoots, TestRegistrationFiles: existing(ctx.ProjectRoot, "pytest.ini", "pyproject.toml"), TestExtensions: []string{".py"}},
 	}
 	if len(markers) > 0 && commandSucceeds(ctx.ProjectRoot, "pytest -q --collect-only") {
 		c.Gates = append(c.Gates, GateCandidate{Capability: "python", Kind: "tests", Command: "pytest -q", Scope: ".", Priority: 20})
@@ -118,6 +121,7 @@ func (Node) Detect(ctx Context) Contributions {
 		}
 		c.Gates = append(c.Gates, GateCandidate{Capability: "node", Kind: "tests", Command: command, Scope: "frontend", Priority: 11, Supplemental: true})
 	}
+	c.LaneHints.TestExtensions = []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 	return c
 }
 
@@ -136,7 +140,7 @@ func (Rust) Detect(ctx Context) Contributions {
 		Detection:   Detection{Capability: "rust", Evidence: []string{"Cargo.toml"}},
 		Gates:       []GateCandidate{{Capability: "rust", Kind: "tests", Command: "cargo test", Scope: ".", Priority: 40}},
 		RunCommands: (Rust{}).DetectRunCommands(ctx),
-		LaneHints:   LaneHints{TestRoots: existingDirs(ctx.ProjectRoot, "tests"), TestRegistrationFiles: []string{"Cargo.toml"}},
+		LaneHints:   LaneHints{TestRoots: existingDirs(ctx.ProjectRoot, "tests"), TestRegistrationFiles: []string{"Cargo.toml"}, TestExtensions: []string{".rs"}},
 	}
 }
 
@@ -249,7 +253,7 @@ func (Meson) Detect(ctx Context) Contributions {
 		Detection:   Detection{Capability: "meson", Evidence: []string{"meson.build"}},
 		Gates:       []GateCandidate{candidate},
 		RunCommands: (Meson{}).DetectRunCommands(ctx),
-		LaneHints:   LaneHints{TestRoots: testRoots, TestRegistrationFiles: registration},
+		LaneHints:   LaneHints{TestRoots: testRoots, TestRegistrationFiles: registration, TestExtensions: []string{".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}},
 	}
 }
 

@@ -443,3 +443,76 @@ func TestBugPromotionRefusesToGuessASuspectedFileBetweenPortions(t *testing.T) {
 		t.Fatalf("promote error = %v, want an actionable ambiguous-lane refusal", err)
 	}
 }
+
+func TestBugPromotionKeepsGoTestRegistrationOutOfFrontendLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, root := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for path, body := range map[string]string{
+		"go.mod":                       "module example.com/mixed\n\ngo 1.22\n",
+		"internal/alpha/alpha.go":      "package alpha\n",
+		"internal/alpha/alpha_test.go": "package alpha\n",
+		"internal/beta/beta.go":        "package beta\n",
+		"internal/beta/beta_test.go":   "package beta\n",
+		"frontend/package.json":        `{"scripts":{"test":"vitest run"}}`,
+		"frontend/src/board.test.tsx":  "",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	promoted := map[string]bool{}
+	for _, proposal := range []struct{ title, source, test string }{
+		{"Correct alpha", "internal/alpha/alpha.go", "internal/alpha/alpha_test.go"},
+		{"Correct beta", "internal/beta/beta.go", "internal/beta/beta_test.go"},
+	} {
+		added, err := s.BugAdd(context.Background(), id, BugRequest{Title: proposal.title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.ApplyTriage(context.Background(), id, []map[string]interface{}{{
+			"bug": added.ID, "severity": "normal", "reason": "isolated Go regression",
+			"proposal": []interface{}{map[string]interface{}{
+				"title": proposal.title, "acceptance": []interface{}{"A Go regression test covers the correction"},
+				"owns": []interface{}{proposal.source, proposal.test},
+			}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s.BugPromote(context.Background(), id, added.ID, "human")
+		if err != nil {
+			t.Fatal(err)
+		}
+		taskID, ok := out["task"].(string)
+		if !ok || taskID == "" {
+			t.Fatalf("promote result = %#v, want task id", out)
+		}
+		promoted[taskID] = true
+	}
+	plan, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if !promoted[task.ID] {
+				continue
+			}
+			checked++
+			if slices.Contains(task.Owns, "frontend/package.json") {
+				t.Errorf("Go-only task %s unexpectedly owns frontend registration: %v", task.ID, task.Owns)
+			}
+		}
+	}
+	if checked != len(promoted) {
+		t.Fatalf("checked %d promoted tasks, want %d", checked, len(promoted))
+	}
+	if collisions := artifact.LaneCollisions(plan); len(collisions) != 0 {
+		t.Fatalf("promoted Go-only lanes collide: %v", collisions)
+	}
+}
