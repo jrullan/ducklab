@@ -37,8 +37,9 @@ Review the JSON manifest below before Ducklab freezes its topology. This is a
 semantic review; deterministic parsing, ids and graph checks have already run.
 
 The candidate's complete schema is exactly: milestone fields id, title and
-tasks; task fields id, title, implements, work_unit, acceptance_slices,
-acceptance_probes, produces, consumes and verification. Do not request
+tasks; task fields {{TASK_FIELDS}}. Produces names artifacts a task creates
+(each has exactly one creator); modifies names existing artifacts a later
+task changes; both are valid, and a task needs at least one. Do not request
 Markdown rendering fields such as Owns, Toolchain, Depends on, Exercises, Out
 of scope or Assumption. Ducklab derives or validates those after this compact
 manifest is approved. Do not request any key outside this schema.
@@ -108,10 +109,11 @@ manifest is approved. Do not request any key outside this schema.
 Approve only when this manifest is a sound topology to freeze.`
 
 func planManifestSemanticReviewFor(small bool) string {
+	base := strings.Replace(planManifestSemanticReview, "{{TASK_FIELDS}}", strings.Join(agent.ManifestTaskFields(), ", "), 1)
 	if small {
-		return planManifestSemanticReview
+		return base
 	}
-	review := strings.Replace(planManifestSemanticReview,
+	review := strings.Replace(base,
 		"- Each task is one cohesive concern with 1–3 independently observable slices.",
 		"- Each task is one cohesive concern with one or more independently observable slices.", 1)
 	return strings.Replace(review,
