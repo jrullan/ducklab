@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { saveChipFacts } from "../lib/chipfacts";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { Cycle, traceMarkers } from "./Cycle";
 import { Ledger } from "./Ledger";
 import { EngineClient } from "../api/client";
@@ -400,6 +400,28 @@ describe("Cycle", () => {
     await waitFor(() => expect(asked.length).toBeGreaterThan(0));
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
     await waitFor(() => expect(asked.some((p) => p.includes("/artifacts/plan"))).toBe(true));
+  });
+
+  // Jose (TI-36X): the first proposal of a document read "replaces the
+  // approved …" although nothing was approved yet.
+  it("words a first proposal as approving it and a later one as replacing", async () => {
+    const proposal = { diff: "", run_id: "r-1", sections: [{ id: "REQ-001", title: "New", body: "Draft." }] };
+    for (const [doc, want, not] of [
+      [{ ...REQUIREMENTS, approved: false, sections: [], proposal }, "approves this as the project's first requirements document", "replaces the approved"],
+      [{ ...REQUIREMENTS, proposal }, "replaces the approved requirements document", "first requirements"],
+    ] as const) {
+      cleanup();
+      const client = clientWith((p) => {
+        if (p.includes("/artifacts/")) return json(doc);
+        if (p.includes("/trace/check")) return json({ errors: null });
+        return json({}, 404);
+      });
+      render(<Cycle client={client} projectId="p" />);
+      const card = await screen.findByTestId("cycle-proposal");
+      const consequence = within(card).getByTestId("decision-consequence").textContent ?? "";
+      expect(consequence).toContain(want);
+      expect(consequence).not.toContain(not);
+    }
   });
 
   it("filters mixed stages and does not render an overlapping section twice", async () => {

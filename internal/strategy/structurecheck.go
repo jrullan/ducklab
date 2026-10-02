@@ -631,6 +631,14 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 // notices; an identical string is deliberate because the public checker is the
 // authority for both sides of the comparison.
 func ProposalStructureFindingsForAmendment(base, proposed *artifact.Document) (blockers, notices []string) {
+	// No approved content, no inheritance. artifact.Load answers a missing
+	// file with an empty document (grammar 0), which read as "the accepted
+	// spec does not use the current grammar" on a project that had never
+	// accepted a spec, and an empty base could have demoted a real blocker
+	// to an inherited notice.
+	if base == nil || len(base.Sections) == 0 {
+		return ProposalStructureFindings(proposed), nil
+	}
 	baseline := map[string]bool{}
 	for _, finding := range ProposalStructureFindings(base) {
 		baseline[finding] = true
@@ -639,7 +647,7 @@ func ProposalStructureFindingsForAmendment(base, proposed *artifact.Document) (b
 	// the candidate correctly has no legacy diagnostic. Keep the accepted
 	// document's migration debt visible as a notice without blaming or blocking
 	// the architect that produced a grammar-current amendment (B-432).
-	if base != nil && proposed != nil && base.Front.Grammar != artifact.CurrentGrammar && proposed.Front.Grammar == artifact.CurrentGrammar {
+	if proposed != nil && base.Front.Grammar != artifact.CurrentGrammar && proposed.Front.Grammar == artifact.CurrentGrammar {
 		kind := string(base.Front.Kind)
 		if kind == "" {
 			kind = "document"

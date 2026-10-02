@@ -569,8 +569,12 @@ func TestPlanAmendmentStructureTreatsInheritedDefectsAsNotices(t *testing.T) {
 }
 
 func TestAmendmentReportsAcceptedLegacyGrammarAsANonBlockingNotice(t *testing.T) {
-	base := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec}}
-	proposed := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec, Grammar: artifact.CurrentGrammar}}
+	// An accepted legacy document has content. A base with no sections is
+	// what artifact.Load returns for a file that does not exist, and that
+	// must inherit nothing (see TestAnEmptyBaseIsNotAnAcceptedDocument).
+	section := artifact.Section{ID: "SPEC-001", Title: "Accepted", Body: "**Implements:** REQ-001\nbody"}
+	base := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec}, Sections: []artifact.Section{section}}
+	proposed := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec, Grammar: artifact.CurrentGrammar}, Sections: []artifact.Section{section}}
 	blockers, notices := ProposalStructureFindingsForAmendment(base, proposed)
 	if len(blockers) != 0 {
 		t.Fatalf("legacy accepted grammar blocked a current proposal: %v", blockers)
@@ -578,6 +582,20 @@ func TestAmendmentReportsAcceptedLegacyGrammarAsANonBlockingNotice(t *testing.T)
 	joined := strings.Join(notices, "\n")
 	if !strings.Contains(joined, "accepted spec") || !strings.Contains(joined, "grammar: 2") {
 		t.Fatalf("legacy grammar notice is not actionable: %v", notices)
+	}
+}
+
+// Jose (TI-36X): a never-accepted document loads as an empty one (grammar 0).
+// It is not an accepted legacy document: no grammar notice, and nothing in
+// the proposal is demoted to "inherited".
+func TestAnEmptyBaseIsNotAnAcceptedDocument(t *testing.T) {
+	empty := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec}}
+	proposed := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec, Grammar: artifact.CurrentGrammar}}
+	for _, base := range []*artifact.Document{nil, empty} {
+		_, notices := ProposalStructureFindingsForAmendment(base, proposed)
+		if len(notices) != 0 {
+			t.Fatalf("base %v produced inherited notices: %v", base, notices)
+		}
 	}
 }
 

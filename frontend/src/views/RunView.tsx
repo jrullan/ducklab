@@ -28,7 +28,7 @@ import { fixedSeats, seatsFromRoster, rolesForMode } from "../lib/seats";
 import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
-import { runLabel } from "../lib/runview";
+import { documentLabel, runLabel } from "../lib/runview";
 import { VisualCheck } from "../components/VisualCheck";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
@@ -872,6 +872,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const rolledBackRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_aborted === true && Array.isArray(run.pending_data?.conflicting_files);
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
+  // The engine says whether an approved document exists (approved_exists);
+  // a project's first spec has nothing to "replace" (Jose, TI-36X). Older
+  // runs lack the flag and keep the replacing wording.
+  const firstDocument = run.pending_data?.approved_exists === false;
+  const docLabel = documentLabel(run.stage, run.pending_data?.artifact);
   const consequence = run.pending_kind === "budget" && !next.includes("resume")
     ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below before Resume becomes available, or Abort to close the attempt."
     : next.includes("resume")
@@ -889,9 +894,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     : documentProposal && !next.includes("accept")
       // B-435: the reviewer blocked acceptance, so the line must describe
       // the two actions actually offered, not the effect of one that is not.
-      ? `Request changes sends this ${run.stage} draft back for revision with your note; Discard draft keeps the approved ${run.stage} as it is`
+      ? `Request changes sends this ${docLabel} draft back for revision with your note; ${firstDocument ? `Discard draft leaves the project without a ${docLabel}` : `Discard draft keeps the approved ${docLabel} as it is`}`
     : documentProposal
-      ? `replaces the approved ${run.stage} and closes the run`
+      ? firstDocument
+        ? `approves this as the project's first ${docLabel} and closes the run`
+        : `replaces the approved ${docLabel} and closes the run`
       : run.stage === "triage"
       ? `applies ${triage.length || "the"} classification${triage.length === 1 ? "" : "s"} to the report${triage.length === 1 ? "" : "s"}`
         : !next.includes("accept")

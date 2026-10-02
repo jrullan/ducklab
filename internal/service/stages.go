@@ -1296,6 +1296,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
 	isAmendment := strings.TrimSpace(req.Revise) != "" || strings.TrimSpace(req.Extend) != "" || strings.TrimSpace(req.SplitTask) != ""
+	// Whether accepting replaces an approved document or approves the first
+	// one: the decision wording depends on it, and a first spec read
+	// "replaces the approved spec" (Jose, TI-36X).
+	rs.run.PendingData["approved_exists"] = approvedDocumentExists(projectRoot, result.Kind)
 	structureBlockers, structureNotices := proposalStructureGateFindings(projectRoot, result, isAmendment)
 	proposalBlockers = append(proposalBlockers, structureBlockers...)
 	if len(structureNotices) > 0 {
@@ -1384,6 +1388,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	})
 	rs.writer.WriteState()
 	rs.wmu.Unlock()
+}
+
+// approvedDocumentExists reports whether the project has approved content of
+// this kind. artifact.Load answers a missing file with an empty document, so
+// "loaded" is not "exists".
+func approvedDocumentExists(projectRoot string, kind artifact.Kind) bool {
+	doc, err := artifact.Load(projectRoot, kind)
+	return err == nil && doc != nil && len(doc.Sections) > 0
 }
 
 func proposalStructureGateFindings(projectRoot string, result *stage.Result, amendment bool) (blockers, notices []string) {

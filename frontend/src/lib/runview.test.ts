@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildTurns, anonymiseTurns, buildTimeline, toolFamily,
+  buildTurns, documentLabel, anonymiseTurns, buildTimeline, toolFamily,
   buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, findingsFiled, chainedBuildId, orderDiffFiles, touchesTests, isTestPath,
   humaniseContract,
 } from "./runview";
@@ -777,5 +777,15 @@ describe("same-coordinate structure repairs", () => {
       ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "local", repair_attempt: 4, repair_max: 12, repair_sections: ["M-10"], repair_stagnant_attempts: 2, repair_stagnation_limit: 3, repair_best_problem_count: 10 }, 1),
     ]);
     expect(blocks[0]!.subject).toBe("structure repair 4/12 · M-10 · no-best-progress 2/3 · best 10");
+  });
+});
+
+describe("documentLabel", () => {
+  it("names the document a stage decides, preferring the engine's artifact", () => {
+    expect(documentLabel("intake", "requirements")).toBe("requirements document");
+    expect(documentLabel("intake")).toBe("requirements document");
+    expect(documentLabel("spec", "spec")).toBe("spec");
+    expect(documentLabel("plan")).toBe("plan");
+    expect(documentLabel("requirements")).toBe("requirements document");
   });
 });

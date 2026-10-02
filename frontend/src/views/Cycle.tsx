@@ -16,7 +16,7 @@ import { useRuns } from "../store/runs";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
-import { parseDiff } from "../lib/runview";
+import { documentLabel, parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
 import { DecisionCard } from "../components/DecisionCard";
 import { SurveyCoverageLine } from "../components/SurveyInventory";
@@ -834,7 +834,9 @@ export function Cycle({
                   ? `from ${artifact.proposal.ducklings.join(", ")}`
                   : undefined
               }
-              consequence={`replaces the approved ${active.kind} and closes the run`}
+              consequence={artifact.approved && (artifact.sections?.length ?? 0) > 0
+                ? `replaces the approved ${documentLabel(active.kind)} and closes the run`
+                : `approves this as the project's first ${documentLabel(active.kind)} and closes the run`}
               accepting={promoting}
               onAccept={() => void accept()}
               onReject={() => void reject()}
