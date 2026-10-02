@@ -271,7 +271,7 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 	// before the answer even with suppression applied, and an advisor cut
 	// off mid-answer fails its contract as surely as an empty one.
 	caps := s.effectiveCaps(ctx, advisorID, false)
-	maxTok := s.oneShotCap(d, caps, 2000)
+	maxTok := s.oneShotCap(d, caps, 2000, provider.EstimateTokens(systemPrompt+b.String()))
 	return &preparedAdvice{advisor: advisorID, duckling: d, caps: caps, provider: p, system: systemPrompt, user: b.String(), maxTok: maxTok}, nil
 }
 
@@ -379,30 +379,49 @@ func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling,
 // the unclosed block, and the visible answer was empty — twice, since the
 // repair repeated the same cap (Neocapture intake, 2026-08-29). Such a seat
 // gets the room its configuration already grants it.
-func (s *Service) oneShotCap(d *duckling.Duckling, caps *duckling.Capabilities, floor int) int {
-	configured := 0
-	if d != nil && d.Params.MaxTokens != nil {
-		configured = *d.Params.MaxTokens
+func (s *Service) oneShotCap(d *duckling.Duckling, caps *duckling.Capabilities, floor, promptTokens int) int {
+	want := floor
+	if d != nil && !s.thinkingSuppressed(d, caps) {
+		// Reasoning shares the cap with the answer and cannot be assumed off:
+		// a mandatory-reasoning endpoint (qwen3.8-max on Alibaba) spent the
+		// whole 2000-token floor thinking and answered nothing (B-479). Grant
+		// the seat's configured output — its declared ceiling, which the agent
+		// loop sends unchanged — or unsuppressedFloor when none is configured.
+		if d.Params.MaxTokens != nil {
+			want = max(floor, *d.Params.MaxTokens)
+		} else {
+			want = max(floor, unsuppressedFloor)
+		}
 	}
-	if d != nil && s.thinkingSuppressed(d, caps) {
-		return floor
+	// Prompt and output share the context window. An endpoint rejects a
+	// request whose max_tokens does not fit beside the prompt (review of
+	// #134: a 16K floor on an 8K seat failed every advisor and digest call,
+	// and digestion runs precisely for small-context seats).
+	contextTokens := 0
+	if caps != nil {
+		contextTokens = caps.ContextTokens
 	}
-	// Reasoning shares the cap with the answer and cannot be assumed off: a
-	// mandatory-reasoning endpoint (qwen3.8-max on Alibaba) spent the whole
-	// 2000-token floor thinking and answered nothing (B-479). Grant what the
-	// duckling's configuration grants, and never less than unsuppressedFloor.
-	if configured > floor {
-		floor = configured
+	if contextTokens > 0 {
+		room := contextTokens - promptTokens - promptTokens/10 - oneShotContextMargin
+		if want > room {
+			want = max(room, minOneShotOutput)
+		}
 	}
-	if floor < unsuppressedFloor {
-		floor = unsuppressedFloor
-	}
-	return floor
+	return want
 }
 
-// unsuppressedFloor is the smallest cap a one-shot gets when its seat may be
-// reasoning: room to think and still answer.
+// unsuppressedFloor is the cap a one-shot gets when its seat may be
+// reasoning and configures no output limit: room to think and still answer,
+// when the context window has it.
 const unsuppressedFloor = 16384
+
+// oneShotContextMargin covers the chat template and the error of the
+// characters/4 prompt estimate (plus 10% of the estimate itself).
+const oneShotContextMargin = 256
+
+// minOneShotOutput is what a one-shot asks for when the prompt leaves less:
+// the call may fail for its size, but it fails with the endpoint's reason.
+const minOneShotOutput = 256
 
 // thinkingSuppressed reports whether a one-shot to this duckling actually
 // runs without reasoning: suppression is requested, and the endpoint is known

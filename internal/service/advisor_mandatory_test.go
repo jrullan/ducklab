@@ -63,11 +63,11 @@ func TestAMandatoryReasoningAdvisorGetsRoomToAnswer(t *testing.T) {
 	cfg.Providers = map[config.ProviderID]config.Provider{
 		"openrouter": {Kind: config.ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1"},
 	}
-	native, maxTok := true, 131072
+	native, maxTok, window := true, 131072, 262144
 	cfg.Ducklings = map[config.DucklingID]config.Duckling{
 		"qwen38-max": {Provider: "openrouter", Model: "qwen/qwen3.8-max",
 			Params: config.SamplingParams{DisableThinking: true, MaxTokens: &maxTok},
-			Caps:   config.Caps{NativeTools: &native}},
+			Caps:   config.Caps{NativeTools: &native, ContextTokens: &window}},
 	}
 	s, err := New(cfg, Options{Bus: bus.New(16)})
 	if err != nil {
@@ -207,6 +207,100 @@ func TestAFailedRepairKeepsTheOriginalResponseAsEvidence(t *testing.T) {
 	for _, want := range []string{`"finish_reason":"length"`, `"reasoning_tokens":2000`, `"completion_tokens":2000`, `"reasoning_chars":`, `504 Gateway Timeout`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("failed-advice record lacks %s:\n%s", want, raw)
+		}
+	}
+}
+
+// smallWindow is a mandatory reasoner behind an 8K context, rejecting what
+// vLLM and llama.cpp reject: a max_tokens that does not fit beside the prompt.
+type smallWindow struct {
+	mu   sync.Mutex
+	caps []int
+}
+
+const smallWindowTokens = 8192
+
+func (m *smallWindow) ID() string                               { return "openrouter" }
+func (m *smallWindow) Models(context.Context) ([]string, error) { return nil, nil }
+func (m *smallWindow) ChatStream(ctx context.Context, req provider.ChatRequest, _ chan<- provider.Delta) (provider.ChatResponse, error) {
+	return m.Chat(ctx, req)
+}
+func (m *smallWindow) Chat(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	if r, ok := req.Extra["reasoning"].(map[string]interface{}); ok && r["enabled"] == false {
+		return provider.ChatResponse{}, fmt.Errorf("chat: 400 Bad Request: Reasoning is mandatory for this endpoint and cannot be disabled.")
+	}
+	prompt := 0
+	for _, msg := range req.Messages {
+		prompt += provider.EstimateTokens(msg.Content)
+	}
+	if req.MaxTokens == nil {
+		return provider.ChatResponse{}, fmt.Errorf("chat: 400 Bad Request: max_tokens is required")
+	}
+	m.mu.Lock()
+	m.caps = append(m.caps, *req.MaxTokens)
+	m.mu.Unlock()
+	if prompt+*req.MaxTokens > smallWindowTokens {
+		return provider.ChatResponse{}, fmt.Errorf("chat: 400 Bad Request: max_tokens (%d) + prompt (%d) exceeds the context length %d", *req.MaxTokens, prompt, smallWindowTokens)
+	}
+	return provider.ChatResponse{
+		Choices: []provider.Choice{{Message: provider.Message{Content: "Use node --test \"tests/**/*.test.mjs\"."}, FinishReason: provider.FinishStop}},
+		Usage:   provider.Usage{PromptTokens: prompt, CompletionTokens: 900, ReasoningTokens: 800},
+	}, nil
+}
+
+// Review of #134: the unsuppressed floor (16K) exceeded an 8K seat's window,
+// so the endpoint rejected every advisor and digest call. Both one-shot paths,
+// end to end, on a seat that declares only its context window (no
+// native_tools: the declaration used to be dropped without one).
+func TestOneShotsFitASmallContextWindow(t *testing.T) {
+	isolate(t)
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{
+		"openrouter": {Kind: config.ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1"},
+	}
+	window := smallWindowTokens
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{
+		"small": {Provider: "openrouter", Model: "small/reasoner",
+			Params: config.SamplingParams{DisableThinking: true},
+			Caps:   config.Caps{ContextTokens: &window}},
+	}
+	s, err := New(cfg, Options{Bus: bus.New(16)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &smallWindow{}
+	s.ducklings.RegisterProvider(fake)
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-small", ProjectID: "p", Stage: "build", Status: "paused", PendingKind: "question",
+		Roster: map[string]string{"advisor": "small"}, StartedAt: "2026-10-02T21:00:00Z"}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+
+	// A question carrying the failing output, as implementers ask them.
+	question := "Which test script works on Node 22? The gate printed:\n" + strings.Repeat("not ok 1 - tests/ is not a module\n", 450)
+	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: question}); err != nil {
+		t.Errorf("advice on an 8K seat failed: %v (caps sent %v)", err, fake.caps)
+	}
+	d, _ := s.ducklings.Get("small")
+	p, err := s.ducklings.Provider("small")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A reference chunk sized like the ones digestion sends a small seat.
+	prompt := "Distill this reference.\n\n" + strings.Repeat("The calculator shows two lines of output. ", 400)
+	if _, err := s.refDigestCall(context.Background(), rs, "small", d.Model, d.Provider, d.Cost, p, prompt); err != nil {
+		t.Errorf("digest on an 8K seat failed: %v (caps sent %v)", err, fake.caps)
+	}
+	if len(fake.caps) < 2 {
+		t.Fatalf("expected an advice call and a digest call, saw caps %v", fake.caps)
+	}
+	for _, c := range fake.caps {
+		if c >= smallWindowTokens {
+			t.Errorf("a one-shot asked for %d output tokens on an %d window", c, smallWindowTokens)
 		}
 	}
 }

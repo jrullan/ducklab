@@ -134,15 +134,20 @@ func (s *Service) effectiveCaps(ctx context.Context, id config.DucklingID, probe
 	caps := &duckling.Capabilities{NativeTools: false, ContextTokens: 32768}
 	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.NativeTools != nil {
 		caps.NativeTools = *cfg.Caps.NativeTools
-		if cfg.Caps.ContextTokens != nil {
-			caps.ContextTokens = *cfg.Caps.ContextTokens
-		}
 	} else if cached, ok := s.ducklings.CachedCaps(id); ok {
-		caps = cached
+		c := *cached // the declarations below must not write into the cache
+		caps = &c
 	} else if probe {
 		if probed, err := s.ducklings.Probe(ctx, id); err == nil {
-			caps = probed
+			c := *probed
+			caps = &c
 		}
+	}
+	// A declared context window wins on its own, not only beside a
+	// native_tools declaration: the one-shot cap sizes itself from it, and a
+	// probed or default 32K must not hide an 8K declaration (review of #134).
+	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.ContextTokens != nil {
+		caps.ContextTokens = *cfg.Caps.ContextTokens
 	}
 	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.Vision != nil {
 		caps.Vision = *cfg.Caps.Vision
