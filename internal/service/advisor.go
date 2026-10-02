@@ -199,6 +199,7 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 type preparedAdvice struct {
 	advisor  config.DucklingID
 	duckling *duckling.Duckling
+	caps     *duckling.Capabilities
 	provider provider.Provider
 	system   string
 	user     string
@@ -267,12 +268,13 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 	// 2000, not 1200: a terse reasoning seat can spend a few hundred tokens
 	// before the answer even with suppression applied, and an advisor cut
 	// off mid-answer fails its contract as surely as an empty one.
-	maxTok := oneShotCap(d, 2000)
-	return &preparedAdvice{advisor: advisorID, duckling: d, provider: p, system: systemPrompt, user: b.String(), maxTok: maxTok}, nil
+	caps := s.effectiveCaps(ctx, advisorID, false)
+	maxTok := s.oneShotCap(d, caps, 2000)
+	return &preparedAdvice{advisor: advisorID, duckling: d, caps: caps, provider: p, system: systemPrompt, user: b.String(), maxTok: maxTok}, nil
 }
 
 func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.PendingQuestion, call *preparedAdvice) (string, string, error) {
-	resp, err := oneShotChat(ctx, call.provider, call.duckling, call.system, call.user, call.maxTok)
+	resp, err := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, call.user, call.maxTok)
 	if err != nil {
 		s.logFailedOneShot(rs, call.advisor, call.duckling, "advisor", q.Question, err)
 		return "", string(call.advisor), err
@@ -288,16 +290,16 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 		repairPrompt := call.user + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
-		repair, repairErr := oneShotChat(ctx, call.provider, call.duckling, call.system, repairPrompt, call.maxTok)
+		repair, repairErr := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, repairPrompt, call.maxTok)
 		if repairErr != nil {
-			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, repairErr)
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, repairErr, nil)
 			return "", string(call.advisor), repairErr
 		}
 		raw = answerText(repair)
 		answer = truncateAdvisorAnswer(stripAdvisorThinking(raw))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
-			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, err)
+			s.logFailedAdvisorAnswer(rs, call.advisor, call.duckling, "advisor", q.Question, raw, err, &repair)
 			return "", string(call.advisor), err
 		}
 	}
@@ -340,7 +342,7 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 // visible answer arrived empty; the repair repeated the identical
 // conditions and the card said "empty answer" (B-123). The loop already
 // knew how to make this call correctly; one-shots now borrow exactly that.
-func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling, system, user string, maxTok int) (provider.ChatResponse, error) {
+func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling, caps *duckling.Capabilities, system, user string, maxTok int) (provider.ChatResponse, error) {
 	req := provider.ChatRequest{
 		Model: d.Model,
 		Messages: []provider.Message{
@@ -356,10 +358,13 @@ func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling,
 		req.TopP = d.Params.TopP
 	}
 	if d.Params.DisableThinking {
-		agent.ApplyThinkingSuppression(&req, provider.Capabilities{
-			NativeTools: d.Caps.NativeTools, JSONMode: d.Caps.JSONMode,
-			ContextTokens: d.Caps.ContextTokens, Vision: d.Caps.Vision,
-		})
+		// The duckling's effective caps, with the probed ThinkingControl —
+		// the same request the agent loop builds. Without it, suppression
+		// fell through to the local-server parameter OpenRouter ignores.
+		if caps == nil {
+			caps = &d.Caps
+		}
+		agent.ApplyThinkingSuppression(&req, duckling.ProviderCaps(caps))
 	}
 	return p.Chat(ctx, req)
 }
@@ -370,11 +375,54 @@ func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling,
 // the unclosed block, and the visible answer was empty — twice, since the
 // repair repeated the same cap (Neocapture intake, 2026-08-29). Such a seat
 // gets the room its configuration already grants it.
-func oneShotCap(d *duckling.Duckling, floor int) int {
-	if d == nil || d.Params.DisableThinking || d.Params.MaxTokens == nil || *d.Params.MaxTokens <= floor {
+func (s *Service) oneShotCap(d *duckling.Duckling, caps *duckling.Capabilities, floor int) int {
+	configured := 0
+	if d != nil && d.Params.MaxTokens != nil {
+		configured = *d.Params.MaxTokens
+	}
+	if d != nil && s.thinkingSuppressed(d, caps) {
 		return floor
 	}
-	return *d.Params.MaxTokens
+	// Reasoning shares the cap with the answer and cannot be assumed off: a
+	// mandatory-reasoning endpoint (qwen3.8-max on Alibaba) spent the whole
+	// 2000-token floor thinking and answered nothing (B-479). Grant what the
+	// duckling's configuration grants, and never less than unsuppressedFloor.
+	if configured > floor {
+		floor = configured
+	}
+	if floor < unsuppressedFloor {
+		floor = unsuppressedFloor
+	}
+	return floor
+}
+
+// unsuppressedFloor is the smallest cap a one-shot gets when its seat may be
+// reasoning: room to think and still answer.
+const unsuppressedFloor = 16384
+
+// thinkingSuppressed reports whether a one-shot to this duckling actually
+// runs without reasoning: suppression is requested, and the endpoint is known
+// to honour the control Ducklab sends. An OpenRouter endpoint is trusted only
+// when its probe accepted reasoning.enabled=false; a local template server
+// takes chat_template_kwargs; a mandatory endpoint never suppresses.
+func (s *Service) thinkingSuppressed(d *duckling.Duckling, caps *duckling.Capabilities) bool {
+	if !d.Params.DisableThinking {
+		return false
+	}
+	control := ""
+	if caps != nil {
+		control = caps.ThinkingControl
+	}
+	switch control {
+	case "disabled":
+		return true
+	case "mandatory":
+		return false
+	}
+	s.cfgMu.RLock()
+	prov, ok := s.cfg.Providers[d.Provider]
+	s.cfgMu.RUnlock()
+	return ok && !config.IsOpenRouter(prov)
 }
 
 // wireAdvisor arms ask_advisor on an ExecContext, guarded so the tool can
@@ -398,19 +446,40 @@ func (s *Service) wireAdvisor(rs *runState, ectx *tools.ExecContext) {
 // — the ones behind "advisor recommendation failed" — were invisible and
 // the diagnosis required guessing (B-123).
 func (s *Service) logFailedOneShot(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request string, callErr error) {
-	s.logFailedAdvisorAnswer(rs, seat, d, role, request, "", callErr)
+	s.logFailedAdvisorAnswer(rs, seat, d, role, request, "", callErr, nil)
 }
 
 // logFailedAdvisorAnswer records rejected provider output as well as its cause,
 // so an operator can audit a contract discard.
-func (s *Service) logFailedAdvisorAnswer(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request, answer string, callErr error) {
+//
+// resp, when there was one, adds what the record needs to explain an empty
+// answer: why generation stopped, what it spent and how much went to
+// reasoning. "empty answer" alone hid a mandatory-reasoning seat spending its
+// whole cap thinking (B-479).
+func (s *Service) logFailedAdvisorAnswer(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request, answer string, callErr error, resp *provider.ChatResponse) {
 	if w := s.llmWriter(rs, rs.tracker); w != nil {
 		response := map[string]interface{}{"error": callErr.Error()}
 		if answer != "" {
 			response["content"] = firstN(answer, 2000)
 		}
+		var usage map[string]interface{}
+		finish := ""
+		if resp != nil {
+			finish = string(resp.FinishReason)
+			if finish == "" && len(resp.Choices) > 0 {
+				// Providers report it per choice as often as per response.
+				finish = string(resp.Choices[0].FinishReason)
+			}
+			usage = map[string]interface{}{
+				"prompt_tokens": resp.Usage.PromptTokens, "completion_tokens": resp.Usage.CompletionTokens,
+				"reasoning_tokens": resp.Usage.ReasoningTokens,
+			}
+			if len(resp.Choices) > 0 {
+				response["reasoning_chars"] = len(resp.Choices[0].Message.Reasoning)
+			}
+		}
 		w.AppendLLM(&agent.LLMCallRecord{
-			Duckling: string(seat), Provider: string(d.Provider), Model: d.Model,
+			Duckling: string(seat), Provider: string(d.Provider), Model: d.Model, Usage: usage, FinishReason: finish,
 			Role: role, Request: map[string]interface{}{"question": firstN(request, 400)}, Response: response,
 		})
 	}
