@@ -53,6 +53,15 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("chat-about-form")).toBeInTheDocument();
   });
 
+  // Jose: a new project starts from the guided form at any time, with or
+  // without projects already open.
+  it("offers a new project next to the project selector", () => {
+    const { rerender } = render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    expect(screen.getByTestId("sidebar-new-project")).toHaveAttribute("href", "#/new");
+    rerender(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[{ id: "p", name: "project", path: "." }]} projectId="p" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    expect(screen.getByTestId("sidebar-new-project")).toHaveAttribute("href", "#/new");
+  });
+
   it("removes app identity and keeps project selection as the only project control", () => {
     render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} project={{ id: "p", name: "ducklab", path: ".", branch: "main" }} projects={[{ id: "p", name: "ducklab", path: ".", branch: "main" }]} projectId="p" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
     expect(screen.queryByText("ducklab", { selector: ".text-md" })).not.toBeInTheDocument();

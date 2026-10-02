@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -89,6 +89,34 @@ describe("App browser engine connection", () => {
     act(() => EventSourceStub.latest!.onopen?.({}));
     expect(screen.getByTestId("first-run-engine")).toHaveTextContent("engine connected");
     expect(screen.getByTestId("first-run-create")).toHaveTextContent("Create your first project");
+  });
+
+  // The guided start is the door for every new project, not only the first:
+  // #/new renders it with projects present, and a started project becomes the
+  // selected one and lands on its drafting run.
+  it("opens the guided start at #/new with projects present and selects the started project", async () => {
+    history.replaceState({}, "", "/?engine=http%3A%2F%2Fengine.test&token=t#/new");
+    localStorage.setItem("ducklab.project", "old");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/projects/start") && init?.method === "POST") {
+        return new Response(JSON.stringify({ project: { id: "calc", name: "calc", path: "/p/calc" }, run_id: "r-new" }));
+      }
+      if (url.includes("/v1/projects") && !url.includes("/v1/projects/")) {
+        return new Response(JSON.stringify({ items: [{ id: "old", name: "Old", path: "/p/old" }, { id: "calc", name: "calc", path: "/p/calc" }] }));
+      }
+      return new Response(JSON.stringify({ items: [] }));
+    }));
+    vi.stubGlobal("EventSource", EventSourceStub);
+    render(<App />);
+    expect(await screen.findByTestId("new-project")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
+    fireEvent.click(screen.getByTestId("start-submit"));
+    await waitFor(() => expect(location.hash).toBe("#/runs/r-new"));
+    // The selection itself, driven by React's projectId (review of #130):
+    // the storage mirror alone stayed green with setProjectId removed.
+    await waitFor(() => expect(screen.getByTestId("project-select")).toHaveValue("calc"));
+    expect(localStorage.getItem("ducklab.project")).toBe("calc");
   });
 
   it("shows a non-empty reconnecting banner and clears the dim when open", async () => {

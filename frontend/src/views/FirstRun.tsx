@@ -21,8 +21,12 @@ import { StatusChip } from "../components/StatusChip";
 export type Readiness = {
   /** Ducklings whose provider exists and has the key it names (or needs none). */
   usable: string[];
-  /** Providers that name a key the engine's environment does not have. */
-  missingKeys: { provider: string; env: string }[];
+  /** Keys missing for providers that configured ducklings use, with those
+   * ducklings. A provider no duckling uses blocks nothing and is not listed
+   * (review of #130: an unrelated provider's key masked the real problem). */
+  missingKeys: { provider: string; env: string; ducklings: string[] }[];
+  /** Providers that configured ducklings name but that do not exist. */
+  missingProviders: { provider: string; ducklings: string[] }[];
   /** True when no duckling is configured at all. */
   noDucklings: boolean;
   /** True when no provider is configured at all. */
@@ -35,19 +39,58 @@ export type Readiness = {
 
 export function readiness(providers: readonly ProviderView[], ducklings: readonly Duckling[]): Readiness {
   const byId = new Map(providers.map((p) => [p.id, p]));
-  const usable = ducklings
-    .filter((d) => {
-      const p = byId.get(d.provider);
-      return !!p && (!p.api_key_env || p.key_present);
-    })
-    .map((d) => d.id);
-  const missingKeys = providers
-    .filter((p) => p.api_key_env && !p.key_present)
-    .map((p) => ({ provider: p.id, env: p.api_key_env as string }));
+  const usable: string[] = [];
+  const keyed = new Map<string, { provider: string; env: string; ducklings: string[] }>();
+  const absent = new Map<string, { provider: string; ducklings: string[] }>();
+  for (const d of ducklings) {
+    const p = byId.get(d.provider);
+    if (!p) {
+      const entry = absent.get(d.provider) ?? { provider: d.provider, ducklings: [] };
+      entry.ducklings.push(d.id);
+      absent.set(d.provider, entry);
+    } else if (p.api_key_env && !p.key_present) {
+      const entry = keyed.get(p.id) ?? { provider: p.id, env: p.api_key_env, ducklings: [] };
+      entry.ducklings.push(d.id);
+      keyed.set(p.id, entry);
+    } else {
+      usable.push(d.id);
+    }
+  }
   const openRouter = providers.find((p) =>
     p.key_present && (p.id === "openrouter" || p.base_url.includes("openrouter.ai")),
   )?.id;
-  return { usable, missingKeys, noDucklings: ducklings.length === 0, noProviders: providers.length === 0, openRouter, ducklingIDs: ducklings.map((d) => d.id) };
+  return {
+    usable, missingKeys: [...keyed.values()], missingProviders: [...absent.values()],
+    noDucklings: ducklings.length === 0, noProviders: providers.length === 0, openRouter,
+    ducklingIDs: ducklings.map((d) => d.id),
+  };
+}
+
+/** What blocks drafting when no configured model can, with the fix for each
+ * blocked model. Shared by First run and the new-project page. Every cause
+ * that applies is named, and only causes that apply: a missing key is named
+ * only for a provider a configured model uses, and a model pointing at a
+ * provider that does not exist is named even when some other key is also
+ * missing (review of #130). */
+export function noModelAdvice(r: Readiness): string {
+  if (r.noDucklings) {
+    return r.noProviders
+      ? "No provider is configured: Ducklab reaches models through a provider (OpenRouter, a local server). Add one in Settings → providers, then a model on it in Settings → ducklings."
+      : "A provider exists, but no model on it is configured. Add one in Settings → ducklings.";
+  }
+  const causes: string[] = [];
+  for (const k of r.missingKeys) {
+    causes.push(`${k.ducklings.join(", ")} ${k.ducklings.length === 1 ? "uses" : "use"} provider ${k.provider}, which needs ${k.env} in the engine's environment: set it where the engine starts, then restart the engine from Settings → engine`);
+  }
+  for (const m of r.missingProviders) {
+    causes.push(`${m.ducklings.join(", ")} ${m.ducklings.length === 1 ? "uses" : "use"} provider ${m.provider}, which is not configured: add it in Settings → providers, or pick another provider in Settings → ducklings`);
+  }
+  if (causes.length === 0) {
+    // Total on purpose: every configured model can reach its provider, so
+    // nothing here blocks drafting; only an answer to a test can say more.
+    return "Every configured model can reach its provider. Use Test connection to check that one answers.";
+  }
+  return `Your models cannot draft yet. ${causes.join("; ")}.`;
 }
 
 export const OPENROUTER_STARTERS = [
@@ -212,11 +255,7 @@ export function FirstRun({
               <div className="space-y-1">
                 <StatusChip role="critical" label="no model ready to draft with" />
                 <p className="text-xs text-ink-secondary" data-testid="first-run-model-fix">
-                  {state.noProviders
-                    ? "Ducklab reaches models through a provider (OpenRouter, a local server). Add one, then add a duckling: a model on that provider."
-                    : state.noDucklings
-                      ? "A provider exists, but no duckling (a model on that provider) does. Add one."
-                      : "The ducklings configured cannot reach their provider; see the missing keys below."}{" "}
+                  {noModelAdvice(state)}{" "}
                   <a href={routeHref({ name: "settings", section: "ducklings" })} className="text-ink underline">
                     Set up a model
                   </a>

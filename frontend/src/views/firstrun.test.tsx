@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { availableDucklingID, FirstRun, friendlyProbeError, readiness } from "./FirstRun";
+import { availableDucklingID, FirstRun, friendlyProbeError, noModelAdvice, readiness } from "./FirstRun";
 import type { Duckling, EngineClient, ProviderView } from "../api/client";
 
 const provider = (over: Partial<ProviderView>): ProviderView => ({ id: "or", kind: "openai", base_url: "https://x", key_present: true, ...over });
@@ -23,7 +23,58 @@ describe("first-run readiness (B-455)", () => {
       [duckling({ id: "a", provider: "or" }), duckling({ id: "b", provider: "local" }), duckling({ id: "c", provider: "gone" })],
     );
     expect(r.usable).toEqual(["b"]);
-    expect(r.missingKeys).toEqual([{ provider: "or", env: "OR_KEY" }]);
+    expect(r.missingKeys).toEqual([{ provider: "or", env: "OR_KEY", ducklings: ["a"] }]);
+    expect(r.missingProviders).toEqual([{ provider: "gone", ducklings: ["c"] }]);
+  });
+});
+
+// Review of #130: the advice names every cause that blocks a configured
+// model, and only those. The whole matrix, because the first two fixes each
+// covered one case and missed the next.
+describe("noModelAdvice", () => {
+  const advise = (providers: ProviderView[], ducklings: Duckling[]) => noModelAdvice(readiness(providers, ducklings));
+  const keyless = provider({ id: "or", api_key_env: "OPENROUTER_API_KEY", key_present: false });
+  const otherKeyless = provider({ id: "anthropic", api_key_env: "ANTHROPIC_API_KEY", key_present: false });
+
+  it("no provider and no model: add a provider, then a model", () => {
+    expect(advise([], [])).toMatch(/No provider is configured.*Settings → providers.*Settings → ducklings/);
+  });
+
+  it("a provider but no model: add a model", () => {
+    expect(advise([provider({})], [])).toBe("A provider exists, but no model on it is configured. Add one in Settings → ducklings.");
+  });
+
+  it("a model whose provider key is missing: names the key, not 'add a model'", () => {
+    const text = advise([keyless], [duckling({ id: "luna", provider: "or" })]);
+    expect(text).toContain("luna uses provider or, which needs OPENROUTER_API_KEY");
+    expect(text).not.toMatch(/no model|not configured/);
+  });
+
+  it("a model on a missing provider, with an UNRELATED provider missing its key: names only the real cause", () => {
+    const text = advise([otherKeyless], [duckling({ id: "luna", provider: "gone" })]);
+    expect(text).toContain("luna uses provider gone, which is not configured");
+    expect(text).not.toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("both causes on different models: names both", () => {
+    const text = advise([keyless], [duckling({ id: "luna", provider: "or" }), duckling({ id: "terra", provider: "gone" })]);
+    expect(text).toContain("luna uses provider or, which needs OPENROUTER_API_KEY");
+    expect(text).toContain("terra uses provider gone, which is not configured");
+  });
+
+  it("models but no providers at all: names the missing provider, grouped", () => {
+    expect(advise([], [duckling({ id: "a", provider: "or" }), duckling({ id: "b", provider: "or" })]))
+      .toContain("a, b use provider or, which is not configured");
+  });
+
+  it("is total: with nothing blocking it says so instead of an empty sentence", () => {
+    expect(advise([provider({ id: "ok" })], [duckling({ id: "luna", provider: "ok" })])).toContain("Every configured model can reach its provider");
+  });
+
+  it("an unrelated keyless provider does not block a usable model", () => {
+    const r = readiness([provider({ id: "ok" }), otherKeyless], [duckling({ id: "luna", provider: "ok" })]);
+    expect(r.usable).toEqual(["luna"]);
+    expect(r.missingKeys).toEqual([]);
   });
 });
 
@@ -88,7 +139,7 @@ describe("FirstRun", () => {
   it("explains what is missing when there is no provider, and links the fix", async () => {
     render(<FirstRun client={clientWith([], [])} connected onStarted={vi.fn()} />);
     const fix = await screen.findByTestId("first-run-model-fix");
-    expect(fix).toHaveTextContent("Add one, then add a duckling");
+    expect(fix).toHaveTextContent("No provider is configured");
     expect(fix.querySelector("a")?.getAttribute("href")).toContain("ducklings");
     expect(screen.getByTestId("start-model-warning")).toHaveTextContent("You can create the project now");
   });
@@ -98,6 +149,13 @@ describe("FirstRun", () => {
     expect(await screen.findByTestId("first-run-missing-keys")).toHaveTextContent("OPENROUTER_API_KEY");
     expect(screen.getByTestId("first-run-missing-keys")).toHaveTextContent("never stores keys");
     expect(screen.getByTestId("first-run-engine")).toHaveTextContent("live updates connecting");
+  });
+
+  it("does not list the key of a provider no model uses", async () => {
+    render(<FirstRun client={clientWith([provider({ id: "ok" }), provider({ id: "anthropic", api_key_env: "ANTHROPIC_API_KEY", key_present: false })], [duckling({ provider: "gone" })])} connected onStarted={vi.fn()} />);
+    expect(await screen.findByTestId("first-run-model-fix")).toHaveTextContent("uses provider gone, which is not configured");
+    expect(screen.queryByTestId("first-run-missing-keys")).toBeNull();
+    expect(screen.getByTestId("first-run-model-fix")).not.toHaveTextContent("ANTHROPIC_API_KEY");
   });
 });
 
