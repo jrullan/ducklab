@@ -624,3 +624,39 @@ func TestManifestRendersDistinctAuthoredProbesWithoutCloningVerification(t *test
 		t.Fatalf("verification was cloned into probes:\n%s", got.Text)
 	}
 }
+
+// The TI-36X plan (2026-10-02): the reviewer's description of the manifest
+// schema was a hand-written copy without "modifies", so reviewers told the
+// architect to remove a key the deterministic checks require, and the plan
+// never converged. Every prompt that describes the task schema now names
+// every field of agent.ManifestTask, and says what produces and modifies mean.
+func TestTheReviewerSeesTheWholeManifestSchema(t *testing.T) {
+	fields := agent.ManifestTaskFields()
+	if len(fields) < 10 || !containsString(fields, "modifies") {
+		t.Fatalf("ManifestTaskFields = %v", fields)
+	}
+	for _, small := range []bool{true, false} {
+		review := planManifestSemanticReviewFor(small)
+		if strings.Contains(review, "{{TASK_FIELDS}}") {
+			t.Fatal("placeholder left in the review prompt")
+		}
+		// The schema sentence itself, not a stray mention elsewhere: the list
+		// between "task fields " and the next "." must be exactly the fields.
+		start := strings.Index(review, "task fields ")
+		if start < 0 {
+			t.Fatalf("small=%v: no schema sentence", small)
+		}
+		listed := review[start+len("task fields "):]
+		listed = listed[:strings.Index(listed, ".")]
+		var got []string
+		for _, f := range strings.Split(strings.ReplaceAll(listed, "\n", " "), ",") {
+			got = append(got, strings.TrimSpace(f))
+		}
+		if !slices.Equal(got, fields) {
+			t.Errorf("small=%v: schema sentence lists %v, want %v", small, got, fields)
+		}
+		if !strings.Contains(review, "modifies names existing artifacts a later") {
+			t.Errorf("small=%v: review prompt does not explain modifies", small)
+		}
+	}
+}

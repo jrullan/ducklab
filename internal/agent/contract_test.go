@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -659,6 +660,94 @@ func TestTriageTestStrategyNormalizes(t *testing.T) {
 		}
 		if got.TestStrategy != want {
 			t.Errorf("normalize(%q) = %q, want %q", in, got.TestStrategy, want)
+		}
+	}
+}
+
+// The TI-36X plan (2026-10-02) never converged: three architects copied one
+// test command into every probe, were told only "contains an empty,
+// multiline, fenced, or repeated item", then wrote one probe per task. These
+// are their real tasks. The validation now names the probe, the problem and
+// the fix.
+func TestRealTI36XProbeFailuresGetActionableMessages(t *testing.T) {
+	raw, err := os.ReadFile("testdata/ti36x_plan_probes.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseContract("json:plan_manifest", string(fixtures["repeated"]))
+	if err == nil {
+		t.Fatal("three identical probes passed")
+	}
+	for _, want := range []string{
+		`T-003 acceptance_probes[1] repeats acceptance_probes[0] ("node --test tests/eval.test.mjs")`,
+		"narrow it to acceptance_slices[1] with a test-name filter",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("repeated-probe message lacks %q:\n%v", want, err)
+		}
+	}
+	_, err = ParseContract("json:plan_manifest", string(fixtures["collapsed"]))
+	if err == nil || !strings.Contains(err.Error(), "T-002 acceptance_probes has 1 items, want 3 (one per acceptance_slice, at the same index; narrow a shared test command to each slice") {
+		t.Fatalf("collapsed-probe message = %v", err)
+	}
+}
+
+// The probe contract is stated wherever an architect writes probes: the
+// manifest prompt, the patch prompt (which the seeded plan flow uses) and the
+// patch repair instruction. The patch prompt's own example obeys it, and the
+// repair states the real operation limit.
+func TestTheProbeRuleIsStatedWhereverProbesAreWritten(t *testing.T) {
+	for name, text := range map[string]string{
+		"manifest small":    planManifestPromptFor(true),
+		"manifest standard": planManifestPromptFor(false),
+		"patch small":       planManifestPatchPromptFor(true),
+		"patch standard":    planManifestPatchPromptFor(false),
+		"patch repair":      repairInstruction("json:plan_manifest_patch", fmt.Errorf("x")),
+	} {
+		if !strings.Contains(text, acceptanceProbeRule) {
+			t.Errorf("%s does not state the probe rule", name)
+		}
+	}
+	repair := repairInstruction("json:plan_manifest_patch", fmt.Errorf("x"))
+	if want := fmt.Sprintf("Use 1-%d operations", MaxPlanManifestPatchOperations); !strings.Contains(repair, want) || strings.Contains(repair, "1-12") {
+		t.Errorf("repair states the wrong operation limit:\n%s", repair)
+	}
+	// Both texts show the one shared example (applied to the real seed in
+	// strategy's TestThePatchExampleAppliesToTheSeededManifest).
+	example := PlanManifestPatchExample()
+	if !strings.Contains(planManifestPatchPrompt, example) || !strings.Contains(repair, example) {
+		t.Error("the patch prompt and the repair do not both show the shared example")
+	}
+	var parsed struct {
+		Operations []struct {
+			Op   string `json:"op"`
+			Task *struct {
+				Slices []string `json:"acceptance_slices"`
+				Probes []string `json:"acceptance_probes"`
+			} `json:"task"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(example), &parsed); err != nil {
+		t.Fatalf("example is not JSON: %v", err)
+	}
+	for _, op := range parsed.Operations {
+		if op.Op != "add_task" || op.Task == nil {
+			t.Errorf("a first patch on a seed only adds tasks; got %q", op.Op)
+			continue
+		}
+		seen := map[string]bool{}
+		for _, p := range op.Task.Probes {
+			if seen[p] {
+				t.Errorf("example repeats probe %q", p)
+			}
+			seen[p] = true
+		}
+		if len(op.Task.Slices) != len(op.Task.Probes) {
+			t.Errorf("example has %d slices and %d probes", len(op.Task.Slices), len(op.Task.Probes))
 		}
 	}
 }

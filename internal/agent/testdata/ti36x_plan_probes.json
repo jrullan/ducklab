@@ -1,0 +1,74 @@
+{
+ "repeated": {
+  "milestones": [
+   {
+    "id": "M-01",
+    "title": "Calculator",
+    "tasks": [
+     {
+      "id": "T-003",
+      "title": "Implement expression evaluator and numeric engine",
+      "implements": [
+       "SPEC-004"
+      ],
+      "work_unit": "AST-based evaluation of calculator tokens with tagged rational/real/complex values, precedence grammar, scientific/fraction/complex support, formatting, and bounded errors",
+      "acceptance_slices": [
+       "Tokens parse to an AST (no eval/Function/remote) honoring the six precedence levels including right-associative powers and implicit multiplication",
+       "Arithmetic, powers, roots, factorial (0-170), trig with DEG/RAD/GRAD conversion, logs, fractions, and rectangular/polar complex values produce correct typed results",
+       "Domain, divide-by-zero, syntax, overflow, and out-of-domain factorial cases return error codes instead of throwing, and the formatter trims to 12 significant digits with scientific-notation thresholds"
+      ],
+      "acceptance_probes": [
+       "node --test tests/eval.test.mjs",
+       "node --test tests/eval.test.mjs",
+       "node --test tests/eval.test.mjs"
+      ],
+      "produces": [
+       "file:tests/eval.test.mjs",
+       "file:logic.mjs"
+      ],
+      "modifies": [
+       "file:index.html"
+      ],
+      "consumes": [
+       "file:index.html"
+      ],
+      "verification": "node --test tests/eval.test.mjs"
+     }
+    ]
+   }
+  ]
+ },
+ "collapsed": {
+  "milestones": [
+   {
+    "id": "M-01",
+    "title": "Calculator",
+    "tasks": [
+     {
+      "id": "T-002",
+      "title": "Implement calculator evaluator",
+      "implements": [
+       "SPEC-004"
+      ],
+      "work_unit": "safe typed expression evaluation",
+      "acceptance_slices": [
+       "The evaluator parses calculator expressions without JavaScript eval or Function and applies required precedence.",
+       "Arithmetic, scientific functions, fractions, complex values, and angle conversion return supported values.",
+       "Syntax, domain, divide-by-zero, factorial, and overflow failures return calculator errors without exceptions."
+      ],
+      "acceptance_probes": [
+       "node --test tests/evaluator.test.mjs"
+      ],
+      "produces": [
+       "file:logic.mjs",
+       "file:tests/evaluator.test.mjs"
+      ],
+      "modifies": [],
+      "consumes": [],
+      "verification": "node --test tests/evaluator.test.mjs"
+     }
+    ]
+   }
+  ]
+ }
+}

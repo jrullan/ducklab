@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -209,6 +210,23 @@ type ManifestTask struct {
 	Verification     string   `json:"verification"`
 }
 
+// ManifestTaskFields are the task keys of the compact manifest, read from
+// ManifestTask's JSON tags. Prompts that describe the schema use this list
+// instead of a hand-written copy: the reviewer's copy lacked "modifies", so
+// reviewers told architects to remove a required key and the TI-36X plan
+// never converged.
+func ManifestTaskFields() []string {
+	t := reflect.TypeOf(ManifestTask{})
+	fields := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		name := strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
+		if name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}
+
 // PlanManifestPatch changes only the tasks named by a rejected semantic
 // review. Regenerating the whole manifest made already-correct obligations
 // disappear while the architect repaired a different finding. The engine
@@ -364,7 +382,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_slices must contain at least one item", taskID))
 			}
 			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
-				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices)))
+				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes has %d items, want %d (one per acceptance_slice, at the same index; narrow a shared test command to each slice, or drop slices)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices)))
 			}
 			if len(task.Produces) == 0 && len(task.Modifies) == 0 {
 				validationProblems = append(validationProblems, fmt.Sprintf("%s must contain at least one typed artifact in produces or modifies", taskID))
@@ -388,14 +406,29 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				}
 				manifest.Milestones[mi].Tasks[ti].AcceptanceSlices[si] = slice
 			}
-			seenProbes := map[string]bool{}
+			// Each problem is named with its index and the fix: "contains an
+			// empty, multiline, fenced, or repeated item" left the architect
+			// to guess, and on the TI-36X plan it guessed by collapsing three
+			// repeated probes into one (B: plan probe interface).
+			seenProbes := map[string]int{}
 			for pi, probe := range task.AcceptanceProbes {
 				probe = strings.TrimSpace(probe)
-				if probe == "" || strings.ContainsAny(probe, "\n`") || seenProbes[probe] {
-					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes contains an empty, multiline, fenced, or repeated item", taskID))
+				switch {
+				case probe == "":
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes[%d] is empty; write the command that checks acceptance_slices[%d]", taskID, pi, pi))
+					continue
+				case strings.Contains(probe, "\n"):
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes[%d] spans several lines; write one single-line command", taskID, pi))
+					continue
+				case strings.Contains(probe, "`"):
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes[%d] contains Markdown backticks; write the bare command", taskID, pi))
 					continue
 				}
-				seenProbes[probe] = true
+				if first, seen := seenProbes[probe]; seen {
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes[%d] repeats acceptance_probes[%d] (%q); each slice needs its own probe: narrow it to acceptance_slices[%d] with a test-name filter, a separate test file, or a check of that slice's output", taskID, pi, first, probe, pi))
+					continue
+				}
+				seenProbes[probe] = pi
 				manifest.Milestones[mi].Tasks[ti].AcceptanceProbes[pi] = probe
 			}
 			for pi, item := range task.Produces {
