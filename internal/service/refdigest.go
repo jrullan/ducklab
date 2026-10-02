@@ -272,9 +272,14 @@ func (s *Service) refDigestCall(ctx context.Context, rs *runState, seat config.D
 	}
 	// Through the shared one-shot path: a raw ChatRequest here had the same
 	// latent B-123 bug — a disable_thinking seat reasoning into the cap.
-	resp, err := oneShotChat(ctx, p, d, "You distill reference documents for a software team. Return only the digest.", prompt, 700)
+	// The cap follows the same rule as the advisor's: 700 is room for a
+	// digest only when the seat is verifiably not reasoning (B-479), and it
+	// always fits beside the prompt in the seat's context window.
+	caps := s.effectiveCaps(ctx, seat, false)
+	const system = "You distill reference documents for a software team. Return only the digest."
+	resp, err := s.oneShot(ctx, p, d, caps, system, prompt, 700)
 	if err != nil {
-		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err)
+		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err, bestResponse(resp))
 		return "", err
 	}
 	calc := provider.CostCalculator{InputPerMTok: cost.InputPerMTok, OutputPerMTok: cost.OutputPerMTok}

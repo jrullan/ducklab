@@ -139,7 +139,7 @@ func TestFailedOneShotPreservesCallerRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs := &runState{run: run, writer: w, runDir: w.RunDir()}
-	s.logFailedOneShot(rs, "pato-dos", d, "librarian", "digest this", errors.New("offline"))
+	s.logFailedOneShot(rs, "pato-dos", d, "librarian", "digest this", errors.New("offline"), nil)
 	data, err := os.ReadFile(filepath.Join(w.RunDir(), "llm.jsonl"))
 	if err != nil {
 		t.Fatal(err)

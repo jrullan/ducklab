@@ -118,6 +118,50 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	return l, nil
 }
 
+// effectiveCaps is what a duckling can do, as the agent loop and every
+// service one-shot must see it: declared capabilities over probing, plus the
+// probed thinking control. One-shots used to build caps from the declaration
+// alone, lost ThinkingControl, and suppressed reasoning with a local-server
+// parameter OpenRouter ignores (B-479).
+//
+// probe is true for the agent loop, which may spend one probe request on an
+// undeclared duckling. One-shots pass false and use the declaration plus what
+// is already cached: an extra request per advice is not theirs to spend, and
+// an unknown thinking control already makes oneShotCap assume reasoning.
+func (s *Service) effectiveCaps(ctx context.Context, id config.DucklingID, probe bool) *duckling.Capabilities {
+	// Declared capabilities win over probing: probing costs a request, and on
+	// a local endpoint the declaration is usually more accurate anyway.
+	caps := &duckling.Capabilities{NativeTools: false, ContextTokens: 32768}
+	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.NativeTools != nil {
+		caps.NativeTools = *cfg.Caps.NativeTools
+	} else if cached, ok := s.ducklings.CachedCaps(id); ok {
+		c := *cached // the declarations below must not write into the cache
+		caps = &c
+	} else if probe {
+		if probed, err := s.ducklings.Probe(ctx, id); err == nil {
+			c := *probed
+			caps = &c
+		}
+	}
+	// A declared context window wins on its own, not only beside a
+	// native_tools declaration: the one-shot cap sizes itself from it, and a
+	// probed or default 32K must not hide an 8K declaration (review of #134).
+	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.ContextTokens != nil {
+		caps.ContextTokens = *cfg.Caps.ContextTokens
+	}
+	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.Vision != nil {
+		caps.Vision = *cfg.Caps.Vision
+	}
+	// Declared capabilities and observed endpoint behaviour are complementary.
+	// A native_tools declaration must not hide a cached mandatory-reasoning
+	// result from the request builder.
+	if probed, ok := s.ducklings.CachedCaps(id); ok {
+		caps.ThinkingControl = probed.ThinkingControl
+		caps.ThinkingControlNote = probed.ThinkingControlNote
+	}
+	return caps
+}
+
 // buildLoop assembles the agent loop for one duckling.
 func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *budget.Tracker, writer agent.RunLogWriter) (*agent.Loop, error) {
 	d, err := s.ducklings.Get(id)
@@ -130,27 +174,7 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 	}
 	p = observedProvider{Provider: p, id: id, registry: s.ducklings}
 
-	// Declared capabilities win over probing: probing costs a request, and on
-	// a local endpoint the declaration is usually more accurate anyway.
-	caps := &duckling.Capabilities{NativeTools: false, ContextTokens: 32768}
-	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.NativeTools != nil {
-		caps.NativeTools = *cfg.Caps.NativeTools
-		if cfg.Caps.ContextTokens != nil {
-			caps.ContextTokens = *cfg.Caps.ContextTokens
-		}
-	} else if probed, err := s.ducklings.Probe(ctx, id); err == nil {
-		caps = probed
-	}
-	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.Vision != nil {
-		caps.Vision = *cfg.Caps.Vision
-	}
-	// Declared capabilities and observed endpoint behaviour are complementary.
-	// A native_tools declaration must not hide a cached mandatory-reasoning
-	// result from the request builder.
-	if probed, ok := s.ducklings.CachedCaps(id); ok {
-		caps.ThinkingControl = probed.ThinkingControl
-		caps.ThinkingControlNote = probed.ThinkingControlNote
-	}
+	caps := s.effectiveCaps(ctx, id, true)
 
 	loop := &agent.Loop{
 		Provider: p,
