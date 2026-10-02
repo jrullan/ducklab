@@ -10,6 +10,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/store"
 )
@@ -441,5 +442,110 @@ func TestBugPromotionRefusesToGuessASuspectedFileBetweenPortions(t *testing.T) {
 	}
 	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err == nil || !strings.Contains(err.Error(), "does not assign suspected file shared/contract.h") {
 		t.Fatalf("promote error = %v, want an actionable ambiguous-lane refusal", err)
+	}
+}
+
+func TestBugPromotionKeepsGoTestRegistrationOutOfFrontendLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, root := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for path, body := range map[string]string{
+		"go.mod":                       "module example.com/mixed\n\ngo 1.22\n",
+		"internal/alpha/alpha.go":      "package alpha\n",
+		"internal/alpha/alpha_test.go": "package alpha\n",
+		"internal/beta/beta.go":        "package beta\n",
+		"internal/beta/beta_test.go":   "package beta\n",
+		"frontend/package.json":        `{"scripts":{"test":"vitest run"}}`,
+		"frontend/src/board.test.tsx":  "",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	promoted := map[string]bool{}
+	for _, proposal := range []struct{ title, source, test string }{
+		{"Correct alpha", "internal/alpha/alpha.go", "internal/alpha/alpha_test.go"},
+		{"Correct beta", "internal/beta/beta.go", "internal/beta/beta_test.go"},
+	} {
+		added, err := s.BugAdd(context.Background(), id, BugRequest{Title: proposal.title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.ApplyTriage(context.Background(), id, []map[string]interface{}{{
+			"bug": added.ID, "severity": "normal", "reason": "isolated Go regression",
+			"proposal": []interface{}{map[string]interface{}{
+				"title": proposal.title, "acceptance": []interface{}{"A Go regression test covers the correction"},
+				"owns": []interface{}{proposal.source, proposal.test},
+			}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s.BugPromote(context.Background(), id, added.ID, "human")
+		if err != nil {
+			t.Fatal(err)
+		}
+		taskID, ok := out["task"].(string)
+		if !ok || taskID == "" {
+			t.Fatalf("promote result = %#v, want task id", out)
+		}
+		promoted[taskID] = true
+	}
+	plan, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if !promoted[task.ID] {
+				continue
+			}
+			checked++
+			if slices.Contains(task.Owns, "frontend/package.json") {
+				t.Errorf("Go-only task %s unexpectedly owns frontend registration: %v", task.ID, task.Owns)
+			}
+		}
+	}
+	if checked != len(promoted) {
+		t.Fatalf("checked %d promoted tasks, want %d", checked, len(promoted))
+	}
+	if collisions := artifact.LaneCollisions(plan); len(collisions) != 0 {
+		t.Fatalf("promoted Go-only lanes collide: %v", collisions)
+	}
+}
+
+func TestPromotionStackLaneHintsFallsBackForDirectoryOwnedPortion(t *testing.T) {
+	profile := capability.Profile{
+		LaneHints: capability.LaneHints{
+			TestRoots:             []string{"tests"},
+			TestRegistrationFiles: []string{"go.mod", "frontend/package.json"},
+		},
+		StackLaneHints: map[string]capability.LaneHints{
+			"node": {TestExtensions: []string{".ts"}, TestRegistrationFiles: []string{"frontend/package.json"}},
+			"go":   {TestExtensions: []string{".go"}, TestRegistrationFiles: []string{"go.mod"}},
+		},
+	}
+
+	got := promotionStackLaneHints(profile, []string{"internal/service/"})
+	if len(got) != 1 || !slices.Equal(got[0].TestRoots, profile.LaneHints.TestRoots) ||
+		!slices.Equal(got[0].TestRegistrationFiles, profile.LaneHints.TestRegistrationFiles) {
+		t.Fatalf("directory-owned hints = %#v, want aggregate fallback %#v", got, profile.LaneHints)
+	}
+}
+
+func TestPromotionStackLaneHintsUsesDeterministicStackOrder(t *testing.T) {
+	profile := capability.Profile{StackLaneHints: map[string]capability.LaneHints{
+		"node": {TestExtensions: []string{".ts"}, TestRegistrationFiles: []string{"frontend/package.json"}},
+		"go":   {TestExtensions: []string{".go"}, TestRegistrationFiles: []string{"go.mod"}},
+	}}
+
+	got := promotionStackLaneHints(profile, []string{"internal/service/service.go", "frontend/src/App.ts"})
+	if len(got) != 2 || !slices.Equal(got[0].TestRegistrationFiles, []string{"go.mod"}) ||
+		!slices.Equal(got[1].TestRegistrationFiles, []string{"frontend/package.json"}) {
+		t.Fatalf("stack hints = %#v, want go then node", got)
 	}
 }
