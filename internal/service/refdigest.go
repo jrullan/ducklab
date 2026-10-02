@@ -277,7 +277,7 @@ func (s *Service) refDigestCall(ctx context.Context, rs *runState, seat config.D
 	// always fits beside the prompt in the seat's context window.
 	caps := s.effectiveCaps(ctx, seat, false)
 	const system = "You distill reference documents for a software team. Return only the digest."
-	resp, err := oneShotChat(ctx, p, d, caps, system, prompt, s.oneShotCap(d, caps, 700, provider.EstimateTokens(system+prompt)))
+	resp, err := s.oneShot(ctx, p, d, caps, system, prompt, 700)
 	if err != nil {
 		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err, bestResponse(resp))
 		return "", err

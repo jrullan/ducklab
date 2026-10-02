@@ -205,7 +205,7 @@ type preparedAdvice struct {
 	provider provider.Provider
 	system   string
 	user     string
-	maxTok   int
+	floor    int
 }
 
 // prepareAdvice resolves the seat and assembles the bounded project context.
@@ -271,12 +271,11 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 	// before the answer even with suppression applied, and an advisor cut
 	// off mid-answer fails its contract as surely as an empty one.
 	caps := s.effectiveCaps(ctx, advisorID, false)
-	maxTok := s.oneShotCap(d, caps, 2000, provider.EstimateTokens(systemPrompt+b.String()))
-	return &preparedAdvice{advisor: advisorID, duckling: d, caps: caps, provider: p, system: systemPrompt, user: b.String(), maxTok: maxTok}, nil
+	return &preparedAdvice{advisor: advisorID, duckling: d, caps: caps, provider: p, system: systemPrompt, user: b.String(), floor: 2000}, nil
 }
 
 func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.PendingQuestion, call *preparedAdvice) (string, string, error) {
-	resp, err := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, call.user, call.maxTok)
+	resp, err := s.oneShot(ctx, call.provider, call.duckling, call.caps, call.system, call.user, call.floor)
 	if err != nil {
 		s.logFailedOneShot(rs, call.advisor, call.duckling, "advisor", q.Question, err, bestResponse(resp))
 		return "", string(call.advisor), err
@@ -289,10 +288,12 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 	raw := answerText(resp)
 	answer := truncateAdvisorAnswer(stripAdvisorThinking(raw))
 	if violation := advisorViolation(answer); violation != "" {
-		repairPrompt := call.user + "\n\nYour previous answer was:\n" + answer +
+		// The quote is bounded: a runaway answer is the usual violation, and
+		// quoted whole it would take the room the repair needs to answer.
+		repairPrompt := call.user + "\n\nYour previous answer was:\n" + firstN(answer, maxQuotedAdvisorAnswer) +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
-		repair, repairErr := oneShotChat(ctx, call.provider, call.duckling, call.caps, call.system, repairPrompt, call.maxTok)
+		repair, repairErr := s.oneShot(ctx, call.provider, call.duckling, call.caps, call.system, repairPrompt, call.floor)
 		if repairErr != nil {
 			// The response that triggered the repair is the evidence when the
 			// repair itself returns nothing (review of #134).
@@ -339,7 +340,19 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 	return strings.TrimSpace(answer), string(call.advisor), nil
 }
 
-// oneShotChat is the single way a service-side one-shot call reaches a
+// maxQuotedAdvisorAnswer bounds the rejected answer a repair quotes back.
+const maxQuotedAdvisorAnswer = 4000
+
+// oneShot sizes the cap from this call's own prompt and sends it. Every
+// service one-shot goes through here: a cap sized once and reused for a
+// longer prompt (the advisor's repair appends the rejected answer) overran
+// the context window it had been clamped to (review of #134).
+func (s *Service) oneShot(ctx context.Context, p provider.Provider, d *duckling.Duckling, caps *duckling.Capabilities, system, user string, floor int) (provider.ChatResponse, error) {
+	return oneShotChat(ctx, p, d, caps, system, user, s.oneShotCap(d, caps, floor, provider.EstimateTokens(system+user)))
+}
+
+// oneShotChat sends a service-side one-shot with a cap already sized for its
+// prompt; callers use oneShot. It is the single way such a call reaches a
 // provider. adviseWith used to build a raw ChatRequest — no sampling
 // params, no thinking suppression — so a seat configured with
 // disable_thinking reasoned straight into the 1200-token cap and the

@@ -304,3 +304,92 @@ func TestOneShotsFitASmallContextWindow(t *testing.T) {
 		}
 	}
 }
+
+// runawayThenTerse answers the first call with a runaway (more than 16
+// sentences, ~3K tokens) and the repair tersely, behind the same 8K window
+// that rejects a max_tokens which does not fit beside the prompt.
+type runawayThenTerse struct {
+	mu    sync.Mutex
+	calls []struct{ prompt, max int }
+}
+
+func (m *runawayThenTerse) ID() string                               { return "openrouter" }
+func (m *runawayThenTerse) Models(context.Context) ([]string, error) { return nil, nil }
+func (m *runawayThenTerse) ChatStream(ctx context.Context, req provider.ChatRequest, _ chan<- provider.Delta) (provider.ChatResponse, error) {
+	return m.Chat(ctx, req)
+}
+func (m *runawayThenTerse) Chat(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	if r, ok := req.Extra["reasoning"].(map[string]interface{}); ok && r["enabled"] == false {
+		return provider.ChatResponse{}, fmt.Errorf("chat: 400 Bad Request: Reasoning is mandatory for this endpoint and cannot be disabled.")
+	}
+	prompt := 0
+	for _, msg := range req.Messages {
+		prompt += provider.EstimateTokens(msg.Content)
+	}
+	m.mu.Lock()
+	m.calls = append(m.calls, struct{ prompt, max int }{prompt, *req.MaxTokens})
+	n := len(m.calls)
+	m.mu.Unlock()
+	if prompt+*req.MaxTokens > smallWindowTokens {
+		return provider.ChatResponse{}, fmt.Errorf("chat: 400 Bad Request: max_tokens (%d) + prompt (%d) exceeds the context length %d", *req.MaxTokens, prompt, smallWindowTokens)
+	}
+	text := "Use node --test \"tests/**/*.test.mjs\". It runs the suites under tests/ on Node 22."
+	if n == 1 {
+		text = strings.Repeat("The runner treats the tests directory as a module path and every suite is skipped by the glob that the gate passes to it today. ", 100)
+	}
+	return provider.ChatResponse{
+		Choices: []provider.Choice{{Message: provider.Message{Content: text}, FinishReason: provider.FinishStop}},
+		Usage:   provider.Usage{PromptTokens: prompt, CompletionTokens: provider.EstimateTokens(text)},
+	}, nil
+}
+
+// Review of #134: the cap was sized for the advice prompt and reused for the
+// repair, whose prompt also carries the rejected answer, so the repair
+// overran the window the first cap had been clamped to.
+func TestAnAdvisorRepairFitsASmallContextWindow(t *testing.T) {
+	isolate(t)
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{
+		"openrouter": {Kind: config.ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1"},
+	}
+	window := smallWindowTokens
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{
+		"small": {Provider: "openrouter", Model: "small/reasoner",
+			Params: config.SamplingParams{DisableThinking: true},
+			Caps:   config.Caps{ContextTokens: &window}},
+	}
+	s, err := New(cfg, Options{Bus: bus.New(16)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &runawayThenTerse{}
+	s.ducklings.RegisterProvider(fake)
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-repair-small", ProjectID: "p", Stage: "build", Status: "paused", PendingKind: "question",
+		Roster: map[string]string{"advisor": "small"}, StartedAt: "2026-10-02T23:30:00Z"}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	question := "Which test script works on Node 22? The gate printed:\n" + strings.Repeat("not ok 1 - tests/ is not a module\n", 300)
+	answer, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: question})
+	if err != nil {
+		t.Fatalf("advice with a repair on an 8K seat failed: %v (calls %+v)", err, fake.calls)
+	}
+	if !strings.Contains(answer, "tests/**/*.test.mjs") {
+		t.Fatalf("the repaired answer was not used: %q", answer)
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("expected the advice and one repair, saw %+v", fake.calls)
+	}
+	first, repair := fake.calls[0], fake.calls[1]
+	if first.max < provider.EstimateTokens(strings.Repeat("x", 13000)) {
+		t.Fatalf("fixture: the first cap (%d) must leave room for the runaway answer", first.max)
+	}
+	// The quoted answer is bounded, so the repair keeps room to answer.
+	if repair.max < 2000 {
+		t.Errorf("the repair was capped at %d (prompt %d): quoting the whole runaway answer took its room", repair.max, repair.prompt)
+	}
+}
