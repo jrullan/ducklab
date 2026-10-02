@@ -522,6 +522,28 @@ describe("RunView — asking a stage for changes", () => {
     }
   });
 
+  // Review of #132: an intake run's document is the requirements, not "the
+  // intake" — the onboarding gate of every new project.
+  it("names the requirements, not the intake stage, on a first intake decision", async () => {
+    for (const pending_data of [{ approved_exists: false, artifact: "requirements" }, { approved_exists: false }]) {
+      cleanup();
+      show({ stage: "intake", project_id: "p", pending_data });
+      render(<RunView runId="r-1" client={recording({})} />);
+      const consequence = (await screen.findByTestId("decision-consequence")).textContent ?? "";
+      expect(consequence).toContain("approves this as the project's first requirements document");
+      expect(consequence).not.toContain("intake");
+    }
+  });
+
+  it("names the requirements when a blocked first intake draft is discarded", async () => {
+    show({ stage: "intake", project_id: "p", verdict: "FAILED", next: ["request_changes", "reject"], pending_data: { approved_exists: false, artifact: "requirements", review_verdict: "request-changes", review_findings: 1 } });
+    render(<RunView runId="r-1" client={recording({})} />);
+    const consequence = (await screen.findByTestId("decision-consequence")).textContent ?? "";
+    expect(consequence).toContain("Request changes sends this requirements document draft back");
+    expect(consequence).toContain("Discard draft leaves the project without a requirements document");
+    expect(consequence).not.toContain("intake");
+  });
+
   it("says discarding a blocked first draft leaves the project without the document", async () => {
     show({ stage: "spec", project_id: "p", verdict: "FAILED", next: ["request_changes", "reject"], pending_data: { approved_exists: false, review_verdict: "request-changes", review_findings: 1 } });
     render(<RunView runId="r-1" client={recording({})} />);

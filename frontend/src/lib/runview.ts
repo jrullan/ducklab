@@ -1162,3 +1162,12 @@ export function humaniseContract(role: string, text: string | undefined): Humani
   }
   return null;
 }
+
+/** The document a stage run's decision is about, in words: the engine's
+ * pending_data.artifact when present (an intake run's document is the
+ * requirements, not "the intake"), else derived from the stage for runs that
+ * predate it. Review of #132: "the project's first intake". */
+export function documentLabel(stage: string, artifact?: unknown): string {
+  const kind = typeof artifact === "string" && artifact ? artifact : stage === "intake" ? "requirements" : stage;
+  return kind === "requirements" ? "requirements document" : kind;
+}

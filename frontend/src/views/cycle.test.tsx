@@ -407,8 +407,8 @@ describe("Cycle", () => {
   it("words a first proposal as approving it and a later one as replacing", async () => {
     const proposal = { diff: "", run_id: "r-1", sections: [{ id: "REQ-001", title: "New", body: "Draft." }] };
     for (const [doc, want, not] of [
-      [{ ...REQUIREMENTS, approved: false, sections: [], proposal }, "approves this as the project's first requirements", "replaces the approved"],
-      [{ ...REQUIREMENTS, proposal }, "replaces the approved requirements", "first requirements"],
+      [{ ...REQUIREMENTS, approved: false, sections: [], proposal }, "approves this as the project's first requirements document", "replaces the approved"],
+      [{ ...REQUIREMENTS, proposal }, "replaces the approved requirements document", "first requirements"],
     ] as const) {
       cleanup();
       const client = clientWith((p) => {

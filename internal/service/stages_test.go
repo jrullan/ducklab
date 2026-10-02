@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -1814,5 +1816,80 @@ func TestAPauseThatIsNotAGateStaysInProgressAndSaysWhy(t *testing.T) {
 	}
 	if status["T-071"] != "in_progress" || !strings.Contains(waiting["T-071"], "budget cap") {
 		t.Errorf("budget pause: status %q waiting %q", status["T-071"], waiting["T-071"])
+	}
+}
+
+// Review of #132: the first-document wording depends on approved_exists
+// reaching the UI from a real gate, not only on the helper. A first intake
+// reaches its gate with approved_exists false and names its artifact; once
+// accepted, a second intake reaches it with approved_exists true. Through
+// RunGet's JSON, which is what the desktop reads.
+func TestTheStageGatePublishesWhetherAnApprovedDocumentExists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	var revising atomic.Bool
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+		content := "## REQ-001 — Adds numbers\n\n**Priority:** must\n\nIt adds two numbers.\n"
+		if revising.Load() {
+			// A revision first triages which sections change ("NEW: <title>"
+			// to add one), then drafts each; it must change something.
+			content = "## REQ-002 — Subtracts numbers\n\n**Priority:** must\n\nIt subtracts two numbers.\n"
+			for _, m := range req.Messages {
+				if strings.Contains(m.Content, "NEW: <title> for a section to ADD") {
+					content = "NEW: Subtracts numbers"
+				}
+			}
+		}
+		for _, m := range req.Messages {
+			if m.Role == "system" && strings.Contains(m.Content, "You are the reviewer") {
+				content = `{"verdict":"approve","findings":[]}`
+			}
+		}
+		return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: content}, FinishReason: provider.FinishStop}}}
+	}
+	res, err := s.ProjectStart(context.Background(), ProjectStartRequest{Name: "calc", Brief: "A calculator that adds.", GitName: "Ada", GitEmail: "a@example.com"})
+	if err != nil || res.RunID == "" {
+		t.Fatalf("start: %v %s", err, res.IntakeError)
+	}
+	gate := func(runID string) map[string]interface{} {
+		t.Helper()
+		s.runsMu.RLock()
+		rs := s.runs[runID]
+		s.runsMu.RUnlock()
+		<-rs.done
+		detail, err := s.RunGet(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(detail)
+		var decoded struct {
+			Run struct {
+				Status      string                 `json:"status"`
+				PendingData map[string]interface{} `json:"pending_data"`
+			} `json:"run"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Run.Status != "paused" {
+			t.Fatalf("run %s did not reach its gate: %s (%s)", runID, decoded.Run.Status, detail.Run.Failure)
+		}
+		return decoded.Run.PendingData
+	}
+	first := gate(res.RunID)
+	if first["approved_exists"] != false || first["artifact"] != "requirements" {
+		t.Fatalf("first intake gate = approved_exists %v, artifact %v", first["approved_exists"], first["artifact"])
+	}
+	if _, err := s.RunAccept(context.Background(), res.RunID, ""); err != nil {
+		t.Fatal(err)
+	}
+	revising.Store(true)
+	again, err := s.StageStart(context.Background(), res.Project.ID, StageRequest{Stage: "intake", Revise: "Also subtract."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second := gate(again.ID); second["approved_exists"] != true {
+		t.Fatalf("second intake gate = approved_exists %v", second["approved_exists"])
 	}
 }
