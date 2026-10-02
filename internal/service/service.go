@@ -3614,8 +3614,11 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
 	// command to reject; executable gates must be green in the clean checkout.
 	reproduction := &runlog.GateReproduction{Gate: string(result.Gate), Command: result.Command, ExitCode: result.ExitCode, Output: result.Output, Duration: result.Duration, Green: verify.IsGreen(result)}
-	if result.Gate == verify.GateNone {
+	if result.Gate == verify.GateNone && result.ExitCode == 0 {
 		return reproduction, nil
+	}
+	if result.Gate == verify.GateNone {
+		return reproduction, fmt.Errorf("clean-checkout verification was interrupted (exit code %d):\n%s", result.ExitCode, result.Output)
 	}
 	// Polarity follows the stage. A test-first commit is red BY DESIGN — the
 	// committed failing test IS the deliverable — and demanding green here

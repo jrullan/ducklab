@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -802,14 +804,45 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	}
 	if len(testPortions) == 1 {
 		profile, _ := capability.DefaultRegistry().ResolveProject(capability.Context{ProjectRoot: projectRoot, Policies: cfg.Capabilities.Policy}, cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled)
-		for _, root := range uniqueStrings(profile.LaneHints.TestRoots) {
-			add(testPortions[0], root, "stack test root")
-		}
-		for _, file := range uniqueStrings(profile.LaneHints.TestRegistrationFiles) {
-			add(testPortions[0], file, "stack test registration")
+		for _, hints := range promotionStackLaneHints(profile, out[testPortions[0]].Owns) {
+			for _, root := range uniqueStrings(hints.TestRoots) {
+				add(testPortions[0], root, "stack test root")
+			}
+			for _, file := range uniqueStrings(hints.TestRegistrationFiles) {
+				add(testPortions[0], file, "stack test registration")
+			}
 		}
 	}
 	return out, nil
+}
+
+// promotionStackLaneHints returns hints from the stack(s) represented by a
+// portion's owned source files. A project profile is deliberately polyglot;
+// applying its aggregate hints would make a Go regression claim Node's package
+// registration merely because the repository also has a frontend.
+func promotionStackLaneHints(profile capability.Profile, owns []string) []capability.LaneHints {
+	var hints []capability.LaneHints
+	stackIDs := make([]string, 0, len(profile.StackLaneHints))
+	for id := range profile.StackLaneHints {
+		stackIDs = append(stackIDs, id)
+	}
+	sort.Strings(stackIDs)
+	for _, id := range stackIDs {
+		stackHints := profile.StackLaneHints[id]
+		for _, owned := range owns {
+			if slices.Contains(stackHints.TestExtensions, strings.ToLower(filepath.Ext(owned))) {
+				hints = append(hints, stackHints)
+				break
+			}
+		}
+	}
+	// Triagers may assign directories rather than concrete files. With no
+	// extension evidence, keep the historical aggregate hints so a test-owning
+	// portion still receives a writable test root and registration file.
+	if len(hints) == 0 {
+		return []capability.LaneHints{profile.LaneHints}
+	}
+	return hints
 }
 
 func lanePathsOverlap(a, b string) bool {
@@ -944,17 +977,43 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion, reopenContext s
 	return sb.String()
 }
 
+// reporterBoldFieldLabel moves the colon outside reporter-authored labels only
+// where the artifact grammar would read one: at the start of a prose line.
+// Inline quotations and fenced examples are evidence and stay byte-for-byte.
+var reporterBoldFieldLabel = regexp.MustCompile(`^(\s*)\*\*([^*\n]+):\*\*`)
+
+func reporterContext(body string) string {
+	lines := strings.Split(body, "\n")
+	fence := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			marker := trimmed[:3]
+			if fence == "" {
+				fence = marker
+			} else if fence == marker {
+				fence = ""
+			}
+			continue
+		}
+		if fence == "" {
+			lines[i] = reporterBoldFieldLabel.ReplaceAllString(line, "$1**$2**:")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n", b.ID)
 	if strings.TrimSpace(reopenContext) != "" {
 		sb.WriteString(reopenEvidenceHeading + "\n\n")
-		sb.WriteString(strings.TrimSpace(reopenContext))
+		sb.WriteString(strings.TrimSpace(reporterContext(reopenContext)))
 		sb.WriteString("\n\nAn unchanged tree cannot satisfy this task: it exists because the previous fix did not hold.\n\n")
 	}
 	if strings.TrimSpace(b.Body) != "" {
 		sb.WriteString("## Reported\n\n")
-		sb.WriteString(strings.TrimSpace(b.Body))
+		sb.WriteString(strings.TrimSpace(reporterContext(b.Body)))
 		sb.WriteString("\n")
 	}
 	// The implementer's numbered work contract, in the same shape the plan
@@ -980,7 +1039,7 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 				strings.Join(strings.Split(b.SuspectedFiles, "\n"), ", "))
 		}
 		if b.TriageReason != "" {
-			sb.WriteString("\n" + strings.TrimSpace(b.TriageReason) + "\n")
+			sb.WriteString("\n" + strings.TrimSpace(reporterContext(b.TriageReason)) + "\n")
 		}
 		if b.TestStrategy != "" {
 			fmt.Fprintf(&sb, "\n- **Verification (triage recommends)**: %s", b.TestStrategy)

@@ -1,12 +1,12 @@
 ---
 kind: plan
-version: 15
-updated_at: 2026-09-08T22:22:15Z
+version: 16
+updated_at: 2026-10-02T19:05:39Z
 run_id: r-20260908-221704-z22k
 ducklings: [human]
 configured_ducklings: [human]
 based_on: ee3e851e27151dd8
-approved_by: mcp:codex-mcp-client
+approved_by: human
 ---
 
 ## M-01 — Reported bugs
@@ -5383,6 +5383,564 @@ Observed after accepting T-267 and T-268. T-262 was promoted before those fixes 
 The reported redo is a reproducible high-impact scope breach in which legacy persisted task bodies override structured bounded contracts and cause out-of-lane implementation.
 
 **Verification (triage recommends):** test-first — A pre-marker promoted task can be exercised through prompt construction and must exclude inherited sibling deliverables and lanes.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-270 — Council plan extend/revise starts with the orphaned plan-manifest critic: the reviewer drafts or judges before the architect has written anything
+
+Fixes B-374.
+
+## Reported
+
+Observed by Jose on Fledge, 2026-09-10: every council-mode plan update (extend r-20260910-112013-ynf3, revise r-20260910-112326-dle7, extend r-20260910-112928-3bcn) opens with `turn_start role=reviewer duckling=glm52 turn=0`, then architect turn 1, reviewer turn 2, architect turn 4, then the composition review. The reviewer is supposed to critique the architect's draft; here it goes first.
+
+Why: `CouncilScript(prefix="M")` prepends two turns for a first plan — architect `PersonaPlanManifest` (JSON topology manifest) and reviewer `PersonaPlanManifestCritic` (its critic). `internal/stage/fragment.go` `artifactUpdateScript` removes only the `PersonaPlanManifest` turn for updates ("the fragment already has a checkpointed topology") and leaves its critic in place. `execute.go` special-cases that critic only when `planManifestDraft != nil` (lines ~585, 639, 682, 998), so with no manifest draft the critic turn falls through to the generic reviewer persona ("the draft is IN this conversation") fed the architect's fragment prompt ("Extend this plan… return ONLY the new task section(s)").
+
+Effect, from llm.jsonl: in ynf3 the reviewer (glm52, seq 1, $0.018, 24 s) DRAFTED the task itself and named it `T-900`; the architect (k3) then copied that draft, T-900 included, which the composition reviewer later flagged as critical — the decorrelation the council exists for was undone by turn 0 (the architect anchored on the critic's draft). In dle7 the reviewer at turn 0 emitted `request-changes` findings against the previous candidate before the architect had revised anything ($0.016, 10 s); the architect then saw those findings as if they were about its own work. One wasted or contaminating model call per council update, plus a confusing record for the human.
+
+Expected: `artifactUpdateScript` drops both manifest turns (architect AND critic) for plan updates, so a council update reads architect → critics → (human) → architect, like the comment on `CouncilScript` says. Regression: a council plan extend's first `turn_start` has role architect, and no reviewer turn runs before an architect turn in round 1. Related: B-371 (extend cannot add a dependency edge), B-372 (unseated reviewer under extend's forced solo), B-373 (mechanical check skips lint).
+
+### T-271 — artifact lint accepts untyped Produces/Consumes/Exercises items that the toolchain then drops silently (lane invisible)
+
+Fixes B-370.
+
+## Reported
+
+Fledge plan_extend r-20260910-110536-vcaa (2026-09-10 11:08) proposed T-028 with `**Produces:** crates/fledge-core/src/contract/model.rs, crates/fledge-core/src/operations/inspect_plan_task.rs, crates/fledge-core/tests/inspect_plan_task_corpus.rs` and `**Exercises:** `InspectPlanTaskInput`, `inspect_plan_task` handler, regression test binary` — no `file:` prefix. `ducklab artifact lint --kind plan .ducklab/docs/plan.md.proposed` printed "plan grammar is valid." with no notice, and the run's composition_mechanical_check reported 0 findings.
+
+Why it matters: `internal/service/toolchain.go` `taskArtifactFiles`/`artifactFiles` keep only items with the `file:` prefix and skip the rest without a word, so a task written this way has an empty lane: no collision detection against T-002/T-010 (which produce those same files), no Owns, no Exercises evidence. Same family as F-079/B-347 (Implements ranges dropped silently): the public preflight (B-355) exists precisely to catch a value-syntax slip before the freeze/accept, and here it lets the item pass while the machine ignores it.
+
+Expected: lint emits at least a notice per artifact item without a recognised type prefix (`file:`, `capability:`, `none` for Consumes), naming the task and the item; the plan-stage mechanical check does the same so the architect gets it as a finding instead of the human reviewer. Regression: a plan fixture with an untyped Produces item fails lint with a notice pointing at it. Grammar doc 02-DATA-MODEL §5.5 should say explicitly that items are typed. Found during the build-3 audit; corrected by request_changes on the same run.
+
+### T-272 — plan extend's mechanical check reports 0 findings on a proposal that `artifact lint` rejects (Verification without backticks)
+
+Fixes B-373.
+
+## Reported
+
+Fledge plan_extend r-20260910-112013-ynf3 (council, k3 architect, glm52 reviewer), 2026-09-10 11:20–11:21. The proposal's T-028 carried `**Verification:** scripts/require-tests.sh --target … -- cargo test …` with no backtick span. The run's `composition_mechanical_check` reported `count: 0, findings: null, contract_findings: null`, so the semantic reviewer (glm52) spent its turn and returned three findings that did not include the grammar error. Running the public preflight on the same file afterwards: `ducklab artifact lint --kind plan .ducklab/docs/plan.md.proposed` → `1 artifact grammar error(s): invalid_field_shape: T-028 **Verification:** must be one backtick command`.
+
+Why it matters: the mechanical layer is supposed to stop a candidate that a machine contract already proves invalid before a model turn is spent (that is what the comment in `reviewComposition` says about contract findings). Grammar 2 shape validation is such a contract and it already exists as the lint; the plan-stage composition check just does not call it. The human then discovers at accept (or at the next run) that the proposal cannot promote.
+
+Expected: `reviewComposition` (or `planCompositionFindings`) runs the same grammar validation as `artifact lint` on the composed candidate and treats its errors as contract findings: short-circuit the semantic review, return them to the architect as findings in the next round. Regression: an extend whose candidate has a Verification without backticks ends with the lint's `invalid_field_shape` in `composition_mechanical_check` and no `composition_review_started`. Related: B-370 (untyped artifact items pass lint), B-371, B-372.
+
+### T-273 — Composition review judges every request_changes round against the original extend ask, so a revise note can never legitimately narrow it
+
+Fixes B-376.
+
+## Reported
+
+Fledge, 2026-09-10, council extend chain for T-028: r-20260910-112928-3bcn → request_changes → r-…-113748-s5ly → request_changes → r-…-114354-psab. All three `composition_review_completed` events carry the same `delta_digest` bb2d3c495a90bdfd… although each round had a different `revise` note in its stage_request. The reviewer prompt therefore shows the ORIGINAL extend text as "the delta" and never the operator's revise instructions.
+
+Consequence in psab: the operator's note (after learning that extend cannot edit the traceability table, B-375) asked to drop the table change and declare it as documentation debt in T-028's body. The architect did exactly that; the reviewer then returned two findings — "the amendment explicitly instructs to append T-028 to the table… missing" (critical) and "T-028 contains an invented 'Deuda documental' paragraph… absent from the requested delta" (major) — verdict request-changes, gate FAILED. The chain cannot converge: the reviewer enforces an ask the operator has already withdrawn, and `next` offers only request_changes/reject, so the correct candidate had to be rejected and the extend relaunched with a rewritten ask.
+
+Expected: the composition review's delta is the effective ask of the round — the original ask plus every accepted revise note in order (or the latest note when it supersedes) — and the event records that composed delta's digest. Regression: after a request_changes whose note withdraws part of the original ask, the reviewer's findings do not cite the withdrawn part. Related: B-371, B-374, B-375.
+
+### T-274 — plan_extend with an unseated reviewer spends the architect turn, then dies with `duckling "": duckling "" not found` at the composition review
+
+Fixes B-372.
+
+## Reported
+
+Fledge plan_extend r-20260910-111323-mpuz, 2026-09-10 11:13:23–11:13:49. Between the previous extend (r-…-vcaa, 11:05) and this one, the project's `[roster]` lost its `architect` and `reviewer` pins (project.toml mtime 11:09:22Z, uncommitted; `ducklab roster show` reports `reviewer  unseated`, `architect k3  global mode seat (council)`). The run resolved `run.Roster` as `{architect: k3, reviewer: "", …}`, let the architect draft the whole task (26 s), passed `composition_mechanical_check` (0 findings), emitted `composition_review_started`, and then failed with `error: duckling "": duckling "" not found` (buildLoop on the empty id) → `run_end FAILED`, no proposal, no gate.
+
+Expected, either of: (1) run_start refuses a plan/extend request whose composition reviewer seat is empty, naming the seat and the fix (`ducklab roster set reviewer <id>` or the desktop Roster card), before any model turn is spent; or (2) the composition review falls back the way the first run did (reviewer = implementer with the "both sides of the pair: self-consistency, not review" warning). Today the empty seat is only discovered by buildLoop, and the message names no role and no remedy — the operator has to diff project.toml to understand it. Regression: a plan extend with `[roster] reviewer` absent and no global reviewer either fails fast at run_start with a message that names the seat, or reviews with the documented fallback and warning.
+
+Related: B-371 (extend cannot add the T-023→T-028 edge), B-370 (untyped artifact items pass lint).
+
+### T-275 — plan_extend cannot add a dependency edge from an existing task to the new task, yet its own composition reviewer demands it
+
+Fixes B-371.
+
+## Reported
+
+Fledge, 2026-09-10. plan_extend r-20260910-110536-vcaa proposed T-028 (a prerequisite fix that T-023 needs). The post-composition reviewer returned request-changes with one critical finding: "T-023 dependency on T-028 is omitted despite explicit delta instruction". I sent request_changes asking, among other things, to add T-028 to T-023's `Depends on`. The revise run r-20260910-111032-tdtn then died at 11:12:19 with `plan extension tried to rewrite existing task T-023; extension may add tasks but must not silently duplicate an existing task` (status failed, no gate, no proposal).
+
+So the light path contradicts itself: the reviewer requires an edge the guard forbids. The most common amendment shape — "add a small prerequisite that an existing blocked task must wait for" — cannot be expressed with plan_extend at all; the operator is pushed either to a full plan revise cycle or to a hand edit of plan.md (the plan-amendment gap already noted for T-001/T-013 lanes).
+
+Expected: the extension contract distinguishes "rewrite a task" (forbidden) from "append a dependency edge to an existing task" (allowed, recorded as an amendment delta: task id, field, added ids). The mechanical guard accepts a proposal whose only change to an existing task is a superset `Depends on`; the composition reviewer's finding then has a legal fix. Regression: an extend fixture that adds T-NEW and appends it to T-OLD's Depends on is accepted; one that changes T-OLD's Work unit is refused with the current message. Also worth a second look: the revise draft named the new task T-900 (the architect invents an id outside the plan's sequence) — the engine should assign the next id.
+
+Workaround used here: extend again asking for T-028 only, with the relaunch rule written in T-028's body; T-023's graph edge stays undocumented until a proper amendment verb exists.
+
+### T-276 — plan extend cannot replace a non-task section: asked to update «Trazabilidad cerrada», the architect nests a copy of it inside the new task's body and the composition reviewer approves
+
+Fixes B-375.
+
+## Reported
+
+Fledge, 2026-09-10, council extend chain for T-028. Two request_changes rounds asked the architect (k3) to add T-028 to the SPEC-004 and SPEC-006 rows of the plan's `## Trazabilidad cerrada` table. Round r-20260910-112928-3bcn: k3 pasted a two-row "fragment" of the table as prose at the end of T-028's body; the real table was untouched. Round r-20260910-113748-s5ly, asked explicitly to emit the whole `## Trazabilidad cerrada` section so the engine replaces it: k3 emitted it as `### Trazabilidad cerrada` (a heading level below), which the parser folds into T-028's body as prose; the plan now carries a full duplicate of the traceability section (table, Assumption, corpus table, critical path) inside T-028, and the original section still lacks T-028. `artifact lint` says valid, `composition_mechanical_check` 0 findings, and the composition reviewer (glm52) approved both times.
+
+Why: the fragment prompt ("Return ONLY the new task section(s) — never the rest of the plan; the engine merges your fragment") and the merge only handle `### T-NNN` task sections for an extend; there is no door for a non-task section such as the traceability table, and nothing detects a `###` heading that is not a task id (it silently becomes body text of the previous task). Sibling of B-371 (extend cannot add a dependency edge to an existing task).
+
+Expected: (1) the extend/revise merge accepts a `## <existing section title>` in the fragment as a replacement of that section, or refuses it with a message naming the limitation; (2) the mechanical check flags any `###` heading inside a plan milestone that is not a `T-NNN` id (it can only be a mistake); (3) the composition reviewer's prompt states which sections the delta was allowed to touch, so "the table was not updated" is a finding rather than an approve. Workaround used: T-028 cleaned by one more round, the table left as declared documentation debt in T-028's body.
+
+### T-277 — history_duration pause: `next` offers only abort although RunResume accepts it (MCP decide refuses resume, CLI resumes)
+
+Fixes B-369.
+
+## Reported
+
+Fledge build-3, run r-20260910-042837-7sck (T-023, build stage, pair terra+glm52), 2026-09-10 04:42 UTC. The run paused with pending_kind `history_duration` (wallclock 13 m vs 6.5 m average of 29 runs; actions advertised on the card: relaunch_with_stronger_seat, improve_task_body, continue_as-is).
+
+What happened: `decide(run, "resume", reason)` over MCP was refused: `"resume" is not among this run's legal actions [abort] — read run_get and pick from next`. `ducklab run resume r-20260910-042837-7sck` from the CLI resumed the run immediately (status running, round 2 continued).
+
+Why: `internal/service/next.go` `runNext` enumerates pending kinds (question, engine_restart/engine_shutdown, chat, budget/provider/error, gate) and `history_duration` is not one of them, so a paused build/test run at that point falls through to the abort-only default, while `RunResume` does accept it. The advisory card's "continue_as-is" therefore has no legal MCP door; an MCP operator (Elena, or Claude here) can only abort.
+
+Expected: `history_duration` listed with `resume`, `abort` (build/test), same shape as `budget`, and a regression test in next_test.go that a paused history_duration run advertises resume. Related observation from the same pause, worth a look in the same change or its own bug: the pause is documented to land "at the next safe point ... the turn in flight finishes", but the record shows the reviewer's round-2 turn starting at 04:42:10 and being cancelled in the same second (`provider_retry: provider unavailable ... context canceled`, then `turn_interrupted` carrying its findings). The findings survived, but the provider-unavailable label is misleading (B-357 shape).
+
+### T-278 — The extend/revise request of a plan run is persisted and served by the API but no surface shows it (desktop, CLI run show, MCP run_get, events)
+
+Fixes B-377.
+
+## Reported
+
+Observed by Jose on Fledge, 2026-09-10, during the T-028 extend chain (r-20260910-110536-vcaa … r-20260910-114726-grdq): once an extend or revise starts, the change request that drives it — the `extend` ask and each `request_changes` note — cannot be read anywhere.
+
+Where it is: `stage_request.json` in the run dir and `state.json.stage_request` (keys autonomy, extend, from, mode, revise, rounds, stage, stream); `GET /v1/runs/{id}` returns it under `run.stage_request` for live and finished runs (verified for grdq and ynf3). Where it is not: the desktop RunView renders nothing from `stage_request` (frontend/src only sets `extend` on launch in client.ts); `ducklab run show <id>` prints "run …: running (task )" and the verdict, no request; MCP `run_get` omits it; no event in events.jsonl carries the ask (run_start has only mode/stage), so the event stream shows the reviewer's verdict against a delta the reader cannot see. The engine's own composition review names it "the delta" and reports a `delta_digest`, but the text behind the digest is invisible.
+
+Why it matters: the whole council conversation (architect draft, critic findings, composition review) is a response to that request; without it the record is unreadable, and after a request_changes round the reader cannot tell which instruction the round was answering (B-376 was only diagnosable by reading stage_request.json from disk).
+
+Expected: (1) desktop RunView for artifact-stage runs shows a "Request" card with the extend/revise text (and, for a chain, the note of each round), above the events; (2) `ducklab run show` prints the request; (3) MCP `run_get` returns `stage_request`; (4) a `stage_request` event (or the ask inside run_start data) so the event log is self-contained. Desktop surface rule applies: every feature exposed in the desktop in the same arc. Related: B-371, B-374, B-375, B-376.
+
+### T-279 — Two accepts landing close together race on the default branch: the loser is refused at the fast-forward and must be retried by hand
+
+Fixes B-367.
+
+## Reported
+
+What happened (Fledge, 2026-09-10 03:52:00): T-015's accept (r-20260910-034630-ig5m) rebased its commit onto main at 120ddba, reproduced the project gate green (cargo test --workspace) and then failed the fast-forward: "git update-ref refs/heads/main … cannot lock ref 'refs/heads/main': is at c6874e9 but expected 120ddba". T-020's accept had landed on main during the reproduction window. The refusal is correct (nothing was clobbered), but the run is left paused with a stale rebased commit and the person has to notice, understand and retry.
+
+Expected: when the fast-forward fails because the default branch moved, the accept retries automatically once (re-rebase onto the new head, re-reproduce the gate, fast-forward), recording the retry as an event; only a second loss, or a rebase conflict, pauses for the person with a message that says "main moved while this accept was reproducing; retry Accept". With four concurrent runs and a person accepting from the desktop in quick succession this is the normal case, not an edge.
+
+Related: B-283 (materialised rebase conflicts), B-367 (the retry itself fails since B-364).
+
+### T-280 — A run's diff may edit files outside its task's Produces/Owns and the gate says nothing; the lane contract is enforced only between plan sections, not against what a run actually changed
+
+Fixes B-365.
+
+## Reported
+
+What happened (Fledge build-3, T-013, r-20260910-033436-loln, PASSED): the task's Produces names the six operation_handlers/*.rs leaf files and its test. The run also edited `crates/fledge-core/src/operation_registry.rs`, which the plan assigns to T-001 and which the plan's global contract explicitly protects ("T-013 sólo cambia sus leaf bodies"; "Ninguna tarea edita un archivo ajeno; cualquier excepción exige enmienda previa del contrato"). Only the reviewer noticed, as a *minor* finding ("strictly required wiring"), and approved. The gate (task verification, probes, project gate) was green and said nothing about the lane.
+
+Why it matters: Ducklab derives Owns from Produces and checks lane collisions between tasks in the plan (trace gate), and the deliverables ledger checks that declared Produces exist — but nothing checks the converse: that the run did not touch paths it does not own. Under grammar 2 the plan makes a precise promise about who edits what; a run can break it silently, and in a parallel tanda (T-008..T-012 ran concurrently) an out-of-lane edit is exactly what produces rebase conflicts and the B-283 situation.
+
+Expected: at the round/final gate, compare the run's diff paths against the task's Produces (+ the plan's derived Owns) and report out-of-lane paths as a structured finding: "edits outside this task's lane: operation_registry.rs (owned by T-001)". Policy is the maintainer's: block (the plan's contract says exception requires a prior amendment), or warn and record so the person accepts knowingly and the plan can be amended after. The reviewer should receive the same list as an invariant, not have to discover it by reading.
+
+Context: here the edit was arguably necessary — T-001's implementation had registered a `placeholder` fn for every operation instead of the handler modules, so wiring real handlers had to touch the table — which is itself evidence that the plan's lane split (table in T-001, bodies in T-013) and T-001's landed shape diverged without anyone being told.
+
+### T-281 — Worktree accept: additive conflicts on a shared registry file need a human rebase for every sibling task
+
+Fixes B-368.
+
+## Reported
+
+Fledge build-3 (2026-09-10). Six parallel tasks (T-015..T-020) each promote providers out of the `builtin!` macro in `crates/fledge-providers/src/builtin/mod.rs`: each adds its own `pub mod x;`/`pub use x::x;` lines and removes its names from the macro list. The plan's lane for that file is T-001 (Produces), so no lane collision fired at launch or at PASSED (same family as B-365: out-of-lane edits are not gated).
+
+What happened: T-020 landed first (c6874e9). Every later accept (T-015, T-016, T-017, T-018 at 03:51-03:52; T-015 again at 04:15) stopped with `human_needed: rebase stopped with conflicts ... conflicting files: crates/fledge-providers/src/builtin/mod.rs`. Three worktrees were left mid-rebase onto a base that was already stale (c6874e9 while main was 77b3fda), so resolving them there would only produce a second conflict on the next accept. Each landing regenerates the same conflict for every sibling still waiting: five tasks means up to 5+4+3+2+1 hand merges of a file whose merged content is the trivial union (both `pub mod` sets, macro list minus both).
+
+Expected (any of): (1) a lane finding at launch or PASSED when a run edits a path produced by another task, so the operator knows before accepting; (2) when the rebase conflicts, the engine reports it on the run and aborts the rebase so the worktree stays at the run commit instead of parked on a stale base; (3) an accept option that retries the rebase with a merge driver / union strategy for additive conflicts and lets the reproduced gate decide, leaving the hand resolution as the last resort instead of the only one.
+
+Hand declared for build-3: I resolved T-015 in its worktree with the union (rebased commit c7f9723 on 77b3fda, `cargo test --workspace` 57/57 offline), aborted the stale rebases of T-016/T-017/T-018 back to their run commits, and will resolve each sibling one at a time after each landing. Evidence: `~/dev/Fledge/.ducklab/runs/r-20260910-034630-{ig5m,s7bd,t3q2,ax3t}/events.jsonl` seq 154-157 and the human_needed events at 03:51:57-03:52:01.
+
+### T-282 — Pair reviewer calls/reply ceiling is a hard-coded 8 (pair.go) that no configuration can raise; three Fledge runs lost their verdict to it
+
+Fixes B-378.
+
+## Reported
+
+Fledge build-3, 2026-09-10. Three pair runs (terra implementer, glm52 reviewer, project `role_turns.reviewer = 100`) ended the same way: the reviewer read files until its last call and never emitted the verdict JSON → `contract parse failed: verdict contract (role reviewer): … no JSON object found; repair failed … empty response` → `human_needed kind=error`. Runs: T-003 attempt 1 (rejected, relaunched), T-023 r-20260910-042837-7sck round 2 (04:44:33), T-028 r-20260910-121006-ztbx round 1 (12:13:31). Each reply_call for the reviewer logs `ceiling: 8, ceiling_source: "pair ceiling", requested: 100, max: 8`, and the warning before the last call says "pair ceiling is a hard ceiling; defaults, overrides, and no-cap cannot raise it".
+
+Why: `internal/strategy/pair.go:28` sets `MaxTurnsCeiling: 8` on the pair reviewer turn as a literal; `execute.go` treats MaxTurnsCeiling as the hard bound above every role/phase/global cap, so the person's `role_turns.reviewer = 100` and the desktop "no cap" tick are silently clamped to 8. Same principle as B-362 (the 24 small-seat reserve): every limit is configuration. Council critics have the same literal (`MaxTurnsCeiling: 4` in council.go:296 and :341).
+
+Cost so far: three lost reviewer turns, two relaunch/resume cycles, and a reviewer that cannot finish a review of a 4–6 file change with `fs_read` per file plus `verify_run` and `git_diff` (8 calls is exactly one read per produced file with nothing left for the verdict).
+
+Expected: the ceiling comes from configuration (`[defaults] pair_reviewer_ceiling` / `council_critic_ceiling`, or simply the role's `role_turns` bound), with today's 8 and 4 as defaults; the "hard ceiling" warning names the setting that raises it; a regression proves `role_turns.reviewer = 20` yields max 20 on the pair reviewer turn. Also worth adding: when the reviewer reaches its last call without a verdict, the harness asks for the verdict on that last call instead of letting it spend it on one more fs_read (the repair path already exists for parse failures but not for "no reply left").
+
+### T-283 — `make test-race` is red on main: TestAStageWarningUsesItsEffectiveLineUp races between executeStage's roster writes and RunGet's snapshot
+
+Fixes B-379.
+
+## Reported
+
+Found while verifying PR 37 round 2 (2026-09-10). On origin/main (7473f14 + merged PRs of the day) `go test -race ./internal/service -run TestAStageWarningUsesItsEffectiveLineUp -count=1` fails with 7 `WARNING: DATA RACE` reports; the branch under review only moved the line numbers. Trace on main: writes in `executeStage` (internal/service/stages.go:634, reached from stages.go:334 via queue.go:227 — the run goroutine assigning/mutating `rs.run.Roster` / `rs.run.RosterSources`) against reads by the test through `RunGet` (`snapshotRun` copies the struct but shares the maps).
+
+Why it matters: the Makefile has a `test-race` target; with this test red on main, the target cannot be used as a gate, so new races (PR 37 round 1 had one) are only caught by hand. The underlying defect is real, not test-only: any API/desktop read of a stage run's roster while `executeStage` is seating it can observe a map being written.
+
+Expected: `snapshotRun` deep-copies the maps (`Roster`, `RosterSources`, `PendingData`) or `executeStage` builds the maps fully and assigns them once under `rs.wmu`; the test passes under `-race` (count=3) and `make test-race` is green on main. Regression: the existing test run with `-race` in CI, or a dedicated race-only test that starts a stage run and polls `RunGet` concurrently.
+
+### T-284 — Record and show the originating bug on promoted-task runs
+
+Fixes B-451.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- RunStart records the originating bug ID on the run for every task promoted from a bug (including each task of a multi-task promotion) and leaves unrelated runs unlinked; a service regression test verifies the run record retains that ID.
+- The run header shows a "Fixes B-xxx" badge linking to the originating bug when the run has one, and no badge otherwise; the bug panel lists the runs of every task promoted from that bug; frontend tests cover both surfaces.
+
+**Owns:** frontend/src/api/client.ts, frontend/src/views/Board.tsx, frontend/src/views/RunView.origin.test.tsx, frontend/src/views/RunView.tsx, frontend/src/views/board.test.tsx, internal/runlog/runlog.go, internal/service/bug_loop_test.go, internal/service/service.go, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-451.
+
+## Reported
+
+**Reported by Jose (2026-09-28), verified on Neocapture:** B-035 was promoted into two sibling tasks, T-063 (fix in src/app/lifecycle.c) and T-064 (regression coverage). The bug moved to fixed only when the last task (T-064) was accepted — that works. But the build run for T-063 (r-20260929-015711-4qya) does not name B-035 anywhere a person looks: `state.json` has no bug field (0 mentions), and the run view's header/panel shows only the task id. The only traces are the "Fixes B-035" line inside the task contract and the bug's own `task:` field, so discovering the link means jumping to the task card or the bug panel.
+
+**Verified detail:** the implementer prompt already carries the bug id, because the task body ("Fixes B-035. …") is pasted into it (18 mentions in llm.jsonl, 5 in events.jsonl through the task text). So the conversation side is covered; the record and the UI are not. `runlog.Run` has no bug/fixes field, and RunView.tsx has no rendering for one.
+
+**Expected:** at RunStart, when the task was promoted from a bug (promotion trace or the `Fixes B-…` line), record `bug_id` (or `fixes: [B-…]`) on the run; the run header shows a "Fixes B-035" badge linking to the bug next to the task id, and the bug panel lists the runs of every task it spawned. With one bug → N tasks this is what lets a person see that several runs share one origin.
+
+**Acceptance slices:**
+- A promoted-task run persists its originating bug ID, including for each task in a multi-task promotion.
+- The run view shows a “Fixes B-xxx” badge linking to the originating bug.
+- The bug panel lists runs for every task promoted from that bug.
+- Regression tests cover run provenance and both UI surfaces.
+
+## Triage
+
+- **Component**: bug/run provenance
+- **Suspected files**: internal/runlog/runlog.go, internal/service/service.go, internal/service/bug_loop_test.go, frontend/src/api/client.ts, frontend/src/views/RunView.tsx, frontend/src/views/Board.tsx, frontend/src/views/RunView.origin.test.tsx, frontend/src/views/board.test.tsx
+
+The report is verified, actionable, and distinct from the supplied open bugs; run records and both requested UI surfaces lack the originating-bug link.
+
+- **Verification (triage recommends)**: test-first — Promote one bug into two tasks, start runs for both, and assert each run records the bug and both views link the runs to it.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-285 — Make toolchain checks and answers reflect the live environment
+
+Fixes B-476.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- Regression tests cover missing-tool rechecks, advisor guidance, plan-time mismatch findings, and the plan-revision option.
+- A missing declared command with an available equivalent is clearly surfaced before build work proceeds.
+
+**Owns:** internal/service, go.mod, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-476.
+
+## Reported
+
+TI-36X build r-20261002-161231-itbc (T-001) is stuck on the toolchain preflight question, asked three times (16:12, 16:14, 16:23) although Jose answered twice.
+
+**What happened**
+- The plan's milestone declares `**Toolchain:** cmd:node, cmd:python`. The machine has `python3` and no `python` (Ubuntu default). No task command uses `python`: the project's own run/smoke commands (web-page preset) use `python3`, and the plan never invokes python at all. The architect named the language, not the binary.
+- The preflight asks "Install them and continue, or change the plan". The advisor (glm53flash) recommended "Installed — continue. Keep the plan as-is…" without any install having happened; Jose accepted it. Resume re-runs the preflight, `python` is still absent, and the identical question comes back with no word that the check ran again and failed. A second answer ("I just answered") loops the same way.
+
+**Expected**
+1. The re-asked question says what the re-check found: "cmd:python is still not on PATH after your answer" and, when an equivalent exists, "python3 is (install python-is-python3, or change the plan to cmd:python3)".
+2. The toolchain advisor is given the live PATH check and never recommends "Installed — continue" while the capability is missing.
+3. Catch it before building: when a plan is proposed/accepted, check declared toolchain against the machine and the project's own commands (here `[run].command` uses python3), so "cmd:python" vs "python3" surfaces at the plan decision, not mid-build. Optionally treat a declared `cmd:python` as satisfied when `python3` is Python 3 and no task invokes `python` literally.
+
+**Also (found when Jose chose the second option):** "Change the plan (revise it) instead" is a dead option. Any answer to the toolchain question resumes the run (service.go executeRun), the preflight re-runs before anything else, finds the same missing capability and pauses again — so choosing "Change the plan" loops exactly like "Installed — continue". The only real way out was to abort the build and launch a plan revision by hand (done for r-20261002-161231-itbc → plan revision r-20261002-162656-pkrl). Expected: that option ends the build run (not as a failure) and starts, or offers, the plan revision with the missing capability in its note.
+
+**Acceptance slices:**
+- A resumed preflight identifies capabilities still missing and reports relevant equivalents found on PATH.
+- The advisor receives live toolchain availability and does not recommend continuing while a declared capability is missing.
+- Plan proposal or acceptance reports declared toolchain mismatches against PATH and the project's configured commands.
+- Choosing plan revision ends or routes away from the build run and preserves the missing-capability context.
+
+## Triage
+
+- **Component**: service toolchain preflight
+- **Suspected files**: internal/service/toolchain.go, internal/service/service.go, internal/service/advisor.go, internal/service/stages.go, internal/service/toolchain_test.go, internal/service/askhuman_test.go, internal/service/advisor_governance_test.go, go.mod
+
+The build preflight rechecks an unchanged declaration on every resume, while the plan review, advisor, and answer handling do not make the missing capability or the revision option actionable.
+
+- **Verification (triage recommends)**: test-first — With python absent and python3 available, answer the missing-tool question and assert the re-check is explicit; choosing plan revision must not resume into the same question.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-286 — Make document truncation advice reflect the serving endpoint
+
+Fixes B-475.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- A regression test demonstrates that a length-finished response below the requested max_tokens names the upstream and observed output cap.
+- Document truncation advice no longer tells the person to raise max_tokens when the response ended below that limit.
+
+**Owns:** internal/agent/agent.go, internal/agent/repair_test.go, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-475.
+
+## Reported
+
+TI-36X plan run r-20261002-123743-ixm6 paused with: "response truncated: the whole document did not fit in k3's output cap (131072 tokens). Raise max_tokens on this duckling…".
+
+**What actually happened (llm.jsonl seq 9):** Ducklab requested max_tokens 131072; OpenRouter routed moonshotai/kimi-k3 to **DeepInfra**, whose endpoint caps completions at **16384** (`/models/moonshotai/kimi-k3/endpoints`: DeepInfra max_completion_tokens 16384; most others 943718). The reply stopped at exactly 16384 completion tokens with finish_reason length. Raising max_tokens cannot help — the advice sends the person to the wrong control.
+
+**Expected:** when finish_reason is length and the completion is below the requested max_tokens, name the real limit: "the serving endpoint (DeepInfra via OpenRouter) stopped at 16384 output tokens; pin a provider with a higher cap in the duckling's OpenRouter endpoint, or draft with another duckling". The llm record already carries `upstream`; the endpoint caps are available from the model-endpoints API Ducklab already uses. Optionally: when a duckling has no pinned endpoint and the request needs more than an endpoint's cap, ask OpenRouter to exclude it (provider routing `max_tokens`-aware / `require_parameters`).
+
+**Acceptance slices:**
+- When a document response finishes with length below its requested max_tokens, the error identifies the routed upstream and actual completion-token count as the limiting cap.
+- When the response reaches the requested max_tokens or upstream details are unavailable, existing applicable truncation advice remains accurate.
+- A regression test covers an upstream-capped response below the requested max_tokens.
+
+## Triage
+
+- **Component**: agent truncation advice
+- **Suspected files**: internal/agent/agent.go, internal/agent/repair_test.go
+
+The report describes an actionable, automated-testable error-message bug in document truncation handling, and no open bug listed is a duplicate.
+
+- **Verification (triage recommends)**: test-first — Simulate a length-finished document response below the requested max_tokens with an OpenRouter upstream, and assert the advice identifies the upstream cap instead of recommending a higher duckling limit.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-287 — Protect copied report labels and cover promotion
+
+Fixes B-477.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- Promoting a report with `**Expected:**` preserves its context but produces no `unknown_field` finding.
+- The regression test runs through the service test suite.
+
+**Owns:** internal/service/bugs.go, internal/service/triage_deliverables_test.go, Makefile, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-477.
+
+## Reported
+
+Promoting B-475 and B-476 on main 6071dfec created T-286 and T-285, then `ducklab trace check` immediately reported:
+
+- `unknown_field T-285 unknown field **Also (found when Jose chose the second option):**`
+- `unknown_field T-286 unknown field **Expected:**`
+- `unknown_field T-286 unknown field **What actually happened (llm.jsonl seq 9):**`
+
+The promoted task template correctly labels the raw report as `## Parent context (non-binding)` / `## Reported`, but the artifact field parser still treats bold colon labels anywhere in that copied report as machine fields. B-447 removed the promotion template's own invalid fields; reporter-authored labels still corrupt the approved plan during promotion.
+
+Expected: promotion may preserve the report for context, but it must encode or render reporter-authored labels so they cannot become grammar fields. A regression should promote a report containing `**Expected:**` and verify the resulting plan has no `unknown_field` finding.
+
+**Acceptance slices:**
+- Promotion preserves reporter-authored labels as readable context without emitting them as machine fields.
+- A promotion regression test checks the resulting plan for unknown-field diagnostics.
+
+## Triage
+
+- **Component**: promotion
+- **Suspected files**: internal/service/bugs.go, internal/service/triage_deliverables_test.go, Makefile
+
+Promotion copies reporter-authored bold-colon labels into task bodies, where the artifact parser treats them as machine fields and immediately invalidates the plan.
+
+- **Verification (triage recommends)**: test-first — Promote a report containing `**Expected:**` and assert the resulting plan has no `unknown_field` finding.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-288 — Make promotion test-registration widening stack-specific
+
+Fixes B-478.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- Go-only test portions do not gain frontend/package.json in a project that also has frontend tests.
+- A regression test promotes two Go-only reports and verifies neither gains frontend/package.json and no new lane collision appears.
+
+**Owns:** internal/service/bugs.go, internal/service/bug_promotion_lane_test.go, internal/capability/capability.go, internal/capability/stacks.go, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-478.
+
+## Reported
+
+Promoting two unrelated, single-portion Go bugs on main 6071dfec produced:
+
+- T-285 owns `internal/service, go.mod, frontend/package.json`
+- T-286 owns `internal/agent/agent.go, internal/agent/repair_test.go, frontend/package.json`
+
+Both tasks say `Lane widened at promote: frontend/package.json (stack test registration)`, even though their tests are Go tests and neither task needs frontend registration. `ducklab trace check` then reports `lane_collision T-285 lane "frontend/package.json" overlaps ... claimed by T-286`.
+
+Expected: stack test-registration widening selects the registration file for the task's actual test stack (Go tasks should not gain frontend/package.json), and independent promotions must not introduce a shared lane. A regression should promote two separate Go-only reports and verify neither receives frontend/package.json and the plan has no new lane collision.
+
+**Acceptance slices:**
+- Promotion adds only test-registration files relevant to the portion’s actual test stack.
+- A regression test verifies Go-only promotions in a mixed-stack project do not gain frontend/package.json.
+- A regression test promotes two separate Go-only reports and verifies their plan lanes do not collide.
+
+## Triage
+
+- **Component**: bug promotion lanes
+- **Suspected files**: internal/service/bugs.go, internal/service/bug_promotion_lane_test.go, internal/capability/capability.go, internal/capability/stacks.go
+
+Promotion currently adds every registration hint from the project-wide composed capability profile to a test portion, so frontend hints can widen Go lanes and collide.
+
+- **Verification (triage recommends)**: test-first — Promote two separate Go-only reports in a mixed Go/frontend fixture; neither task should own frontend/package.json, and the plan should have no new lane collision.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-289 — Refuse acceptance when clean-checkout reproduction is interrupted
+
+Fixes B-480.
+
+## Reported
+
+Guarded run r-20261002-170158-6o4f (T-287) reached a PASSED human gate and the operator ran `ducklab run accept`. The accept request timed out after 30 seconds, while the engine's clean-checkout reproduction was killed with exit_code=-1 and `green=false`. Despite that failed reproduction, the engine committed 995a2d95, advanced main, marked the run accepted/done, moved B-477 to fixed, and wrote record commit 47a2d3f7.
+
+Evidence is in `.ducklab/runs/r-20261002-170158-6o4f/events.jsonl`: seq 133 starts the accept reproduction; seq 134 records `gate_reproduced` with `green:false`, `exit_code:-1`, and a killed/timed-out gate; seq 135 immediately emits `bug_fixed`, followed by accept/run_end and an accepted state.
+
+Expected: a guarded/manual accept must never land, mark accepted, or close its bug unless the clean-checkout reproduction returns green. A client request deadline must not turn an interrupted reproduction into a successful acceptance. The operation should remain decidable/retryable and report the reproduction failure.
+
+**Acceptance slices:**
+- Interrupted reproduction returns an error that identifies the verification failure.
+- An interrupted reproduction leaves the run unaccepted and its candidate commit off the default branch.
+- No bug_fixed event, acceptance receipt, or accepted run record is written after an interrupted reproduction.
+- A regression test confirms the run remains decidable or retryable after the interruption.
+
+## Triage
+
+- **Component**: acceptance verification
+- **Suspected files**: internal/service/service.go, internal/service/accept_worktree_test.go
+
+The clean-checkout timeout is represented as GateNone, which the acceptance verifier treats as success, allowing acceptance and bug closure despite a killed reproduction.
+
+- **Verification (triage recommends)**: test-first — Accept a guarded run with a short request deadline during clean-checkout verification; expect refusal and no landing or bug closure.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-290 — Close the toolchain preflight and plan-revision regressions
+
+Fixes B-476.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- Automated regressions cover missing-tool rechecks, advisor guidance, plan-time mismatch findings, and plan-revision routing; a missing command with an available equivalent is surfaced before build work proceeds.
+- Plan-revision answers do not resume the paused build and preserve the missing-capability context in the revision request.
+
+**Owns:** internal/service, go.mod, frontend/package.json, frontend/src/store/runs.test.ts, frontend/src/store/runs.ts
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-476.
+
+## Reopen evidence (authoritative)
+
+Reopened: reopened after T-285 was accepted; the previous fix did not answer the report (2026-10-02T16:59:04Z).
+
+Person's promote note (verbatim):
+T-285 did not complete the reported workflow safely. This attempt must make the missing-toolchain answer actionable end to end: selecting plan revision must use only supported run states, emit the normal terminal events, and never let a frontend human event flip a paused run back to running. The advisor must recognize the general missing-toolchain preflight finding instead of matching only the exact words 'not on path'. Cover both continuing after the environment is actually fixed and routing a plan-time mismatch to revision rather than build.
+
+An unchanged tree cannot satisfy this task: it exists because the previous fix did not hold.
+
+## Reported
+
+TI-36X build r-20261002-161231-itbc (T-001) is stuck on the toolchain preflight question, asked three times (16:12, 16:14, 16:23) although Jose answered twice.
+
+**What happened**
+- The plan's milestone declares `**Toolchain:** cmd:node, cmd:python`. The machine has `python3` and no `python` (Ubuntu default). No task command uses `python`: the project's own run/smoke commands (web-page preset) use `python3`, and the plan never invokes python at all. The architect named the language, not the binary.
+- The preflight asks "Install them and continue, or change the plan". The advisor (glm53flash) recommended "Installed — continue. Keep the plan as-is…" without any install having happened; Jose accepted it. Resume re-runs the preflight, `python` is still absent, and the identical question comes back with no word that the check ran again and failed. A second answer ("I just answered") loops the same way.
+
+**Expected**
+1. The re-asked question says what the re-check found: "cmd:python is still not on PATH after your answer" and, when an equivalent exists, "python3 is (install python-is-python3, or change the plan to cmd:python3)".
+2. The toolchain advisor is given the live PATH check and never recommends "Installed — continue" while the capability is missing.
+3. Catch it before building: when a plan is proposed/accepted, check declared toolchain against the machine and the project's own commands (here `[run].command` uses python3), so "cmd:python" vs "python3" surfaces at the plan decision, not mid-build. Optionally treat a declared `cmd:python` as satisfied when `python3` is Python 3 and no task invokes `python` literally.
+
+**Also (found when Jose chose the second option):** "Change the plan (revise it) instead" is a dead option. Any answer to the toolchain question resumes the run (service.go executeRun), the preflight re-runs before anything else, finds the same missing capability and pauses again — so choosing "Change the plan" loops exactly like "Installed — continue". The only real way out was to abort the build and launch a plan revision by hand (done for r-20261002-161231-itbc → plan revision r-20261002-162656-pkrl). Expected: that option ends the build run (not as a failure) and starts, or offers, the plan revision with the missing capability in its note.
+
+**Acceptance slices:**
+- Regression tests verify a resumed preflight reports still-missing commands and available equivalents using a controlled PATH.
+- Regression tests verify the advisor receives live availability and cannot recommend continuing while a declared capability is missing.
+- Plan proposal or acceptance reports a declared-command mismatch against PATH and configured project commands before build work proceeds.
+- Choosing plan revision supersedes or routes away from the build and carries the missing-capability context into the revision request.
+- Register the regression tests in the repository’s Go and frontend test stacks as applicable.
+
+## Triage
+
+- **Component**: service toolchain preflight
+- **Suspected files**: internal/service/toolchain.go, internal/service/service.go, internal/service/advisor.go, internal/service/stages.go, internal/service/toolchain_regression_test.go, internal/service/toolchain_test.go, internal/service/askhuman_test.go, internal/service/advisor_governance_test.go, internal/service/stages_test.go, go.mod, frontend/package.json
+
+The report is actionable and high impact, while the current helper-level regression tests do not establish the full resumed-run, plan-decision, and revision-routing behavior required by the reopened contract.
+
+- **Verification (triage recommends)**: test-first — With python missing and python3 available, resume after answering the preflight and assert the re-check names both; choosing plan revision must route away from the build.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-291 — Add and document an explicit retry-with-note CLI path
+
+Fixes B-483.
+
+## Current portion contract (authoritative)
+
+**Acceptance slices:**
+- A CLI regression test confirms `--note` reaches RunStart and is retained as the new run's note.
+- The CLI reference explains how to retry with rejection feedback and that the note does not amend the task body.
+
+**Owns:** internal/cli/cli.go, internal/cli/cli_test.go, docs/spec/03-CLI.md, frontend/package.json
+
+- **Lane widened at promote**: frontend/package.json (stack test registration)
+
+Only the Acceptance slices and Owns above are required for this portion.
+
+## Parent context (non-binding)
+
+Fixes B-483.
+
+## Reported
+
+## Reported
+
+During T-286 review, run `r-20261002-175521-nivs` was rejected with a precise correction: require a positive completion-token observation and test the upstream-present/usage-zero case. A new CLI launch of the same task, `r-20261002-180124-h3i2`, did not receive that rejection reason and produced the same defect. It was rejected again with an exact example condition and fixture guidance. The next launch, `r-20261002-180838-n3jz`, again read only the original task contract and repeated the same defect.
+
+The rejection reasons exist in each terminated run's `human` event, but `ducklab task show T-286` remains the original task body and `ducklab run T-286 --mode pair` has no note option. A CLI operator has no visible retry-with-feedback path, so corrective review is silently discarded between attempts.
+
+## Expected
+
+After rejecting a gated run with a reason, the next retry of that task receives the rejection feedback, with provenance, exactly once or until addressed. The CLI must expose an explicit retry-with-note path if plain relaunch is intentionally fresh. The task/run surface should make clear which feedback the next run will receive.
+
+## Suggested verification
+
+Reject a gated worktree run with a unique correction string, relaunch it through the documented CLI retry workflow, and assert that the new implementer prompt/state contains that string. Also assert the feedback is not lost, duplicated indefinitely, or confused with the authoritative task contract.
+
+**Acceptance slices:**
+- `ducklab run <task-id> --note <text>` passes the note to the new run without changing the task contract.
+- The CLI makes the note received by the new run visible and labels it as run-specific feedback.
+- The CLI reference documents the retry-with-note workflow and distinguishes the note from the authoritative task body.
+
+## Triage
+
+- **Component**: CLI run launch
+- **Suspected files**: internal/cli/cli.go, internal/cli/cli_test.go, docs/spec/03-CLI.md
+
+A rejected run’s correction is recorded, but the documented CLI launch cannot pass it to the next run, causing reproducible blind retries.
+
+- **Verification (triage recommends)**: test-first — Reject a run with a unique reason, relaunch with the documented --note option, and assert the run request and implementer prompt carry that note.
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
