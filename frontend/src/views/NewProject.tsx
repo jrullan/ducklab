@@ -14,16 +14,20 @@ import { useEffect, useState } from "react";
 import type { EngineClient, ProjectStartResult } from "../api/client";
 import { StartProject } from "../components/StartProject";
 import { routeHref } from "../app/routes";
-import { readiness } from "./FirstRun";
+import { noModelAdvice, readiness } from "./FirstRun";
 
 export function NewProject({ client, onStarted }: { client: EngineClient; onStarted: (result: ProjectStartResult) => void }) {
-  const [noModel, setNoModel] = useState(false);
+  // Why no configured model can draft, or null when one can.
+  const [blocked, setBlocked] = useState<string | null>(null);
   const [stalled, setStalled] = useState<ProjectStartResult | null>(null);
 
   useEffect(() => {
     let live = true;
     Promise.all([client.providers(), client.ducklings()])
-      .then(([providers, ducklings]) => { if (live) setNoModel(readiness(providers, ducklings).usable.length === 0); })
+      .then(([providers, ducklings]) => {
+        const r = readiness(providers, ducklings);
+        if (live) setBlocked(r.usable.length === 0 ? noModelAdvice(r) : null);
+      })
       .catch(() => {});
     return () => { live = false; };
   }, [client]);
@@ -53,7 +57,7 @@ export function NewProject({ client, onStarted }: { client: EngineClient; onStar
           <StartProject
             client={client}
             onStarted={(result) => (result.run_id ? onStarted(result) : setStalled(result))}
-            modelWarning={noModel ? "No model is configured to draft with. You can create the project now; add a model in Settings → ducklings to draft the requirements." : undefined}
+            modelWarning={blocked ? `${blocked} You can create the project now; drafting starts once a model can answer.` : undefined}
           />
         </div>
       )}

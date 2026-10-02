@@ -113,6 +113,9 @@ describe("App browser engine connection", () => {
     fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
     fireEvent.click(screen.getByTestId("start-submit"));
     await waitFor(() => expect(location.hash).toBe("#/runs/r-new"));
+    // The selection itself, driven by React's projectId (review of #130):
+    // the storage mirror alone stayed green with setProjectId removed.
+    await waitFor(() => expect(screen.getByTestId("project-select")).toHaveValue("calc"));
     expect(localStorage.getItem("ducklab.project")).toBe("calc");
   });
 

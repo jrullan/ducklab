@@ -50,6 +50,23 @@ export function readiness(providers: readonly ProviderView[], ducklings: readonl
   return { usable, missingKeys, noDucklings: ducklings.length === 0, noProviders: providers.length === 0, openRouter, ducklingIDs: ducklings.map((d) => d.id) };
 }
 
+/** What blocks drafting when no configured model can, in one sentence with
+ * the fix. Shared with the new-project page (review of #130: "no model is
+ * configured" sent a person with a model but no key to add another model). */
+export function noModelAdvice(r: Readiness): string {
+  if (r.noProviders) {
+    return "No provider is configured: Ducklab reaches models through a provider (OpenRouter, a local server). Add one in Settings → providers, then a model on it.";
+  }
+  if (r.noDucklings) {
+    return "A provider exists, but no model on it is configured. Add one in Settings → ducklings.";
+  }
+  if (r.missingKeys.length > 0) {
+    const keys = r.missingKeys.map((k) => `${k.provider} needs ${k.env}`).join("; ");
+    return `Your models cannot reach their provider: ${keys} in the engine's environment. Set it where the engine starts, then restart the engine from Settings → engine.`;
+  }
+  return "Your models point at providers that are not configured. Fix their provider in Settings → ducklings.";
+}
+
 export const OPENROUTER_STARTERS = [
   { id: "pato-gemini", model: "google/gemini-3.7-flash", label: "Gemini 3.7 Flash", vision: true, note: "recommended · lower cost" },
   { id: "pato-qwen", model: "qwen/qwen3.6-flash", label: "Qwen 3.6 Flash", vision: true, note: "alternative" },

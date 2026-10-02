@@ -7,9 +7,9 @@ import type { Duckling, EngineClient, ProviderView } from "../api/client";
 const provider = (over: Partial<ProviderView>): ProviderView => ({ id: "or", kind: "openai", base_url: "https://x", key_present: true, ...over });
 const duckling = (over: Partial<Duckling>): Duckling => ({ id: "luna", provider: "or", model: "m", ...over } as Duckling);
 
-function client(ducklings: Duckling[], start: () => Promise<unknown> = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, run_id: "r-1" }))) {
+function client(ducklings: Duckling[], start: () => Promise<unknown> = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, run_id: "r-1" })), providers: ProviderView[] = [provider({})]) {
   return {
-    providers: vi.fn(async () => [provider({})]),
+    providers: vi.fn(async () => providers),
     ducklings: vi.fn(async () => ducklings),
     projectStart: start,
     projectPresets: vi.fn(async () => []),
@@ -41,11 +41,25 @@ describe("NewProject", () => {
     const start = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, intake_error: "no model" }));
     const onStarted = vi.fn();
     render(<NewProject client={client([], start)} onStarted={onStarted} />);
-    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("No model is configured to draft with");
+    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("no model on it is configured");
     fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
     fireEvent.click(screen.getByTestId("start-submit"));
     expect(await screen.findByTestId("new-project-stalled")).toHaveTextContent("could not start: no model");
     fireEvent.click(screen.getByTestId("new-project-continue"));
     expect(onStarted).toHaveBeenCalled();
+  });
+
+  // Review of #130: a configured model whose provider key is missing is not
+  // "no model"; the advice names the key, not "add a model".
+  it("names the missing key when a configured model cannot reach its provider", async () => {
+    render(<NewProject client={client([duckling({})], undefined, [provider({ api_key_env: "OPENROUTER_API_KEY", key_present: false })])} onStarted={vi.fn()} />);
+    const warning = await screen.findByTestId("start-model-warning");
+    expect(warning).toHaveTextContent("or needs OPENROUTER_API_KEY");
+    expect(warning).not.toHaveTextContent("Add one in Settings → ducklings");
+  });
+
+  it("names a provider that does not exist", async () => {
+    render(<NewProject client={client([duckling({ provider: "gone" })])} onStarted={vi.fn()} />);
+    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("providers that are not configured");
   });
 });
