@@ -262,3 +262,53 @@ func TestAPeerHangupIsTransient(t *testing.T) {
 		t.Error("a canceled context was classed transient")
 	}
 }
+
+// The whole status matrix, on both call paths (the 429 seen in a real intake
+// failed terminally because streaming, which runs use, classified HTTP status
+// in a different place than Chat did). Both paths must give every status the
+// same identity and the same transient verdict.
+func TestEveryHTTPStatusIsClassifiedTheSameOnBothCallPaths(t *testing.T) {
+	cases := []struct {
+		code      int
+		sentinel  error
+		transient bool
+	}{
+		{http.StatusUnauthorized, ErrAuth, false},
+		{http.StatusForbidden, ErrAuth, false},
+		{http.StatusNotFound, ErrChatUnavailable, false},
+		{http.StatusTooManyRequests, ErrRateLimit, true},
+		{http.StatusInternalServerError, ErrProviderUnavailable, true},
+		{http.StatusBadGateway, ErrProviderUnavailable, true},
+		{http.StatusServiceUnavailable, ErrProviderUnavailable, true},
+		{520, ErrProviderUnavailable, true},
+		{http.StatusBadRequest, nil, false},
+	}
+	for _, c := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(c.code)
+			fmt.Fprint(w, `{"error":{"message":"status under test","code":`+fmt.Sprint(c.code)+`}}`)
+		}))
+		p := NewOpenAICompat("t", srv.URL, "")
+		req := ChatRequest{Model: "m", Messages: []Message{{Role: "user", Content: "go"}}}
+		paths := map[string]func() error{
+			"chat":        func() error { _, err := p.Chat(context.Background(), req); return err },
+			"chat stream": func() error { _, err := p.ChatStream(context.Background(), req, make(chan Delta, 1)); return err },
+		}
+		for name, call := range paths {
+			err := call()
+			if err == nil {
+				t.Errorf("%d %s: no error", c.code, name)
+				continue
+			}
+			for _, s := range []error{ErrAuth, ErrChatUnavailable, ErrRateLimit, ErrProviderUnavailable} {
+				if want := s == c.sentinel; errors.Is(err, s) != want {
+					t.Errorf("%d %s: errors.Is(%v) = %v, want %v (err: %v)", c.code, name, s, !want, want, err)
+				}
+			}
+			if IsTransient(err) != c.transient {
+				t.Errorf("%d %s: transient = %v, want %v (err: %v)", c.code, name, !c.transient, c.transient, err)
+			}
+		}
+		srv.Close()
+	}
+}

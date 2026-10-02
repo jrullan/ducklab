@@ -159,14 +159,54 @@ func (r *Registry) clearProbeFailure(id config.DucklingID) {
 // health signal as a capability probe. A declared native-tools capability can
 // skip launch-time probing, but a 404/refused/DNS failure from the actual chat
 // still proves that endpoint should not be selected automatically again.
-// Contract/content errors do not: they say nothing about reachability.
 func (r *Registry) RecordProviderResult(id config.DucklingID, err error) {
-	if err == nil {
-		r.clearProbeFailure(id)
-		return
+	r.applyHealth(id, err, err, false)
+}
+
+// healthVerdict is what one chat result says about whether a duckling's
+// endpoint can serve it.
+type healthVerdict int
+
+const (
+	healthUnchanged healthVerdict = iota // says nothing about reachability
+	healthAlive                          // the endpoint answered: clear any mark
+	healthDead                           // the endpoint cannot serve this duckling
+)
+
+// chatHealth is the one rule both the capability probe and run traffic use
+// (review of #131: they decided separately and drifted). An answer, and a
+// rate limit — the endpoint answered, it is only throttling — prove the
+// endpoint alive and clear an older mark. Not found, refused/unreachable and
+// rejected credentials mark it dead. Anything else (a malformed reply, a 400,
+// a vision rejection) is about the request, not the endpoint, and leaves the
+// signal as it was — except for the probe's own minimal request (see
+// applyHealth).
+func chatHealth(err error) healthVerdict {
+	switch {
+	case err == nil, errors.Is(err, provider.ErrRateLimit):
+		return healthAlive
+	case errors.Is(err, provider.ErrChatUnavailable), errors.Is(err, provider.ErrAuth), errors.Is(err, provider.ErrProviderUnavailable):
+		return healthDead
 	}
-	if errors.Is(err, provider.ErrProviderUnavailable) || errors.Is(err, provider.ErrChatUnavailable) || errors.Is(err, provider.ErrAuth) {
-		r.recordProbeFailure(id, err)
+	return healthUnchanged
+}
+
+// applyHealth records or clears the duckling's mark from one chat result;
+// failure is what is retained when the verdict is dead. minimal is true for
+// the probe's "Reply with ok.": when even that fails, for any reason but a
+// rate limit, the duckling cannot chat (B-464: a non-LLM service that
+// answered every request with an unclassified error), so an unclassified
+// failure counts as dead there. In run traffic it is about the request.
+func (r *Registry) applyHealth(id config.DucklingID, err, failure error, minimal bool) {
+	verdict := chatHealth(err)
+	if verdict == healthUnchanged && minimal {
+		verdict = healthDead
+	}
+	switch verdict {
+	case healthAlive:
+		r.clearProbeFailure(id)
+	case healthDead:
+		r.recordProbeFailure(id, failure)
 	}
 }
 
@@ -323,7 +363,9 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		MaxTokens: intPtr(8),
 	}); err != nil {
 		failure := fmt.Errorf("%s did not answer a chat at %s: %w", d.ID, d.Model, err)
-		r.recordProbeFailure(id, failure)
+		// The same health rule as run traffic: a rate limit clears an older
+		// mark (the endpoint answered), a dead endpoint sets one.
+		r.applyHealth(id, err, failure, true)
 		return nil, failure
 	}
 	r.clearProbeFailure(id)
