@@ -803,14 +803,33 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	}
 	if len(testPortions) == 1 {
 		profile, _ := capability.DefaultRegistry().ResolveProject(capability.Context{ProjectRoot: projectRoot, Policies: cfg.Capabilities.Policy}, cfg.Capabilities.Auto, cfg.Capabilities.Enabled, cfg.Capabilities.Disabled)
-		for _, root := range uniqueStrings(profile.LaneHints.TestRoots) {
-			add(testPortions[0], root, "stack test root")
-		}
-		for _, file := range uniqueStrings(profile.LaneHints.TestRegistrationFiles) {
-			add(testPortions[0], file, "stack test registration")
+		for _, hints := range promotionStackLaneHints(profile, out[testPortions[0]].Owns) {
+			for _, root := range uniqueStrings(hints.TestRoots) {
+				add(testPortions[0], root, "stack test root")
+			}
+			for _, file := range uniqueStrings(hints.TestRegistrationFiles) {
+				add(testPortions[0], file, "stack test registration")
+			}
 		}
 	}
 	return out, nil
+}
+
+// promotionStackLaneHints returns hints from the stack(s) represented by a
+// portion's owned source files. A project profile is deliberately polyglot;
+// applying its aggregate hints would make a Go regression claim Node's package
+// registration merely because the repository also has a frontend.
+func promotionStackLaneHints(profile capability.Profile, owns []string) []capability.LaneHints {
+	var hints []capability.LaneHints
+	for _, stackHints := range profile.StackLaneHints {
+		for _, owned := range owns {
+			if slices.Contains(stackHints.TestExtensions, strings.ToLower(filepath.Ext(owned))) {
+				hints = append(hints, stackHints)
+				break
+			}
+		}
+	}
+	return hints
 }
 
 func lanePathsOverlap(a, b string) bool {
