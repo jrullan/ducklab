@@ -10,9 +10,9 @@
 // is recorded with the operator's name. The record must never say a human
 // decided what a model decided.
 //
-// Out of scope, deliberately: configuring providers, ducklings or budgets —
-// those stay human-owned — and anything that returns a secret, which I10
-// already guarantees does not exist.
+// Provider secrets remain out of scope: I10 guarantees they never cross this
+// surface. Duckling selection itself is available because an MCP-only operator
+// must be able to recover from an unusable starter model.
 package mcp
 
 import (
@@ -29,6 +29,10 @@ import (
 type Engine interface {
 	ProjectList() ([]map[string]interface{}, error)
 	ConfigDoctor(projectID string) ([]engineclt.Finding, error)
+	ProviderList() ([]map[string]interface{}, error)
+	DucklingList() ([]map[string]interface{}, error)
+	DucklingSet(id string, body map[string]interface{}) error
+	DucklingProbe(id string) (map[string]interface{}, error)
 	RunList(projectID string) ([]map[string]interface{}, error)
 	RunGet(id string) (map[string]interface{}, error)
 	RunDiff(id string) (diff, tests, warning string, err error)

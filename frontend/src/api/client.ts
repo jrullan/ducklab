@@ -1394,6 +1394,12 @@ export class EngineClient {
       `/v1/providers/${encodeURIComponent(id)}/model-endpoints?model=${encodeURIComponent(model)}`,
     ).then((r) => r.items ?? []);
   }
+  providerModels(id: string) {
+    return this.request<{ items: string[] | null }>(
+      "GET",
+      `/v1/providers/${encodeURIComponent(id)}/models`,
+    ).then((r) => r.items ?? []);
+  }
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
   }

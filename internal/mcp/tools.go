@@ -36,6 +36,19 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{"action": str("get | set | unpin"), "scope": str("global | project"), "project_id": str("project id"), "mode": str("mode"), "role": str("role"), "ducklings": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "action", "scope"),
 		},
 		{
+			"name": "duckling",
+			"description": "List, add, or test model ducklings without exposing provider secrets. " +
+				"Use list to see configured providers and models; add creates a duckling and immediately tests its real capabilities; test re-probes an existing duckling. " +
+				"A provider key must already be present in the engine environment.",
+			"inputSchema": obj(map[string]interface{}{
+				"action":   str("list | add | test"),
+				"id":       str("duckling id; required for add and test"),
+				"provider": str("configured provider id; required for add"),
+				"model":    str("provider model id; required for add"),
+				"vision":   map[string]interface{}{"type": "boolean", "description": "optional capability override; omit to detect from the provider catalog and probe"},
+			}, "action"),
+		},
+		{
 			"name": "status",
 			"description": "What needs a decision and what is running, across every project. " +
 				"Start here. Each pending run carries `next`: the ONLY actions you may take on it. " +
@@ -538,6 +551,59 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(out), nil
+	case "duckling":
+		switch a.str("action") {
+		case "list":
+			providers, err := s.eng.ProviderList()
+			if err != nil {
+				return nil, err
+			}
+			ducklings, err := s.eng.DucklingList()
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(map[string]interface{}{"providers": providers, "ducklings": ducklings}), nil
+		case "add":
+			id, providerID, model := a.str("id"), a.str("provider"), a.str("model")
+			if id == "" || providerID == "" || model == "" {
+				return nil, fmt.Errorf("duckling add requires id, provider, and model")
+			}
+			ducklings, err := s.eng.DucklingList()
+			if err != nil {
+				return nil, err
+			}
+			for _, existing := range ducklings {
+				if existingID, _ := existing["id"].(string); existingID == id {
+					return nil, fmt.Errorf("duckling %q already exists; choose another id or edit it explicitly", id)
+				}
+			}
+			body := map[string]interface{}{
+				"provider": providerID, "model": model,
+				"actor": "mcp:" + s.client, "create_only": true,
+			}
+			if vision, present := a["vision"]; present {
+				body["caps"] = map[string]interface{}{"vision": vision}
+			}
+			if err := s.eng.DucklingSet(id, body); err != nil {
+				return nil, err
+			}
+			caps, err := s.eng.DucklingProbe(id)
+			if err != nil {
+				return nil, fmt.Errorf("duckling %s was saved but did not answer its capability test: %w", id, err)
+			}
+			return toolJSON(map[string]interface{}{"id": id, "provider": providerID, "model": model, "capabilities": caps}), nil
+		case "test":
+			if a.str("id") == "" {
+				return nil, fmt.Errorf("duckling test requires id")
+			}
+			caps, err := s.eng.DucklingProbe(a.str("id"))
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(caps), nil
+		default:
+			return nil, fmt.Errorf("duckling action must be list, add, or test")
+		}
 	case "roster":
 		return s.roster(a)
 	case "status":

@@ -3,14 +3,70 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
+
+type selectiveProbeProvider struct{}
+
+func (selectiveProbeProvider) ID() string                               { return "fake" }
+func (selectiveProbeProvider) Models(context.Context) ([]string, error) { return nil, nil }
+func (selectiveProbeProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, provider.ErrUnsupported
+}
+func (selectiveProbeProvider) Chat(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	if req.Model == "m-pato-local" {
+		return provider.ChatResponse{}, fmt.Errorf("404 Not Found")
+	}
+	return provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Content: `{"ok":true}`}}}}, nil
+}
+
+func TestAutomaticSeatingSkipsTheDucklingWhoseLastProbeFailed(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-local", "pato-openrouter")
+	s.ducklings.RegisterProvider(selectiveProbeProvider{})
+	if _, err := s.ducklings.ProbeForce(context.Background(), "pato-local"); err == nil {
+		t.Fatal("broken starter unexpectedly passed its probe")
+	}
+	roster, sources := s.resolveCanonicalRoster(nil, "solo")
+	if got := roster[config.RoleImplementer]; got != "pato-openrouter" {
+		t.Fatalf("implementer = %q (%s), want the answering duckling", got, sources[config.RoleImplementer])
+	}
+}
+
+func TestActualChatFailureMakesNextAutomaticSeatSkipDuckling(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<h1>404 Not Found</h1>No context found for request")
+	}))
+	defer srv.Close()
+	s := serviceWithDucklings(t, "pato-local", "pato-openrouter")
+	s.ducklings.RegisterProvider(provider.NewOpenAICompat("fake", srv.URL, ""))
+	native := true
+	cfg := s.cfg.Ducklings["pato-local"]
+	cfg.Caps.NativeTools = &native // the replay path: declared, so no launch probe
+	s.cfg.Ducklings["pato-local"] = cfg
+	loop, err := s.buildLoop(context.Background(), "pato-local", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loop.Provider.ChatStream(context.Background(), provider.ChatRequest{Model: cfg.Model}, make(chan provider.Delta, 1)); !errors.Is(err, provider.ErrChatUnavailable) {
+		t.Fatalf("real 404 = %v, want ErrChatUnavailable", err)
+	}
+	roster, _ := s.resolveCanonicalRoster(nil, "solo")
+	if got := roster[config.RoleImplementer]; got != "pato-openrouter" {
+		t.Fatalf("implementer after real 404 = %q, want pato-openrouter", got)
+	}
+}
 
 // An omitted mode is an engine decision, not a launcher convenience. Desktop,
 // autopilot, and MCP all enter through RunStart, so each must receive the same

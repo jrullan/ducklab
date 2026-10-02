@@ -19,6 +19,7 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/duckling"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -33,6 +34,24 @@ import (
 // pair and tournament use several ducklings in one run, so a single loop is
 // not enough. Loops are cached because building one probes capabilities, and
 // probing once per turn would cost a request per turn.
+type observedProvider struct {
+	provider.Provider
+	id       config.DucklingID
+	registry *duckling.Registry
+}
+
+func (p observedProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	resp, err := p.Provider.Chat(ctx, req)
+	p.registry.RecordProviderResult(p.id, err)
+	return resp, err
+}
+
+func (p observedProvider) ChatStream(ctx context.Context, req provider.ChatRequest, ch chan<- provider.Delta) (provider.ChatResponse, error) {
+	resp, err := p.Provider.ChatStream(ctx, req, ch)
+	p.registry.RecordProviderResult(p.id, err)
+	return resp, err
+}
+
 type loopCache struct {
 	svc         *Service
 	tracker     *budget.Tracker
@@ -109,6 +128,7 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 	if err != nil {
 		return nil, fmt.Errorf("duckling %q provider: %w", id, err)
 	}
+	p = observedProvider{Provider: p, id: id, registry: s.ducklings}
 
 	// Declared capabilities win over probing: probing costs a request, and on
 	// a local endpoint the declaration is usually more accurate anyway.
@@ -164,8 +184,12 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 	seats := s.cfg.Defaults.ModeSeats[mode]
 	pins := s.cfg.Defaults.RolePins
 	available := make(map[config.DucklingID]bool, len(s.cfg.Ducklings))
+	autoAvailable := make(map[config.DucklingID]bool, len(s.cfg.Ducklings))
 	for id := range s.cfg.Ducklings {
 		available[id] = true
+		if !s.ducklings.LastProbeFailed(id) {
+			autoAvailable[id] = true
+		}
 	}
 	s.cfgMu.RUnlock()
 	firstAvailable := func(ids []config.DucklingID) config.DucklingID {
@@ -244,8 +268,8 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 	// configured, it stops guessing: a configured install with no triager
 	// gets "no triager seated" at launch, not the alphabet (B-063).
 	if !s.anySeatConfigured(projCfg) {
-		availableIDs := make([]config.DucklingID, 0, len(available))
-		for id := range available {
+		availableIDs := make([]config.DucklingID, 0, len(autoAvailable))
+		for id := range autoAvailable {
 			availableIDs = append(availableIDs, id)
 		}
 		sort.Slice(availableIDs, func(i, j int) bool { return availableIDs[i] < availableIDs[j] })

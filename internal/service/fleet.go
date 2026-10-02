@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -78,6 +79,11 @@ type DucklingUpdate struct {
 	Cost               *CostUpdate           `json:"cost,omitempty"`
 	Color              *int                  `json:"color,omitempty"`
 	Fallback           *string               `json:"fallback,omitempty"`
+	// Actor and CreateOnly are write controls, not duckling fields. MCP uses
+	// them to make configuration authorship auditable and to guarantee that an
+	// "add" cannot silently replace an existing person's setup.
+	Actor      string `json:"actor,omitempty"`
+	CreateOnly bool   `json:"create_only,omitempty"`
 }
 
 type SamplingParamsUpdate struct {
@@ -123,6 +129,27 @@ func (s *Service) ProviderList() []ProviderView {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// ProviderModels returns the provider's live model ids. Starter UIs use this
+// as an allow-list so a renamed or retired catalog entry is never offered as
+// a one-click path into a broken configuration.
+func (s *Service) ProviderModels(ctx context.Context, providerID string) ([]string, error) {
+	s.cfgMu.RLock()
+	_, exists := s.cfg.Providers[config.ProviderID(providerID)]
+	prov := s.providers[config.ProviderID(providerID)]
+	s.cfgMu.RUnlock()
+	if !exists || prov == nil {
+		return nil, fmt.Errorf("provider %q does not exist", providerID)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	models, err := prov.Models(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list models from provider %q: %w", providerID, err)
+	}
+	sort.Strings(models)
+	return models, nil
 }
 
 // ProviderSet adds or replaces a provider and rebuilds what depends on it.
@@ -215,6 +242,19 @@ func (s *Service) ProviderRemove(id string) error {
 // ducklings start from zero values and therefore retain DucklingSet's required
 // provider/model validation.
 func (s *Service) DucklingUpdate(id string, patch map[string]interface{}) error {
+	clean := make(map[string]interface{}, len(patch))
+	for key, value := range patch {
+		clean[key] = value
+	}
+	actor, _ := clean["actor"].(string)
+	createOnly, _ := clean["create_only"].(bool)
+	delete(clean, "actor")
+	delete(clean, "create_only")
+	if createOnly {
+		if _, err := s.DucklingGet(context.Background(), id); err == nil {
+			return fmt.Errorf("duckling %q already exists; choose another id or edit it explicitly", id)
+		}
+	}
 	base := map[string]interface{}{}
 	if current, err := s.DucklingGet(context.Background(), id); err == nil {
 		raw, marshalErr := json.Marshal(current)
@@ -225,7 +265,7 @@ func (s *Service) DucklingUpdate(id string, patch map[string]interface{}) error 
 			return fmt.Errorf("decode duckling %q for update: %w", id, err)
 		}
 	}
-	mergeDucklingUpdate(base, patch)
+	mergeDucklingUpdate(base, clean)
 	// The path is authoritative. A body id came from the editable view in old
 	// clients but was never a supported rename operation.
 	delete(base, "id")
@@ -237,7 +277,25 @@ func (s *Service) DucklingUpdate(id string, patch map[string]interface{}) error 
 	if err := json.Unmarshal(raw, &view); err != nil {
 		return fmt.Errorf("decode duckling %q update: %w", id, err)
 	}
-	return s.DucklingSet(id, view)
+	if err := s.DucklingSet(id, view); err != nil {
+		return err
+	}
+	s.auditFleetChange(actor, "duckling_set", id)
+	return nil
+}
+
+func (s *Service) auditFleetChange(actor, source, id string) {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "human"
+	}
+	path := filepath.Join(filepath.Dir(s.configPath), "config-audit.jsonl")
+	if receipt, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		_ = json.NewEncoder(receipt).Encode(map[string]interface{}{
+			"actor": actor, "source": source, "keys": []string{"ducklings." + id}, "ts": time.Now().UTC().Format(time.RFC3339),
+		})
+		_ = receipt.Close()
+	}
 }
 
 // mergeDucklingUpdate follows JSON Merge Patch semantics for the editable
@@ -497,7 +555,8 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	needsContext := view.Caps.ContextTokens == nil || *view.Caps.ContextTokens <= 0
 	needsCost := view.Cost.InputPerMTok == 0 && view.Cost.OutputPerMTok == 0
 	needsOutput := view.Params.MaxTokens == nil || *view.Params.MaxTokens <= 0
-	if !needsContext && !needsCost && !needsOutput {
+	needsVision := view.Caps.Vision == nil
+	if !needsContext && !needsCost && !needsOutput && !needsVision {
 		return view
 	}
 	prov, ok := s.providers[config.ProviderID(view.Provider)]
@@ -537,7 +596,7 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 			}
 		}
 	}
-	if !needsContext && !needsCost && !needsOutput {
+	if !needsContext && !needsCost && !needsOutput && !needsVision {
 		return view
 	}
 	info, err := informer.ModelInfo(ctx, view.Model)
@@ -558,6 +617,10 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	if needsOutput && info.MaxOutputTokens > 0 {
 		n := info.MaxOutputTokens
 		view.Params.MaxTokens = &n
+	}
+	if needsVision && info.Vision != nil {
+		vision := *info.Vision
+		view.Caps.Vision = &vision
 	}
 	return view
 }

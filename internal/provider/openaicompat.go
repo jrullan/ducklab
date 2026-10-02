@@ -143,6 +143,9 @@ func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<
 // OpenAI-compatible servers report neither, and absence is not an error.
 type ModelInfo struct {
 	ContextTokens int
+	// Vision is present when the provider catalog declares whether image input
+	// is accepted. A nil value means the catalog did not say.
+	Vision *bool
 	// MaxOutputTokens is the model's own reply ceiling. Left unset, a
 	// duckling runs on ducklab's conservative default — which truncated a
 	// whole-document draft twice for a model that could have emitted eight
@@ -183,6 +186,9 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 				Prompt     json.Number `json:"prompt"`
 				Completion json.Number `json:"completion"`
 			} `json:"pricing"`
+			Architecture struct {
+				InputModalities []string `json:"input_modalities"`
+			} `json:"architecture"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -195,6 +201,16 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 		info := &ModelInfo{
 			ContextTokens:   m.ContextLength,
 			MaxOutputTokens: m.TopProvider.MaxCompletionTokens,
+		}
+		if len(m.Architecture.InputModalities) > 0 {
+			vision := false
+			for _, modality := range m.Architecture.InputModalities {
+				if strings.EqualFold(modality, "image") {
+					vision = true
+					break
+				}
+			}
+			info.Vision = &vision
 		}
 		if v, err := m.Pricing.Prompt.Float64(); err == nil {
 			info.PromptPerMTok = v * 1e6
@@ -353,6 +369,17 @@ func classifiedChatError(operation, status string, code int, body []byte) error 
 		(strings.Contains(lower, "image") && strings.Contains(lower, "mmproj")) ||
 		strings.Contains(lower, "vision projector") {
 		return fmt.Errorf("%w: model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling", ErrVisionUnsupported)
+	}
+	// Streaming takes this common classifier before the non-streaming path's
+	// explicit auth checks. Both forms must retain the same error identity.
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return fmt.Errorf("%w: %s: %s: %s", ErrAuth, operation, status, message)
+	}
+	// A 404 is not transient provider weather: retrying the same URL does not
+	// help. It does prove that this configured duckling cannot chat, whether
+	// the address serves no chat API or the selected model does not exist.
+	if code == http.StatusNotFound {
+		return fmt.Errorf("%w: %s: %s: %s", ErrChatUnavailable, operation, status, message)
 	}
 	// A 5xx — a Cloudflare 520 from a flaky OpenRouter upstream, a 503/504
 	// from a gateway — is the provider being unavailable, weather worth

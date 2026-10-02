@@ -102,6 +102,19 @@ func TestProviderListReportsWhetherTheKeyIsSet(t *testing.T) {
 	}
 }
 
+func TestProviderModelsUsesTheLiveCatalog(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.SetModels([]string{"qwen/qwen3.6-flash", "google/gemini-3.7-flash"})
+	got, err := s.ProviderModels(context.Background(), "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "google/gemini-3.7-flash,qwen/qwen3.6-flash" {
+		t.Fatalf("models = %v", got)
+	}
+}
+
 func TestProviderSetIsWrittenAndReadable(t *testing.T) {
 	s, path := fleetService(t)
 	if err := s.ProviderSet("hosted", ProviderView{

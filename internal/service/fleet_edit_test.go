@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -231,5 +232,36 @@ func TestDucklingSetRefusesIdsTheLoaderWould(t *testing.T) {
 	err := s.DucklingSet("qwen38_27b", DucklingView{Provider: "fake", Model: "qwen/qwen3.8-27b"})
 	if err == nil || !strings.Contains(err.Error(), "invalid id") {
 		t.Fatalf("an underscore id was accepted for writing: %v", err)
+	}
+}
+
+func TestDucklingUpdateCreateOnlyRefusesAnExistingID(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	err := s.DucklingUpdate("pato-uno", map[string]interface{}{
+		"provider": "fake", "model": "replacement", "create_only": true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("create-only overwrite was not refused: %v", err)
+	}
+	if got := s.cfg.Ducklings["pato-uno"].Model; got != "m-pato-uno" {
+		t.Fatalf("existing duckling was overwritten with %q", got)
+	}
+}
+
+func TestAttributedDucklingUpdateWritesGlobalConfigAudit(t *testing.T) {
+	s := writableService(t)
+	if err := s.DucklingUpdate("pato-new", map[string]interface{}{
+		"provider": "fake", "model": "m", "actor": "mcp:claude", "create_only": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := os.ReadFile(filepath.Join(filepath.Dir(s.configPath), "config-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"actor":"mcp:claude"`, `"source":"duckling_set"`, `"ducklings.pato-new"`} {
+		if !strings.Contains(string(audit), want) {
+			t.Errorf("audit lacks %s: %s", want, audit)
+		}
 	}
 }
