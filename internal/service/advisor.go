@@ -52,6 +52,16 @@ accepts it). No preamble, no "I recommend".`
 // a model call. The recommendation lands on the record as an `advice` event
 // and on the pending data, where the question card renders it.
 func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
+	if strings.HasPrefix(q.ID, "toolchain-") {
+		// The live PATH check has already decided the safe option. Asking a
+		// model here can only contradict that evidence or spend tokens restating
+		// it, so publish the revision choice directly.
+		if w, err := s.ensureWriter(rs); err == nil {
+			w.AppendEvent("advice_started", map[string]interface{}{"advisor": "ducklab", "question_id": q.ID})
+		}
+		go s.publishQuestionAdvice(rs, q, "Change the plan (revise it) instead", "ducklab")
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	call, err := s.prepareAdvice(ctx, rs, advisorSystemPrompt, "## The question the human was asked", q)
 	if err != nil {
@@ -68,50 +78,50 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		w, werr := s.ensureWriter(rs)
-		if werr != nil {
-			return
-		}
-		// The person can answer while the advisor is still assembling context or
-		// waiting on its model. Check and publish under the same lock used by run
-		// snapshots and resume: otherwise the old question's advisor races the
-		// resumed run and can file advice on the next attempt (B-411).
-		rs.wmu.Lock()
-		questionID, _ := rs.run.PendingData["question_id"].(string)
-		_, answered := rs.givenAnswers[q.ID]
-		if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
-			rs.wmu.Unlock()
-			return
-		}
-		if rs.run.PendingData == nil {
-			rs.run.PendingData = map[string]interface{}{}
-		}
-		rs.run.PendingData["advice"] = answer
-		rs.run.PendingData["advisor"] = advisor
-		autonomy := rs.run.Autonomy
-		runID := rs.run.ID
-		w.AppendEvent("advice", map[string]interface{}{
-			"question_id": q.ID, "advisor": advisor, "answer": answer,
-		})
-		_ = w.WriteState()
-		rs.wmu.Unlock()
-
-		// Under yolo the draft IS the answer: the run asked, an advisor
-		// reasoned from the same documents, and nobody is watching the
-		// inbox. Submitted through the same RunAnswer a person would use,
-		// with the decider on the record — a failed submit degrades back to
-		// an ordinary question card.
-		if autonomy == "yolo" {
-			w.AppendEvent("advice_taken", map[string]interface{}{
-				"question_id": q.ID, "advisor": advisor,
-			})
-			if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
-				w.AppendEvent("warning", map[string]interface{}{
-					"detail": "advisor auto-answer failed: " + err.Error(),
-				})
-			}
-		}
+		s.publishQuestionAdvice(rs, q, answer, advisor)
 	}()
+}
+
+func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, answer, advisor string) {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	// The person can answer while advice is being prepared. Publish under the
+	// same lock used by run snapshots and resume so an old answer cannot attach
+	// itself to the next attempt (B-411).
+	rs.wmu.Lock()
+	questionID, _ := rs.run.PendingData["question_id"].(string)
+	_, answered := rs.givenAnswers[q.ID]
+	if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
+		rs.wmu.Unlock()
+		return
+	}
+	if rs.run.PendingData == nil {
+		rs.run.PendingData = map[string]interface{}{}
+	}
+	rs.run.PendingData["advice"] = answer
+	rs.run.PendingData["advisor"] = advisor
+	autonomy := rs.run.Autonomy
+	runID := rs.run.ID
+	w.AppendEvent("advice", map[string]interface{}{
+		"question_id": q.ID, "advisor": advisor, "answer": answer,
+	})
+	_ = w.WriteState()
+	rs.wmu.Unlock()
+
+	// Under yolo the draft IS the answer. Submit through the same RunAnswer a
+	// person would use, with the decider on the record.
+	if autonomy == "yolo" {
+		w.AppendEvent("advice_taken", map[string]interface{}{
+			"question_id": q.ID, "advisor": advisor,
+		})
+		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
+			w.AppendEvent("warning", map[string]interface{}{
+				"detail": "advisor auto-answer failed: " + err.Error(),
+			})
+		}
+	}
 }
 
 // advise picks the advisor, assembles the context, and asks once — a one-shot
@@ -256,9 +266,6 @@ func (s *Service) prepareAdvice(ctx context.Context, rs *runState, systemPrompt,
 		b.WriteString("## Active harness/stack invariants — authoritative\n\n" + strings.TrimSpace(rs.execCtx.HarnessContext) +
 			"\n\nResolve any conflict between memory, task prose and these detected environment facts in favor of these invariants.\n\n")
 	}
-	if strings.HasPrefix(q.ID, "toolchain-") {
-		b.WriteString("## Live toolchain check — authoritative\n\nThe question text is the current PATH result. Do not recommend Installed — continue while it says a capability is not on PATH; choose plan revision or instruct the person to install the missing capability first.\n\n")
-	}
 	b.WriteString(header + "\n\n" + q.Question + "\n")
 	if len(q.Options) > 0 {
 		b.WriteString("\nOffered options:\n")
@@ -287,7 +294,7 @@ func (s *Service) executeAdvice(ctx context.Context, rs *runState, q *tools.Pend
 	// and the failure could not be diagnosed (Neocapture intake, 2026-08-29).
 	raw := answerText(resp)
 	answer := truncateAdvisorAnswer(stripAdvisorThinking(raw))
-	if violation := advisorViolation(q, answer); violation != "" {
+	if violation := advisorViolation(answer); violation != "" {
 		repairPrompt := call.user + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
@@ -563,12 +570,8 @@ func stripAdvisorThinking(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func advisorViolation(q *tools.PendingQuestion, text string) string {
+func advisorViolation(text string) string {
 	text = stripAdvisorThinking(text)
-	if q != nil && strings.HasPrefix(q.ID, "toolchain-") &&
-		(strings.Contains(strings.ToLower(text), "installed — continue") || strings.Contains(strings.ToLower(text), "install and continue") || strings.Contains(strings.ToLower(text), "continue with the plan")) {
-		return "do not recommend continuing while the live toolchain check reports a missing capability"
-	}
 	if text == "" {
 		return "empty answer"
 	}

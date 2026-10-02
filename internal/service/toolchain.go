@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -18,12 +19,14 @@ import (
 // (**Toolchain:** per milestone). Nobody installs anything ahead of time:
 // the first build that needs a tool checks the machine and, when one is
 // missing, asks the person to install it — at the moment it matters, with
-// the exact names.
+// the exact names. The first Neocapture builds ran with meson.build in the
+// tree and no meson on the machine, and the gate stayed "none" for the
+// whole run (benchmark run 5).
 
 // declaredToolchain returns the tools the plan declares for the milestone
-// that holds taskID — or, when the task cannot be placed, for the whole plan.
-// Names are the binaries as invoked; a parenthesised hint after a name is kept
-// for the message and ignored for the check.
+// that holds taskID — or, when the task cannot be placed, for the whole
+// plan. Names are the binaries as invoked; a parenthesised hint after a
+// name is kept for the message and ignored for the check.
 func declaredToolchain(plan *artifact.Document, taskID string) []string {
 	if plan == nil {
 		return nil
@@ -33,12 +36,16 @@ func declaredToolchain(plan *artifact.Document, taskID string) []string {
 	add := func(field string) {
 		for _, item := range strings.Split(field, ",") {
 			item = strings.TrimSpace(strings.Trim(item, "`"))
-			if item != "" && !seen[item] {
+			if item == "" {
+				continue
+			}
+			if !seen[item] {
 				seen[item] = true
 				out = append(out, item)
 			}
 		}
 	}
+	// The task's own milestone first: a task is a child of its milestone.
 	for i := range plan.Sections {
 		sec := &plan.Sections[i]
 		for _, child := range sec.Children {
@@ -57,6 +64,7 @@ func declaredToolchain(plan *artifact.Document, taskID string) []string {
 }
 
 // binaryOf strips an install hint and the optional cmd: capability prefix.
+// Bare names remain supported so existing plans do not become unreadable.
 func binaryOf(item string) string {
 	if i := strings.Index(item, "("); i > 0 {
 		item = item[:i]
@@ -70,7 +78,9 @@ func binaryOf(item string) string {
 
 var pkgConfigCapability = regexp.MustCompile(`^pkg-config:([^<>= ]+)(?:>=([^ ]+))?$`)
 
-// capabilityAvailable checks declared commands and pkg-config modules.
+// capabilityAvailable checks the two environment facts a plan can declare:
+// commands on PATH and pkg-config modules (optionally at a minimum version).
+// Installation remains a human action; this only makes the preflight honest.
 func capabilityAvailable(item string) bool {
 	clean := strings.TrimSpace(strings.Trim(item, "`"))
 	if m := pkgConfigCapability.FindStringSubmatch(clean); m != nil {
@@ -81,7 +91,8 @@ func capabilityAvailable(item string) bool {
 		if m[2] != "" {
 			args = []string{"--atleast-version=" + m[2]}
 		}
-		return exec.Command("pkg-config", append(args, m[1])...).Run() == nil
+		args = append(args, m[1])
+		return exec.Command("pkg-config", args...).Run() == nil
 	}
 	bin := binaryOf(clean)
 	if bin == "" {
@@ -101,6 +112,7 @@ func equivalentCommand(item string) string {
 	return ""
 }
 
+// missingTools reports which declared environment capabilities are absent.
 func missingTools(declared []string) []string {
 	var missing []string
 	for _, item := range declared {
@@ -126,7 +138,9 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 			tasks = []artifact.Section{sec}
 		}
 		for _, task := range tasks {
-			for _, finding := range registry.InspectPlanTask(capability.PlanTaskContext{ID: task.ID, Body: task.Body, Verification: task.Field("verification"), ProjectRoot: projectRoot}) {
+			for _, finding := range registry.InspectPlanTask(capability.PlanTaskContext{
+				ID: task.ID, Body: task.Body, Verification: task.Field("verification"), ProjectRoot: projectRoot,
+			}) {
 				out = append(out, fmt.Sprintf("%s plan contract (%s/%s): %s", task.ID, finding.Capability, finding.Name, finding.Detail))
 			}
 		}
@@ -136,7 +150,11 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 				continue
 			}
 			if equivalent := equivalentCommand(item); equivalent != "" {
-				out = append(out, fmt.Sprintf("%s declares %s, but it is not on PATH; %s is available (install python-is-python3, or change the plan to cmd:%s)", sec.ID, item, equivalent, equivalent))
+				key := "command|" + strings.ToLower(item)
+				if !seen[key] {
+					seen[key] = true
+					out = append(out, fmt.Sprintf("%s declares %s, but it is not on PATH; %s is available (install a compatible %s command, or change the plan to cmd:%s)", sec.ID, item, equivalent, binaryOf(item), equivalent))
+				}
 			}
 			m := pkgConfigCapability.FindStringSubmatch(item)
 			if m == nil {
@@ -151,15 +169,20 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 			}
 		}
 	}
-	// Project commands are the local evidence that a binary name is wrong, not
-	// merely absent. Keep this advisory: a plan may deliberately provision a tool.
+	// Project commands are local evidence that a binary name is wrong, not
+	// merely absent. This finding intentionally blocks plan acceptance before a
+	// build can pause on a mismatch the project configuration already exposes.
 	if projectRoot != "" {
-		if cfg, err := config.LoadProject(projectRoot + "/.ducklab/project.toml"); err == nil {
+		if cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml")); err == nil {
 			command := strings.Fields(cfg.Run.Command)
 			if len(command) > 0 {
 				for _, item := range declaredToolchain(plan, "") {
 					if eq := equivalentCommand(item); eq != "" && command[0] == eq {
-						out = append(out, fmt.Sprintf("plan declares %s while [run].command uses %s; revise the declared command or install python-is-python3", item, eq))
+						key := "command|" + strings.ToLower(item)
+						if !seen[key] {
+							seen[key] = true
+							out = append(out, fmt.Sprintf("plan declares %s while [run].command uses %s; revise the declared command or install a compatible %s command", item, eq, binaryOf(item)))
+						}
 					}
 				}
 			}
@@ -168,7 +191,10 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 	return out
 }
 
-// wontRequirementStructureFindings prevents active specs from implementing an excluded requirement.
+// wontRequirementStructureFindings prevents a specification from turning an
+// explicit requirements exclusion into active work. A wont requirement may be
+// referenced by a spec section that is itself marked wont (to preserve the
+// decision and traceability), but never by an active section.
 func wontRequirementStructureFindings(projectRoot string, spec *artifact.Document) []string {
 	if spec == nil {
 		return nil
@@ -198,7 +224,8 @@ func wontRequirementStructureFindings(projectRoot string, spec *artifact.Documen
 }
 
 func installedPkgConfigModules() []string {
-	out, err := exec.Command("pkg-config", "--list-all").Output()
+	cmd := exec.Command("pkg-config", "--list-all")
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
@@ -213,6 +240,11 @@ func installedPkgConfigModules() []string {
 }
 
 func closestCapability(want string, modules []string) string {
+	// Suggestions are corrections, not recommendations. Only collapse the
+	// spelling differences normally introduced by distro package names
+	// (libgtk-4 -> gtk4, libx11 -> x11). A fuzzy nearest neighbour turned
+	// libtoml into Qt6Xml in Neocapture corrida 34, which is syntactically
+	// close but semantically unrelated and actively misled the architect.
 	wantKey := capabilityKey(want)
 	for _, candidate := range modules {
 		if wantKey != "" && capabilityKey(candidate) == wantKey {
@@ -221,11 +253,13 @@ func closestCapability(want string, modules []string) string {
 	}
 	return ""
 }
+
 func capabilityKey(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.TrimPrefix(s, "lib")
 	return strings.NewReplacer("-", "", "_", "", ".", "").Replace(s)
 }
+
 func editDistance(a, b string) int {
 	prev := make([]int, len(b)+1)
 	for j := range prev {
@@ -246,6 +280,9 @@ func editDistance(a, b string) int {
 	return prev[len(b)]
 }
 
+// toolchainQuestion is the pause a build stops on when the plan's toolchain
+// is not on the machine. A repeated pause says explicitly that the answer did
+// not change PATH, rather than presenting the same question as new.
 func toolchainQuestion(taskID string, missing []string, recheck bool) *tools.PendingQuestion {
 	details := make([]string, 0, len(missing))
 	for _, item := range missing {
@@ -256,7 +293,7 @@ func toolchainQuestion(taskID string, missing []string, recheck bool) *tools.Pen
 			detail += " is not on PATH"
 		}
 		if eq := equivalentCommand(item); eq != "" {
-			detail += fmt.Sprintf("; %s is available (install python-is-python3, or change the plan to cmd:%s)", eq, eq)
+			detail += fmt.Sprintf("; %s is available (install a compatible %s command, or change the plan to cmd:%s)", eq, binaryOf(item), eq)
 		}
 		details = append(details, detail)
 	}
@@ -267,6 +304,8 @@ func toolchainQuestion(taskID string, missing []string, recheck bool) *tools.Pen
 	return &tools.PendingQuestion{ID: "toolchain-" + taskID, Question: fmt.Sprintf("%s: %s. Install them and continue, or change the plan.", prefix, strings.Join(details, "; ")), Options: []string{"Installed — continue", "Change the plan (revise it) instead"}}
 }
 
+// missingToolchainFor loads the plan and reports the declared tools this
+// task's milestone needs that are not on PATH.
 func (s *Service) missingToolchainFor(docsRoot, taskID string) []string {
 	plan, err := artifact.Load(docsRoot, artifact.KindPlan)
 	if err != nil {
@@ -289,6 +328,10 @@ func taskField(projectRoot, taskID, field string) string {
 	}
 	return ""
 }
+
+// taskVerificationCommand accepts the plan's deliberately narrow syntax: the
+// command is the first backtick-delimited value. Prose after it explains the
+// assertion to a person but is never interpreted by a shell.
 func taskVerificationCommand(projectRoot, taskID string) string {
 	value := taskField(projectRoot, taskID, "verification")
 	if value == "" {
@@ -301,19 +344,27 @@ func taskVerificationCommand(projectRoot, taskID string) string {
 	}
 	return ""
 }
+
 func taskArtifactFiles(projectRoot, taskID, field string) []string {
 	value := taskField(projectRoot, taskID, field)
 	var files []string
 	for _, item := range strings.Split(value, ",") {
 		item = strings.TrimSpace(item)
-		if strings.HasPrefix(strings.ToLower(item), "file:") {
-			if path := strings.TrimSpace(item[len("file:"):]); path != "" {
-				files = append(files, path)
-			}
+		if !strings.HasPrefix(strings.ToLower(item), "file:") {
+			continue
+		}
+		if path := strings.TrimSpace(item[len("file:"):]); path != "" {
+			files = append(files, path)
 		}
 	}
 	return files
 }
+
+// taskDependencyProducedFiles returns the concrete files supplied by the
+// accepted dependency closure. RunStart already refuses unmet dependencies,
+// so this is build evidence, not speculative future work. Keeping these files
+// in the gate context lets a stack adapter notice an accepted implementation
+// that silently disappeared from the build graph.
 func taskDependencyProducedFiles(projectRoot, taskID string) []string {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
@@ -358,6 +409,7 @@ func taskDependencyProducedFiles(projectRoot, taskID string) []string {
 	sort.Strings(files)
 	return files
 }
+
 func artifactFiles(value string) []string {
 	var files []string
 	for _, item := range strings.Split(value, ",") {
@@ -373,6 +425,10 @@ func artifactFiles(value string) []string {
 
 var acceptanceProbeLine = regexp.MustCompile("^(?:[-*]\\s+|[0-9]+[.)]\\s+)(?:[^`]*)`([^`]+)`\\s*$")
 
+// taskAcceptanceProbes reads the optional one-command-per-slice executable
+// examples from the accepted plan. They travel through the same human gate as
+// Verification and run in the same bounded verifier, rather than becoming
+// ad-hoc shell suggestions in a model prompt.
 func taskAcceptanceProbes(projectRoot, taskID string) []string {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
@@ -401,8 +457,8 @@ func taskAcceptanceProbes(projectRoot, taskID string) []string {
 			in = false
 		}
 		if in {
-			if m := acceptanceProbeLine.FindStringSubmatch(trimmed); m != nil {
-				probes = append(probes, strings.TrimSpace(m[1]))
+			if match := acceptanceProbeLine.FindStringSubmatch(trimmed); match != nil {
+				probes = append(probes, strings.TrimSpace(match[1]))
 			}
 		}
 	}
