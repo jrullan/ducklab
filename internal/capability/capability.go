@@ -151,9 +151,6 @@ type Contributions struct {
 type LaneHints struct {
 	TestRoots             []string
 	TestRegistrationFiles []string
-	// TestExtensions identify source/test files served by this stack. They let
-	// promotion select hints for the portion's stack in a polyglot project.
-	TestExtensions []string
 }
 
 // Profile is the deterministic composition of all matching providers.
@@ -163,10 +160,6 @@ type Profile struct {
 	RunCommands []RunCandidate
 	ReviewRules []ReviewRule
 	LaneHints   LaneHints
-	// StackLaneHints retains provider attribution that the aggregate LaneHints
-	// intentionally omits. Promotion uses it to avoid borrowing another stack's
-	// test registration file.
-	StackLaneHints map[string]LaneHints
 }
 
 // Provider names one reusable project or stack capability. Optional detector
@@ -270,7 +263,7 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 	if err != nil {
 		return Profile{}, err
 	}
-	profile := Profile{StackLaneHints: map[string]LaneHints{}}
+	var profile Profile
 	var gates []GateCandidate
 	for _, id := range ids {
 		detector, ok := r.providers[id].(Detector)
@@ -284,10 +277,6 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 		}
 		profile.LaneHints.TestRoots = append(profile.LaneHints.TestRoots, contribution.LaneHints.TestRoots...)
 		profile.LaneHints.TestRegistrationFiles = append(profile.LaneHints.TestRegistrationFiles, contribution.LaneHints.TestRegistrationFiles...)
-		profile.LaneHints.TestExtensions = append(profile.LaneHints.TestExtensions, contribution.LaneHints.TestExtensions...)
-		if len(contribution.Detection.Evidence) > 0 {
-			profile.StackLaneHints[id] = contribution.LaneHints
-		}
 		gates = append(gates, contribution.Gates...)
 		profile.RunCommands = append(profile.RunCommands, contribution.RunCommands...)
 	}

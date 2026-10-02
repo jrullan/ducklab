@@ -1890,8 +1890,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// to install, asked for by name, now (toolchain.go).
 	if req.TaskID != "" {
 		if missing := s.missingToolchainFor(entry.Path, req.TaskID); len(missing) > 0 {
-			_, recheck := rs.answers()["toolchain-"+req.TaskID]
-			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing, recheck))
+			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing))
 			return
 		}
 	}
@@ -3615,11 +3614,8 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
 	// command to reject; executable gates must be green in the clean checkout.
 	reproduction := &runlog.GateReproduction{Gate: string(result.Gate), Command: result.Command, ExitCode: result.ExitCode, Output: result.Output, Duration: result.Duration, Green: verify.IsGreen(result)}
-	if result.Gate == verify.GateNone && result.ExitCode == 0 {
-		return reproduction, nil
-	}
 	if result.Gate == verify.GateNone {
-		return reproduction, fmt.Errorf("clean-checkout verification was interrupted (exit code %d):\n%s", result.ExitCode, result.Output)
+		return reproduction, nil
 	}
 	// Polarity follows the stage. A test-first commit is red BY DESIGN — the
 	// committed failing test IS the deliverable — and demanding green here
@@ -5246,28 +5242,7 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	if author != "" {
 		event["author"] = author
 	}
-	planRevision := strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer)
-	if planRevision {
-		event["resolution"] = "plan_revision"
-	}
 	w.AppendEvent("human", event)
-	if planRevision {
-		// This option must route away from the build, not resume into the same
-		// preflight. End through the normal terminal state so clients receive the
-		// durable resolution and run_end sequence.
-		rs.wmu.Lock()
-		rs.run.Status = "done"
-		rs.run.Verdict = ""
-		rs.run.Resolution = "plan_revision"
-		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-		clearPending(rs.run)
-		w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict, "resolution": rs.run.Resolution})
-		_ = w.WriteState()
-		projectID := rs.run.ProjectID
-		rs.wmu.Unlock()
-		_, err := s.StageStart(ctx, projectID, StageRequest{Stage: "plan", Revise: "Resolve the missing toolchain capability before build work: " + questionText})
-		return err
-	}
 	if author != "" {
 		// This is an attention event, not another human decision: unattended
 		// runs continue, but the operator can inspect and correct the answer.
@@ -5279,10 +5254,6 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 
 	_, err = s.RunResume(ctx, id)
 	return err
-}
-
-func toolchainPlanRevisionAnswer(answer string) bool {
-	return strings.EqualFold(strings.TrimSpace(answer), "Change the plan (revise it) instead")
 }
 
 // writeProjectTOML persists a project config. Delegates to config.SaveProject

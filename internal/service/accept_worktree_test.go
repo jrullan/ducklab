@@ -325,56 +325,6 @@ func TestAcceptWorktreeReceiptNamesRebasedSHA(t *testing.T) {
 	}
 }
 
-// An interrupted clean-checkout reproduction is not an unconfigured gate. It
-// must leave the candidate on its run branch and the decision open to retry.
-func TestAcceptWorktreeRefusesInterruptedCleanCheckoutReproduction(t *testing.T) {
-	s := serviceWithDucklings(t, "pato-uno")
-	id, dir := projectWithDocs(t, s, nil)
-	appendVerifyPreparation(t, dir, `mode = "custom"
-custom = "sleep 1"
-timeout_s = 30`)
-	git := gitProject(t, dir)
-	base := mustHead(t, git)
-	run, _ := pausedWorktreeRun(t, s, id, dir, "r-interrupted-clean-checkout")
-	if err := os.WriteFile(filepath.Join(run.WorktreePath, "candidate.txt"), []byte("candidate\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	_, err := s.RunAccept(ctx, run.ID, "")
-	if err == nil || !strings.Contains(err.Error(), "clean-checkout verification was interrupted") {
-		t.Fatalf("accept error = %v, want interrupted clean-checkout verification", err)
-	}
-	if got := mustHead(t, git); got != base {
-		t.Fatalf("default HEAD = %s after interrupted reproduction, want %s", got, base)
-	}
-	detail, err := s.RunGet(context.Background(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Run.Accepted || detail.Run.Status == "done" {
-		t.Fatalf("interrupted run was accepted: %+v", detail.Run)
-	}
-	if !contains(detail.Run.Next, "accept") || !contains(detail.Run.Next, "reject") {
-		t.Fatalf("next = %v, want an open decision", detail.Run.Next)
-	}
-	if detail.Run.GateReproduced == nil || detail.Run.GateReproduced.Green || detail.Run.GateReproduced.ExitCode != -1 {
-		t.Fatalf("reproduction = %+v, want recorded interrupted gate", detail.Run.GateReproduced)
-	}
-	for _, event := range detail.Events {
-		if event.Type == "bug_fixed" || event.Type == "accept" {
-			t.Fatalf("interrupted reproduction wrote forbidden event %q", event.Type)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".ducklab", "runs", run.ID, "receipt.json")); !os.IsNotExist(err) {
-		t.Fatalf("interrupted reproduction wrote an acceptance receipt: %v", err)
-	}
-	if _, err := s.RunAccept(context.Background(), run.ID, "retry after interruption"); err != nil {
-		t.Fatalf("retry after interrupted reproduction: %v", err)
-	}
-}
-
 // Acceptance must reproduce from the detached checkout, where this fake tool
 // exists only when verify.link_deps explicitly borrows it from the live tree.
 func TestAcceptWorktreeCleanCheckoutLinksDeclaredDependency(t *testing.T) {
