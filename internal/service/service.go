@@ -5243,16 +5243,22 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	if author != "" {
 		event["author"] = author
 	}
+	planRevision := strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer)
+	if planRevision {
+		event["resolution"] = "plan_revision"
+	}
 	w.AppendEvent("human", event)
-	if strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer) {
+	if planRevision {
 		// This option must route away from the build, not resume into the same
-		// preflight. The paused build has no live worker to unwind.
+		// preflight. End through the normal terminal state so clients receive the
+		// durable resolution and run_end sequence.
 		rs.wmu.Lock()
-		rs.run.Status = "superseded"
+		rs.run.Status = "done"
 		rs.run.Verdict = ""
+		rs.run.Resolution = "plan_revision"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
-		w.AppendEvent("human", map[string]interface{}{"action": "plan_revision_requested", "task_id": rs.run.TaskID, "detail": questionText})
+		w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict, "resolution": rs.run.Resolution})
 		_ = w.WriteState()
 		projectID := rs.run.ProjectID
 		rs.wmu.Unlock()

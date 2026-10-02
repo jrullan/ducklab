@@ -250,8 +250,13 @@ func toolchainQuestion(taskID string, missing []string, recheck bool) *tools.Pen
 	details := make([]string, 0, len(missing))
 	for _, item := range missing {
 		detail := item
+		if recheck {
+			detail += " is still not on PATH after your answer"
+		} else {
+			detail += " is not on PATH"
+		}
 		if eq := equivalentCommand(item); eq != "" {
-			detail += fmt.Sprintf(" is still not on PATH; %s is available (install python-is-python3, or change the plan to cmd:%s)", eq, eq)
+			detail += fmt.Sprintf("; %s is available (install python-is-python3, or change the plan to cmd:%s)", eq, eq)
 		}
 		details = append(details, detail)
 	}
