@@ -716,14 +716,13 @@ func TestTheProbeRuleIsStatedWhereverProbesAreWritten(t *testing.T) {
 	if want := fmt.Sprintf("Use 1-%d operations", MaxPlanManifestPatchOperations); !strings.Contains(repair, want) || strings.Contains(repair, "1-12") {
 		t.Errorf("repair states the wrong operation limit:\n%s", repair)
 	}
-	// The patch prompt's example is itself a valid patch: equal slices and
-	// probes per task, distinct probes, and add_task before replace_task.
-	start := strings.Index(planManifestPatchPrompt, `{"operations":[`)
-	end := strings.Index(planManifestPatchPrompt, "]}\n\nRules:")
-	if start < 0 || end < 0 {
-		t.Fatal("cannot find the patch example")
+	// Both texts show the one shared example (applied to the real seed in
+	// strategy's TestThePatchExampleAppliesToTheSeededManifest).
+	example := PlanManifestPatchExample()
+	if !strings.Contains(planManifestPatchPrompt, example) || !strings.Contains(repair, example) {
+		t.Error("the patch prompt and the repair do not both show the shared example")
 	}
-	var example struct {
+	var parsed struct {
 		Operations []struct {
 			Op   string `json:"op"`
 			Task *struct {
@@ -732,16 +731,13 @@ func TestTheProbeRuleIsStatedWhereverProbesAreWritten(t *testing.T) {
 			} `json:"task"`
 		} `json:"operations"`
 	}
-	if err := json.Unmarshal([]byte(planManifestPatchPrompt[start:end+2]), &example); err != nil {
-		t.Fatalf("patch example is not JSON: %v", err)
+	if err := json.Unmarshal([]byte(example), &parsed); err != nil {
+		t.Fatalf("example is not JSON: %v", err)
 	}
-	firstTaskOp := ""
-	for _, op := range example.Operations {
-		if op.Task == nil {
+	for _, op := range parsed.Operations {
+		if op.Op != "add_task" || op.Task == nil {
+			t.Errorf("a first patch on a seed only adds tasks; got %q", op.Op)
 			continue
-		}
-		if firstTaskOp == "" {
-			firstTaskOp = op.Op
 		}
 		seen := map[string]bool{}
 		for _, p := range op.Task.Probes {
@@ -751,10 +747,7 @@ func TestTheProbeRuleIsStatedWhereverProbesAreWritten(t *testing.T) {
 			seen[p] = true
 		}
 		if len(op.Task.Slices) != len(op.Task.Probes) {
-			t.Errorf("example %s has %d slices and %d probes", op.Op, len(op.Task.Slices), len(op.Task.Probes))
+			t.Errorf("example has %d slices and %d probes", len(op.Task.Slices), len(op.Task.Probes))
 		}
-	}
-	if firstTaskOp != "add_task" {
-		t.Errorf("the example's first task operation is %q; an empty seeded manifest has nothing to replace", firstTaskOp)
 	}
 }

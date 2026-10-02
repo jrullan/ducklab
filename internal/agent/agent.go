@@ -1763,19 +1763,31 @@ Rules:
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
 - The next architect turn receives this validated manifest and renders the full plan.`
 
+// planManifestPatchExample is the one example patch, shown by the patch
+// prompt and the patch repair. It must apply cleanly to the seeded manifest
+// (milestone M-01, no tasks), which is where the seeded plan flow starts: an
+// example that added M-01 again or replaced and deleted tasks a fresh seed
+// does not have failed on the first patch (review of #133). The second task
+// changes what the first creates, so it shows modifies; each task has one
+// distinct probe per slice.
+const planManifestPatchExample = `{"operations":[
+ {"op":"add_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome 1","observable outcome 2"],"acceptance_probes":["command that checks outcome 1","command that checks outcome 2"],"produces":["file:path/created"],"modifies":[],"consumes":[],"verification":"executable command"}},
+ {"op":"add_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-002"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["command that checks that outcome"],"produces":[],"modifies":["file:path/created"],"consumes":[],"verification":"executable command"}}
+]}`
+
+// PlanManifestPatchExample returns the example patch the prompts show, so a
+// test can apply it to the real seed.
+func PlanManifestPatchExample() string { return planManifestPatchExample }
+
 const planManifestPatchPrompt = `You are the plan topology repair architect. Ducklab already owns a canonical
 JSON manifest. Change only the tasks implicated by the review findings.
 
-Reply with exactly one JSON object:
-{"operations":[
- {"op":"add_milestone","milestone_id":"M-01","milestone_title":"short title"},
- {"op":"add_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome 1","observable outcome 2"],"acceptance_probes":["command that checks outcome 1","command that checks outcome 2"],"produces":["file:path"],"modifies":[],"consumes":[],"verification":"executable command"}},
- {"op":"replace_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-002"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["command that checks that outcome"],"produces":[],"modifies":["file:path"],"consumes":[],"verification":"executable command"}},
- {"op":"delete_task","task_id":"T-003"}
-]}
+Reply with exactly one JSON object, for example (a first patch on the seeded manifest, which has milestone M-01 and no tasks):
+` + planManifestPatchExample + `
 
 Rules:
-- add_task creates a task; replace_task and delete_task act only on task IDs that already exist in the canonical manifest (an empty manifest has none: start with add_milestone and add_task).
+- add_task creates a task in an existing milestone; replace_task and delete_task act only on task IDs that already exist in the canonical manifest. A fresh seeded manifest has milestone M-01 and no tasks: start with add_task into M-01.
+- The other operations: {"op":"replace_task", ... same fields as add_task, for an existing task_id}; {"op":"delete_task","task_id":"T-NNN"}; {"op":"add_milestone","milestone_id":"M-NN","milestone_title":"short title"} only for a milestone that does not exist yet (never M-01 on a seeded manifest).
 ` + acceptanceProbeRule + `
 - Use replace_task for an existing task whose complete contract must change.
 - Use add_milestone with only milestone_id and milestone_title, plus add_task
@@ -2567,10 +2579,11 @@ All six native_checks values are required and must name concrete final-code evid
 
 What was wrong: %v
 
-Reply with ONLY one JSON object containing 1-%d operations: {"operations":[{"op":"add_milestone","milestone_id":"M-NN","milestone_title":"short title"},{"op":"add_task|replace_task","task_id":"T-NNN","milestone_id":"M-NN","task":{"id":"T-NNN","title":"short action","implements":["SPEC-NNN"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome 1","observable outcome 2"],"acceptance_probes":["command that checks outcome 1","command that checks outcome 2"],"produces":["file:path"],"modifies":[],"consumes":[],"verification":"executable command"}},{"op":"delete_task","task_id":"T-NNN"}]}
+Reply with ONLY one JSON object containing 1-%d operations, shaped like this example:
+%s
 
 Use 1-%d operations, one per task_id. add_task creates a task; replace_task and delete_task act only on existing task IDs. A split replaces the original and adds new task IDs. Add/replace operations require a complete task and an existing milestone. Delete accepts only op and task_id. Return no full manifest, Markdown, or prose.
-%s`, parseErr, MaxPlanManifestPatchOperations, MaxPlanManifestPatchOperations, acceptanceProbeRule)
+%s`, parseErr, MaxPlanManifestPatchOperations, planManifestPatchExample, MaxPlanManifestPatchOperations, acceptanceProbeRule)
 	}
 	return fmt.Sprintf(`Your reply did not satisfy the required output format.
 

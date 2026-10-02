@@ -151,3 +151,28 @@ func containsString(values []string, target string) bool {
 	}
 	return false
 }
+
+// Review of #133: the example patch the prompts show must apply cleanly to
+// the seeded manifest the first architect turn receives — the earlier
+// example added M-01 again and replaced/deleted tasks a fresh seed does not
+// have. Applied here with the engine's own transaction and validation.
+func TestThePatchExampleAppliesToTheSeededManifest(t *testing.T) {
+	seed, err := seedPlanManifest([]PlanSeedSpec{
+		{ID: "SPEC-001", Title: "Delivery", Priority: "must"},
+		{ID: "SPEC-002", Title: "Behaviour", Priority: "must"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := agent.ParseContract("json:plan_manifest_patch", agent.PlanManifestPatchExample())
+	if err != nil {
+		t.Fatalf("the example is not a valid patch: %v", err)
+	}
+	patched, n, err := applyPlanManifestPatch(seed, parsed.(*agent.PlanManifestPatch))
+	if err != nil {
+		t.Fatalf("the example does not apply to the seed: %v", err)
+	}
+	if n != 2 || len(patched.Milestones) != 1 || len(patched.Milestones[0].Tasks) != 2 {
+		t.Fatalf("applied %d operations, manifest %+v", n, patched)
+	}
+}
