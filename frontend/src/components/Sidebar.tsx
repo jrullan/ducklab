@@ -62,14 +62,14 @@ export function Sidebar({
             {projects.map((p) => <option key={p.id} value={p.id}>{(p.name || p.id) + (p.missing ? " (missing)" : "")}</option>)}
           </select>
         )}
+        {project?.branch && project.branch !== baseBranch && (
+          <div className="mt-2 truncate text-xs text-ink-muted">on branch {project.branch} — not the base</div>
+        )}
         {/* Every new project starts from the guided form, not only the
             first (the folder form stays in Settings for existing code). */}
         <a href={routeHref({ name: "new-project" })} data-testid="sidebar-new-project" className={`mt-2 block text-xs ${route.name === "new-project" ? "text-ink" : "text-ink-muted hover:text-ink"}`}>
           + New project
         </a>
-        {project?.branch && project.branch !== baseBranch && (
-          <div className="mt-2 truncate text-xs text-ink-muted">on branch {project.branch} — not the base</div>
-        )}
       </div>
       <nav className="mt-4 flex flex-col gap-1" aria-label="Primary navigation">
         {zones.map((z) => {

@@ -53,7 +53,7 @@ export function NewProject({ client, onStarted }: { client: EngineClient; onStar
           <StartProject
             client={client}
             onStarted={(result) => (result.run_id ? onStarted(result) : setStalled(result))}
-            modelWarning={noModel ? "No model is ready to draft with. You can create the project now; add a model in Settings → ducklings to draft the requirements." : undefined}
+            modelWarning={noModel ? "No model is configured to draft with. You can create the project now; add a model in Settings → ducklings to draft the requirements." : undefined}
           />
         </div>
       )}

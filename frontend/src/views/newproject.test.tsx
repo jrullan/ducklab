@@ -41,7 +41,7 @@ describe("NewProject", () => {
     const start = vi.fn(async () => ({ project: { id: "calc", name: "calc", path: "/p/calc" }, intake_error: "no model" }));
     const onStarted = vi.fn();
     render(<NewProject client={client([], start)} onStarted={onStarted} />);
-    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("No model is ready to draft with");
+    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("No model is configured to draft with");
     fireEvent.change(screen.getByTestId("start-name"), { target: { value: "calc" } });
     fireEvent.click(screen.getByTestId("start-submit"));
     expect(await screen.findByTestId("new-project-stalled")).toHaveTextContent("could not start: no model");
