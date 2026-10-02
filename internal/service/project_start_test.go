@@ -48,6 +48,35 @@ func TestProjectInitAsksForAGitIdentityAndSetsItForThatRepositoryOnly(t *testing
 	}
 }
 
+// B-467: a fresh machine may still default git init to master, while Ducklab's
+// project contract defaults to main. The repository is born on the contract's
+// branch, independent of the machine preference.
+func TestProjectInitUsesTheConfiguredBaseAsInitialBranch(t *testing.T) {
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(global, []byte("[init]\n\tdefaultBranch = master\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := filepath.Join(t.TempDir(), "calc")
+	if _, err := s.ProjectInit(context.Background(), InitRequest{
+		Path: dir, Name: "calc", GitInit: true, GitName: "Ada", GitEmail: "ada@example.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := vcs.New(dir).CurrentBranch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != cfg.Git.BaseBranch || branch != "main" {
+		t.Fatalf("branch = %q, configured base = %q", branch, cfg.Git.BaseBranch)
+	}
+}
+
 // B-456: one verb from an idea to a drafting run, with a default folder.
 func TestProjectStartCreatesInTheDefaultFolderAndStartsTheIntake(t *testing.T) {
 	home := t.TempDir()

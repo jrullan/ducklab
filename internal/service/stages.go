@@ -109,6 +109,10 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// Intake retries keep the delivery constraints chosen at project creation,
+	// and relative references are project-relative rather than dependent on the
+	// engine daemon's working directory (B-474).
+	req.Refs = normalizeStageRefs(entry.Path, req.Stage, req.Refs)
 	// Refuse an impossible document run before it acquires an id, a queue
 	// entry, and a misleading failed-run record. The desktop normally prevents
 	// these launches, but CLI and MCP callers deserve the same invariant.
@@ -611,6 +615,37 @@ func writeStageRequest(runDir string, req StageRequest) {
 	if data, err := json.Marshal(req); err == nil {
 		_ = os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
 	}
+}
+
+// normalizeStageRefs gives references a stable meaning before the request is
+// persisted. The project preset is part of every intake, not only the first
+// ProjectStart call, so a failed first model can be retried without silently
+// losing the selected delivery contract.
+func normalizeStageRefs(projectRoot, stageName string, refs []string) []string {
+	all := append([]string(nil), refs...)
+	if stageName == "intake" {
+		preset := filepath.Join(projectRoot, ".ducklab", "preset.md")
+		if info, err := os.Stat(preset); err == nil && !info.IsDir() {
+			all = append(all, preset)
+		}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(all))
+	for _, ref := range all {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if ref != "~" && !strings.HasPrefix(ref, "~/") && !filepath.IsAbs(ref) {
+			ref = filepath.Join(projectRoot, ref)
+		}
+		ref = filepath.Clean(ref)
+		if !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 // loadStageRequest rebuilds a stage run's request from its record. The false

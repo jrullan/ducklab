@@ -291,3 +291,62 @@ func TestAnEmptyRenderTableRunsNoRenderStep(t *testing.T) {
 		t.Fatal("[run].command was launched by the gate")
 	}
 }
+
+// B-465: the product smoke is part of the blocking final gate. A red smoke
+// cannot leave the semantic verdict at PASSED merely because the test command
+// itself was green.
+func TestAFailingProductSmokeFailsTheBuildVerdict(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"add", "-A"}, {"commit", "-q", "-m", "seed", "--allow-empty"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"run.smoke":        "exit 7",
+		"run.smoke_expect": "exit",
+		"verify.mode":      "custom",
+		"verify.custom":    "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	native := true
+	for did, duck := range s.cfg.Ducklings {
+		duck.Caps.NativeTools = &native
+		s.cfg.Ducklings[did] = duck
+	}
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(req provider.ChatRequest, call int) *provider.ChatResponse {
+		var message provider.Message
+		finish := provider.FinishStop
+		if call == 1 {
+			tc := provider.ToolCall{ID: "call-1", Type: "function"}
+			tc.Function.Name, tc.Function.Arguments = "fs_write", `{"path":"index.html","content":"<p>calc</p>\n"}`
+			message.ToolCalls = []provider.ToolCall{tc}
+			finish = provider.FinishToolCalls
+		} else {
+			message.Content = "Done."
+		}
+		return &provider.ChatResponse{Choices: []provider.Choice{{Message: message, FinishReason: finish}}}
+	}
+	r, err := s.RunStart(context.Background(), id, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.waitForRun(context.Background(), r.ID); err != nil && !strings.Contains(err.Error(), "waiting for a human") {
+		t.Fatal(err)
+	}
+	detail, err := s.RunGet(context.Background(), r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Verdict != "FAILED" || !strings.Contains(detail.Run.Failure, "blocking product smoke") {
+		t.Fatalf("verdict = %s, failure = %q", detail.Run.Verdict, detail.Run.Failure)
+	}
+}

@@ -94,8 +94,27 @@ func (g *Git) Init() error {
 // before the root commit, so the commit can be made on a machine with no
 // identity of its own.
 func (g *Git) InitWithIdentity(name, email string) error {
+	return g.InitWithIdentityOnBranch(name, email, "")
+}
+
+// InitWithIdentityOnBranch is InitWithIdentity with an explicit initial
+// branch. Passing the project's configured base branch keeps a fresh
+// repository's HEAD and project.toml in agreement even when the machine's
+// init.defaultBranch is still "master" (B-467).
+func (g *Git) InitWithIdentityOnBranch(name, email, branch string) error {
 	if _, err := g.run("init"); err != nil {
 		return err
+	}
+	// `git init -b` was added in Git 2.28. Ducklab still supports machines
+	// with older Git releases, and symbolic-ref names the unborn branch just
+	// as precisely without depending on that flag. Do this before the root
+	// commit; once history exists an adopted repository keeps its current HEAD.
+	if branch = strings.TrimSpace(branch); branch != "" {
+		if sha, err := g.HeadSHA(); err != nil || strings.TrimSpace(sha) == "" {
+			if _, err := g.run("symbolic-ref", "HEAD", "refs/heads/"+shellEscape(branch)); err != nil {
+				return fmt.Errorf("set initial branch %q: %w", branch, err)
+			}
+		}
 	}
 	if name != "" && email != "" {
 		if _, err := g.run("config", "user.name", shellEscape(name)); err != nil {

@@ -156,7 +156,7 @@ reviewer = ["pata"]
 
 func TestDoctorReportsConfiguredRemoteMissingFromRepository(t *testing.T) {
 	root := t.TempDir()
-	if out, err := exec.Command("git", "init", root).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "-b", "master", root).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	writeDoctorProject(t, root, `schema = 1
@@ -185,8 +185,44 @@ on_accept = "push"
 	want := []Finding{{
 		Key: "remote.on_accept", Proposed: "nothing",
 		Reason: "no remote 'origin' in this repository — accepts commit locally only",
+	}, {
+		Key: "git.base_branch", Proposed: "master",
+		Reason: "configured base branch 'main' does not exist; use the repository's current branch",
 	}}
 	if !reflect.DeepEqual(findings, want) {
+		t.Fatalf("Doctor findings = %#v, want %#v", findings, want)
+	}
+}
+
+func TestDoctorReportsBaseBranchThatDoesNotExist(t *testing.T) {
+	root := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "legacy", root)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	writeDoctorProject(t, root, `schema = 1
+id = "legacy"
+name = "Legacy"
+autonomy = "guarded"
+
+[git]
+base_branch = "main"
+
+[verify]
+mode = "none"
+
+[budget]
+max_usd = 5
+
+[shell]
+allow_prefixes = []
+`)
+	findings, err := Doctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Finding{Key: "git.base_branch", Proposed: "legacy", Reason: "configured base branch 'main' does not exist; use the repository's current branch"}
+	if len(findings) != 1 || findings[0] != want {
 		t.Fatalf("Doctor findings = %#v, want %#v", findings, want)
 	}
 }

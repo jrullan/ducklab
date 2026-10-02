@@ -143,9 +143,10 @@ func Run(args []string) int {
 	}
 
 	// MCP stdio serving manages its own engine connection and must not trigger
-	// the ordinary CLI discovery path (which would hide its exit contract).
+	// the ordinary command dispatch. It does use the same discovery/autostart
+	// contract as every other client command (B-472).
 	if noun == "mcp" {
-		return mcpCmd(verb)
+		return mcpCmd(verb, noAutostart)
 	}
 
 	if noun == "proof" {
@@ -162,7 +163,7 @@ func Run(args []string) int {
 
 	switch noun {
 	case "mcp":
-		return mcpCmd(verb)
+		return mcpCmd(verb, noAutostart)
 	case "project":
 		return projectCmd(verb, cmdArgs, repo)
 	case "duckling":

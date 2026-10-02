@@ -104,7 +104,12 @@ func TestMCPBBundleIsInstallableLinuxAMD64StdioServer(t *testing.T) {
 	if filepath.Clean(program) != filepath.Join(extract, manifest.Server.EntryPoint) {
 		t.Fatalf("mcp_config.command %q must execute entry_point %q", manifest.Server.MCPConfig.Command, manifest.Server.EntryPoint)
 	}
-	invoke := exec.Command(program, manifest.Server.MCPConfig.Args...)
+	// Keep this packaging smoke test hermetic: the normal manifest invocation
+	// auto-starts ducklab-engine, while --no-autostart preserves a quick way to
+	// verify that the extracted stdio entry point is executable without leaving
+	// a daemon behind on the test host.
+	args := append([]string{"--no-autostart"}, manifest.Server.MCPConfig.Args...)
+	invoke := exec.Command(program, args...)
 	invoke.Env = append(os.Environ(), "XDG_STATE_HOME="+filepath.Join(extract, "state"))
 	output, err := invoke.CombinedOutput()
 	if err == nil {
