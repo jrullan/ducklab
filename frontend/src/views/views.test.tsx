@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { Settings } from "./Settings";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
@@ -501,6 +501,33 @@ describe("RunView — asking a stage for changes", () => {
 
     await waitFor(() => expect(sent.path).toBe("/v1/projects/p/stages/spec"));
     expect(JSON.parse(sent.body!).revise).toBe("SPEC-004 should lock the opposite vertex too");
+  });
+
+  // Jose (TI-36X): a project's first spec read "Accepting replaces the
+  // approved spec". The engine now says whether an approved document exists.
+  it("words the decision on a first document as approving it, not replacing one", async () => {
+    show({ stage: "spec", project_id: "p", pending_data: { approved_exists: false } });
+    render(<RunView runId="r-1" client={recording({})} />);
+    const consequence = (await screen.findByTestId("decision-consequence")).textContent ?? "";
+    expect(consequence).toContain("approves this as the project's first spec");
+    expect(consequence).not.toContain("replaces the approved");
+  });
+
+  it("keeps the replacing wording when an approved document exists, or the run predates the flag", async () => {
+    for (const pending_data of [{ approved_exists: true }, {}]) {
+      cleanup();
+      show({ stage: "spec", project_id: "p", pending_data });
+      render(<RunView runId="r-1" client={recording({})} />);
+      expect((await screen.findByTestId("decision-consequence")).textContent).toContain("replaces the approved spec");
+    }
+  });
+
+  it("says discarding a blocked first draft leaves the project without the document", async () => {
+    show({ stage: "spec", project_id: "p", verdict: "FAILED", next: ["request_changes", "reject"], pending_data: { approved_exists: false, review_verdict: "request-changes", review_findings: 1 } });
+    render(<RunView runId="r-1" client={recording({})} />);
+    const consequence = (await screen.findByTestId("decision-consequence")).textContent ?? "";
+    expect(consequence).toContain("Discard draft leaves the project without a spec");
+    expect(consequence).not.toContain("keeps the approved spec");
   });
 
   it("blocks acceptance when the final document reviewer still requests changes", async () => {

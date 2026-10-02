@@ -1190,6 +1190,38 @@ func TestSpecAmendmentGateKeepsUntouchedContractDebtAsNotice(t *testing.T) {
 	}
 }
 
+// Jose (TI-36X, a new project): a revision of a spec that was never accepted
+// showed "accepted spec does not use the current grammar". artifact.Load
+// answers a missing file with an empty document (grammar 0), and the
+// amendment path read it as an accepted legacy spec. With nothing approved
+// there is nothing to inherit: no notice, and a real defect still blocks
+// instead of being demoted to "inherited".
+func TestARevisionWithNoApprovedDocumentInheritsNothing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(artifact.DocsDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	clean, err := artifact.Parse("---\nkind: spec\ngrammar: 2\nversion: 1\n---\n\n## SPEC-001 — Delivery\n\n**Implements:** REQ-001\nbody\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockers, notices := proposalStructureGateFindings(root, &stage.Result{Kind: artifact.KindSpec, Proposed: clean}, true)
+	if len(blockers) != 0 || len(notices) != 0 {
+		t.Fatalf("a first spec revision inherited something: blockers %v, notices %v", blockers, notices)
+	}
+	if approvedDocumentExists(root, artifact.KindSpec) {
+		t.Fatal("a missing spec reads as approved")
+	}
+	defective, err := artifact.Parse("---\nkind: spec\ngrammar: 2\nversion: 1\n---\n\n## SPEC-005 — LCD\n\n**Implements:** REQ-004\n**Entry:** the caret\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockers, notices = proposalStructureGateFindings(root, &stage.Result{Kind: artifact.KindSpec, Proposed: defective}, true)
+	if len(notices) != 0 || !strings.Contains(strings.Join(blockers, "\n"), "unknown field **Entry:**") {
+		t.Fatalf("a real defect was not a blocker: blockers %v, notices %v", blockers, notices)
+	}
+}
+
 func TestProposalGateRetainsUnrelatedUnimplementedSpecAfterLocalizedFieldError(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{

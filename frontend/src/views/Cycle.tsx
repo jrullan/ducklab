@@ -834,7 +834,9 @@ export function Cycle({
                   ? `from ${artifact.proposal.ducklings.join(", ")}`
                   : undefined
               }
-              consequence={`replaces the approved ${active.kind} and closes the run`}
+              consequence={artifact.approved && (artifact.sections?.length ?? 0) > 0
+                ? `replaces the approved ${active.kind} and closes the run`
+                : `approves this as the project's first ${active.kind} and closes the run`}
               accepting={promoting}
               onAccept={() => void accept()}
               onReject={() => void reject()}
