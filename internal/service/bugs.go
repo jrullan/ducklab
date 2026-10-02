@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -944,6 +945,15 @@ func promotedPortionBody(b *store.Bug, portion promotionPortion, reopenContext s
 	return sb.String()
 }
 
+// reporterBoldFieldLabel moves the colon outside reporter-authored bold labels.
+// The artifact grammar reserves `**Key:**` for machine fields, while markdown
+// renders `**Key**:` equivalently for report context.
+var reporterBoldFieldLabel = regexp.MustCompile(`\*\*([^*\n]+):\*\*`)
+
+func reporterContext(body string) string {
+	return reporterBoldFieldLabel.ReplaceAllString(body, "**$1**:")
+}
+
 func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n", b.ID)
@@ -954,7 +964,7 @@ func promotedTaskBody(b *store.Bug, reopenContext string) string {
 	}
 	if strings.TrimSpace(b.Body) != "" {
 		sb.WriteString("## Reported\n\n")
-		sb.WriteString(strings.TrimSpace(b.Body))
+		sb.WriteString(strings.TrimSpace(reporterContext(b.Body)))
 		sb.WriteString("\n")
 	}
 	// The implementer's numbered work contract, in the same shape the plan
