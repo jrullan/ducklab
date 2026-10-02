@@ -54,12 +54,16 @@ describe("NewProject", () => {
   it("names the missing key when a configured model cannot reach its provider", async () => {
     render(<NewProject client={client([duckling({})], undefined, [provider({ api_key_env: "OPENROUTER_API_KEY", key_present: false })])} onStarted={vi.fn()} />);
     const warning = await screen.findByTestId("start-model-warning");
-    expect(warning).toHaveTextContent("or needs OPENROUTER_API_KEY");
+    expect(warning).toHaveTextContent("luna uses provider or, which needs OPENROUTER_API_KEY");
     expect(warning).not.toHaveTextContent("Add one in Settings → ducklings");
   });
 
-  it("names a provider that does not exist", async () => {
-    render(<NewProject client={client([duckling({ provider: "gone" })])} onStarted={vi.fn()} />);
-    expect(await screen.findByTestId("start-model-warning")).toHaveTextContent("providers that are not configured");
+  // Codex's combined case: an unrelated provider without its key must not
+  // mask the model's missing provider.
+  it("names a provider that does not exist, not an unrelated missing key", async () => {
+    render(<NewProject client={client([duckling({ provider: "gone" })], undefined, [provider({ id: "anthropic", api_key_env: "ANTHROPIC_API_KEY", key_present: false })])} onStarted={vi.fn()} />);
+    const warning = await screen.findByTestId("start-model-warning");
+    expect(warning).toHaveTextContent("luna uses provider gone, which is not configured");
+    expect(warning).not.toHaveTextContent("ANTHROPIC_API_KEY");
   });
 });
