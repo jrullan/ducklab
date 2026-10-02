@@ -56,6 +56,9 @@ describe("Projects", () => {
   it("will not create without a path", async () => {
     const client = clientWith([]);
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    // The guided start leads; the folder form is for existing code.
+    expect(screen.getByTestId("projects-new-project")).toHaveAttribute("href", "#/new");
+    expect(screen.getByText("Add an existing folder")).toBeInTheDocument();
     expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(true);
   });
 

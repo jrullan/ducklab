@@ -10,6 +10,7 @@
  * work from a list view is a tool nobody should point at a real repository.
  */
 
+import { routeHref } from "../app/routes";
 import { VisualCheckSettings } from "../components/VisualCheckSettings";
 import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, ConfigFinding, Duckling, EngineClient, GateStatus, Project } from "../api/client";
@@ -162,8 +163,20 @@ export function Projects({
   return (
     <div data-testid="projects-view" className="space-y-4">
       <ProjectsFolderPreference client={client} />
+      <section className="rounded-card border border-hairline p-3" data-testid="projects-start-new">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-ink">New project</h3>
+            <p className="text-xs text-ink-muted">Start from an idea: what to build, what kind of project, references. Ducklab creates the folder and drafts the requirements.</p>
+          </div>
+          <a href={routeHref({ name: "new-project" })} data-testid="projects-new-project" className="rounded border border-good px-3 py-1 text-sm text-good">
+            Start a new project
+          </a>
+        </div>
+      </section>
       <section className="rounded-card border border-hairline p-3">
-        <h3 className="mb-2 text-ink">New project</h3>
+        <h3 className="mb-1 text-ink">Add an existing folder</h3>
+        <p className="mb-2 text-xs text-ink-muted">Bring code that already exists (or a folder that is already a Ducklab project) under Ducklab.</p>
         <div className="flex flex-wrap items-center gap-2">
           <input
             aria-label="project folder"
@@ -207,7 +220,7 @@ export function Projects({
             data-testid="project-create"
             className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
           >
-            {busy ? "Creating…" : "Create"}
+            {busy ? "Adding…" : "Add folder"}
           </button>
         </div>
         {pathProblem && (

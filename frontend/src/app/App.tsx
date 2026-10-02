@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EngineClient, type Project } from "../api/client";
+import { EngineClient, type Project, type ProjectStartResult } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
@@ -8,6 +8,7 @@ import type { Run } from "../api/client";
 import { Sidebar } from "../components/Sidebar";
 import { Now } from "../views/Now";
 import { FirstRun } from "../views/FirstRun";
+import { NewProject } from "../views/NewProject";
 import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
@@ -133,7 +134,7 @@ function NoProject() {
   return (
     <p className="m-4 text-ink-muted" data-testid="cycle-no-project">
       No project yet.{" "}
-      <a href={routeHref({ name: "projects" })} className="text-ink underline">
+      <a href={routeHref({ name: "new-project" })} className="text-ink underline">
         Create one
       </a>
       .
@@ -161,6 +162,17 @@ export function App() {
   // conn first and the client one effect later; between the two, the old
   // client still answers (its requests retry through the reconnect).
   const [clientBase, setClientBase] = useState<string | null>(null);
+  // A started project becomes the selected one, and the person lands where
+  // the work is: the run drafting the requirements, or Documents when it
+  // could not start. The first project and every later one take this path.
+  const startedProject = (result: ProjectStartResult) => {
+    setProjectId(result.project.id);
+    try { localStorage.setItem("ducklab.project", result.project.id); } catch { /* storage may be unavailable */ }
+    void client?.projects().then((ps) => setProjects(ps));
+    location.hash = result.run_id
+      ? routeHref({ name: "run", id: result.run_id })
+      : routeHref({ name: "cycle" });
+  };
   // The engine this page talks to. State, not a constant: a restart hands
   // back fresh connection details and everything below rebuilds against them.
   const [conn, setConn] = useState<EngineConnection | null>(() =>
@@ -558,19 +570,11 @@ export function App() {
             ? <FirstRun
                 client={client}
                 connected={connection === "open"}
-                onStarted={(result) => {
-                  // The new project becomes the selected one, and the person
-                  // lands where the work is: the run drafting the requirements,
-                  // or Documents when it could not start.
-                  setProjectId(result.project.id);
-                  void client.projects().then((ps) => setProjects(ps));
-                  location.hash = result.run_id
-                    ? routeHref({ name: "run", id: result.run_id })
-                    : routeHref({ name: "cycle" });
-                }}
+                onStarted={startedProject}
               />
             : <p className="m-4 text-ink-muted" data-testid="now-choose-project">Choose a project in the sidebar.</p>
         )}
+        {route.name === "new-project" && client && <NewProject client={client} onStarted={startedProject} />}
         {route.name === "runs" && (
           <div className="p-4">
             <Runs runs={Object.values(runs)} />

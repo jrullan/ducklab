@@ -160,10 +160,10 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 	// Ducklab project at the path was opened and given a second intake under
 	// the new name).
 	if _, err := os.Stat(filepath.Join(path, ".ducklab", "project.toml")); err == nil {
-		return nil, fmt.Errorf("%s is already a Ducklab project; open it from Settings → Projects instead of creating it again", path)
+		return nil, fmt.Errorf("%s is already a Ducklab project; add it with Settings → Project management → Add an existing folder instead of creating it again", path)
 	}
 	if entries, err := os.ReadDir(path); err == nil && len(entries) > 0 {
-		return nil, fmt.Errorf("%s already contains files; choose an empty or new folder, or open it as an existing project from Settings → Projects", path)
+		return nil, fmt.Errorf("%s already contains files; choose an empty or new folder, or bring it in with Settings → Project management → Add an existing folder", path)
 	}
 	project, err := s.ProjectInit(ctx, InitRequest{
 		Path: path, Name: name, GitInit: true, GitName: req.GitName, GitEmail: req.GitEmail,
