@@ -420,9 +420,14 @@ func TestRepairPromptKeepsToolExchangeAndClosesTools(t *testing.T) {
 	}
 	repair := p.requests[2]
 	var transcript strings.Builder
+	var system strings.Builder
 	for _, msg := range repair.Messages {
 		transcript.WriteString(msg.Content)
 		transcript.WriteByte('\n')
+		if msg.Role == "system" {
+			system.WriteString(msg.Content)
+			system.WriteByte('\n')
+		}
 	}
 	for _, want := range []string{
 		`{"tool":"fs_read","args":{"path":"evidence.txt"}}`,
@@ -432,6 +437,11 @@ func TestRepairPromptKeepsToolExchangeAndClosesTools(t *testing.T) {
 	} {
 		if !strings.Contains(transcript.String(), want) {
 			t.Errorf("repair prompt lost %q:\n%s", want, transcript.String())
+		}
+	}
+	for _, forbidden := range []string{"## How to use tools", "## Your tools", "```ducklab", "@payload:"} {
+		if strings.Contains(system.String(), forbidden) {
+			t.Errorf("repair system prompt still teaches unavailable tool syntax %q:\n%s", forbidden, system.String())
 		}
 	}
 	if len(repair.Tools) != 0 {

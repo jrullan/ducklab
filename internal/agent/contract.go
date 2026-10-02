@@ -164,15 +164,96 @@ func ParseContract(contract, text string) (interface{}, error) {
 	if candidateErr != nil {
 		return parseJSONContract(contract, text)
 	}
-	var lastErr error
-	for _, candidate := range candidates {
+	values := make([]interface{}, 0, len(candidates))
+	errs := make([]error, len(candidates))
+	for i, candidate := range candidates {
 		value, err := parseJSONContract(contract, candidate)
 		if err == nil {
-			return value, nil
+			values = append(values, value)
 		}
-		lastErr = err
+		errs[i] = err
 	}
-	return nil, lastErr
+	if len(values) == 0 {
+		return nil, preferredContractError(contract, candidates, errs)
+	}
+	unique := []interface{}{values[0]}
+	for _, value := range values[1:] {
+		different := true
+		for _, seen := range unique {
+			if reflect.DeepEqual(seen, value) {
+				different = false
+				break
+			}
+		}
+		if different {
+			unique = append(unique, value)
+		}
+	}
+	if len(unique) == 1 {
+		return values[0], nil
+	}
+	name := contractObjectName(contract)
+	return nil, fmt.Errorf("%s contract: %d different %s objects satisfy the contract; emit exactly one", name, len(unique), name)
+}
+
+// preferredContractError reports the failure from the object most likely to
+// be the intended answer. A trailing format example must not replace a useful
+// diagnosis from an earlier verdict-like object (B-486 review of #142).
+func preferredContractError(contract string, candidates []string, errs []error) error {
+	if key := contractTopLevelKey(contract); key != "" {
+		for i, candidate := range candidates {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal([]byte(candidate), &fields) == nil {
+				if _, ok := fields[key]; ok {
+					return errs[i]
+				}
+			}
+		}
+	}
+	best := -1
+	for i, candidate := range candidates {
+		if json.Valid([]byte(candidate)) && (best < 0 || len(candidate) > len(candidates[best])) {
+			best = i
+		}
+	}
+	if best >= 0 {
+		return errs[best]
+	}
+	return errs[0]
+}
+
+func contractTopLevelKey(contract string) string {
+	switch {
+	case strings.HasPrefix(contract, "verdict"):
+		return "verdict"
+	case contract == "choice":
+		return "choice"
+	case contract == "json:decomposition":
+		return "subtasks"
+	case contract == "json:triage":
+		return "severity"
+	case contract == "json:inventory":
+		return "items"
+	case contract == "json:plan_manifest":
+		return "milestones"
+	case contract == "json:plan_manifest_patch":
+		return "operations"
+	default:
+		return ""
+	}
+}
+
+func contractObjectName(contract string) string {
+	switch {
+	case strings.HasPrefix(contract, "verdict"):
+		return "verdict"
+	case contract == "choice":
+		return "choice"
+	case strings.HasPrefix(contract, "json:"):
+		return strings.TrimPrefix(contract, "json:")
+	default:
+		return "JSON"
+	}
 }
 
 func parseJSONContract(contract, text string) (interface{}, error) {

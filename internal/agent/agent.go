@@ -911,15 +911,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// more perfectly valid ducklab envelope as its inert final answer. Strip
 		// the catalogue and protocol grammar from the forced conclusion request.
 		if !useNative {
-			for i := range finalMessages {
-				if finalMessages[i].Role != "system" {
-					continue
-				}
-				if marker := strings.Index(finalMessages[i].Content, "\n\n## How to use tools"); marker >= 0 {
-					finalMessages[i].Content = finalMessages[i].Content[:marker] +
-						"\n\nAll tools and tool-call syntax are unavailable for the remainder of this turn."
-				}
-			}
+			finalMessages = closeTextToolProtocol(finalMessages)
 		}
 		final := provider.ChatRequest{
 			Model: loop.Duckling.Model,
@@ -2236,9 +2228,16 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 	if repairs <= 0 {
 		repairs = 2
 	}
+	// Every repair is tools-closed, including the specialized manifest audit
+	// fragments below. Preserve the exchange but remove a text seat's stale
+	// catalogue before selecting the repair strategy.
+	base := append([]provider.Message{}, msgs...)
+	if loop.Duckling != nil && !loop.Duckling.Caps.NativeTools {
+		base = closeTextToolProtocol(base)
+	}
 	if strings.HasPrefix(turn.Contract, "verdict:plan_manifest:") && repairs >= 2 {
 		if baseVerdict, baseErr := parseVerdict(text, false); baseErr == nil {
-			return repairManifestAuditFragments(ctx, loop, turn, msgs, text, baseVerdict, ectx, timeout)
+			return repairManifestAuditFragments(ctx, loop, turn, base, text, baseVerdict, ectx, timeout)
 		}
 	}
 
@@ -2246,7 +2245,6 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 	// answer plus the correction. Sending only the correction, as this used to,
 	// asks a model to fix a response it can no longer see — which is why weak
 	// models tended to produce a second, differently-malformed answer.
-	base := append([]provider.Message{}, msgs...)
 
 	attempts := 0
 	for i := 0; i < repairs; i++ {
@@ -2603,6 +2601,24 @@ func contractRepairInstruction(contract string, parseErr error) string {
 	return `TOOLS ARE UNAVAILABLE DURING CONTRACT REPAIR. The complete tool exchange and its results are already present above. Do not ask to call or repeat a tool; use that evidence and re-emit only the corrected contract.
 
 ` + repairInstruction(contract, parseErr)
+}
+
+// closeTextToolProtocol keeps the conversation and tool results but removes
+// the stale catalogue and fence grammar from a request where tools are closed.
+// A final instruction alone lost this conflict to the system catalogue and
+// Qwen kept emitting inert tool envelopes (forced conclusion and B-487).
+func closeTextToolProtocol(messages []provider.Message) []provider.Message {
+	closed := append([]provider.Message{}, messages...)
+	for i := range closed {
+		if closed[i].Role != "system" {
+			continue
+		}
+		if marker := strings.Index(closed[i].Content, "\n\n## How to use tools"); marker >= 0 {
+			closed[i].Content = closed[i].Content[:marker] +
+				"\n\nAll tools and tool-call syntax are unavailable for the remainder of this turn."
+		}
+	}
+	return closed
 }
 
 // applySampling copies the duckling's sampling parameters onto a request, so a
