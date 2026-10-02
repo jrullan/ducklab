@@ -199,8 +199,10 @@ export const useRuns = create<RunsState>((set) => ({
           runs = { ...runs, [runId]: { ...run, status: "running" } };
         } else if (e.type === "human_needed") {
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
-        } else if (e.type === "human" && run.status === "paused") {
-          // Answering a human gate resumes the run. Remove every pending
+        } else if (e.type === "human" && run.status === "paused" && String(e.data?.resolution ?? "") !== "plan_revision") {
+          // Answering a human gate resumes the run. A plan-revision answer is
+          // terminal routing, not a resume; its following run_end owns status.
+          // Remove every pending
           // field, not just the kind — and the offered actions: next
           // [resume, abort] kept the decision card open over a run that was
           // already working again.

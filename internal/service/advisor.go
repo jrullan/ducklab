@@ -566,7 +566,6 @@ func stripAdvisorThinking(text string) string {
 func advisorViolation(q *tools.PendingQuestion, text string) string {
 	text = stripAdvisorThinking(text)
 	if q != nil && strings.HasPrefix(q.ID, "toolchain-") &&
-		strings.Contains(strings.ToLower(q.Question), "not on path") &&
 		(strings.Contains(strings.ToLower(text), "installed — continue") || strings.Contains(strings.ToLower(text), "install and continue") || strings.Contains(strings.ToLower(text), "continue with the plan")) {
 		return "do not recommend continuing while the live toolchain check reports a missing capability"
 	}
