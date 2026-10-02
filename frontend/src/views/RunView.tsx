@@ -90,7 +90,17 @@ function runStatePresentation(run: Run): { label: string; role: StatusRole } {
   return { label: "done", role: runStatusRole(run.status) };
 }
 
-function plainFailure(failure: string, run: Run): string {
+// A provider rate limit (HTTP 429) is neither a dead connection nor a
+// failure of the work: it is temporary, and the fix is waiting or another
+// model. Matched on the engine's own words ("rate limited") and the status.
+export function isRateLimited(failure: string | undefined): boolean {
+  return !!failure && /rate[ -]?limit|\b429\b|too many requests/i.test(failure);
+}
+
+export function plainFailure(failure: string, run: Run): string {
+  if (isRateLimited(failure)) {
+    return "The model's provider is rate-limiting requests (HTTP 429). This is temporary: try again in a few minutes, or seat another model for this role.";
+  }
   if (/contract parse failed/i.test(failure) && /reviewer|verdict contract/i.test(failure)) {
     return "The reviewer did not return a usable verdict, and the automatic format repair also failed.";
   }
@@ -868,7 +878,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     ? run.pending_kind === "budget"
       ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
       : run.pending_kind === "provider"
-        ? "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
+        ? isRateLimited(run.failure)
+          ? "The model's provider is rate-limiting requests and retries ran out; the work is intact. Resume in a few minutes, or abort."
+          : "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
         : run.pending_kind === "error"
           ? "The run stopped on an error. Its work is intact; Resume retries from its last real checkpoint, while Abort closes the attempt. Technical details follow below."
           : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."

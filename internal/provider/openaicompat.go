@@ -375,6 +375,13 @@ func classifiedChatError(operation, status string, code int, body []byte) error 
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		return fmt.Errorf("%w: %s: %s: %s", ErrAuth, operation, status, message)
 	}
+	// A 429 is rate limiting: weather the retry policy exists for, and, once
+	// retries are spent, a resumable pause rather than a failed run. The
+	// non-streaming path mapped it before reaching here; streaming (what runs
+	// use) came straight here and failed terminally on the first 429.
+	if code == http.StatusTooManyRequests {
+		return fmt.Errorf("%w: %s: %s: %s", ErrRateLimit, operation, status, message)
+	}
 	// A 404 is not transient provider weather: retrying the same URL does not
 	// help. It does prove that this configured duckling cannot chat, whether
 	// the address serves no chat API or the selected model does not exist.

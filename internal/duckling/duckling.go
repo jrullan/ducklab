@@ -323,7 +323,13 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 		MaxTokens: intPtr(8),
 	}); err != nil {
 		failure := fmt.Errorf("%s did not answer a chat at %s: %w", d.ID, d.Model, err)
-		r.recordProbeFailure(id, failure)
+		// A rate limit is weather, not a dead endpoint: the model answers
+		// once the provider lets it. Recording it here excluded a working,
+		// merely throttled model from automatic seating (the same rule
+		// RecordProviderResult applies to run traffic).
+		if !errors.Is(err, provider.ErrRateLimit) {
+			r.recordProbeFailure(id, failure)
+		}
 		return nil, failure
 	}
 	r.clearProbeFailure(id)

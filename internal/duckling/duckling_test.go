@@ -98,3 +98,36 @@ func TestProbeFailsAndCachesNothingWhenTheEndpointAnswersNoChat(t *testing.T) {
 		t.Fatal("the failed probe was not retained for automatic seating")
 	}
 }
+
+// throttledEndpoint answers every chat with a rate limit.
+type throttledEndpoint struct{ deadEndpoint }
+
+func (throttledEndpoint) Chat(context.Context, provider.ChatRequest) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("%w: chat: 429 Too Many Requests", provider.ErrRateLimit)
+}
+
+// A rate-limited probe fails (nothing is cached) but is weather, not a dead
+// endpoint: the duckling stays eligible for automatic seating, matching the
+// rule RecordProviderResult applies to run traffic. Every other way of not
+// answering is still retained.
+func TestARateLimitedProbeDoesNotMarkTheDucklingDead(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	r := NewRegistry()
+	r.RegisterProvider(throttledEndpoint{})
+	if err := r.Register(&Duckling{ID: "k3", Provider: "local", Model: "kimi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ProbeForce(context.Background(), "k3"); err == nil {
+		t.Fatal("a rate-limited probe succeeded")
+	}
+	if _, cached := r.CachedCaps("k3"); cached {
+		t.Fatal("a rate-limited probe was cached")
+	}
+	if r.LastProbeFailed("k3") {
+		t.Fatal("a rate limit excluded the duckling from automatic seating")
+	}
+	r.RecordProviderResult("k3", fmt.Errorf("%w: after 3 attempts", provider.ErrRateLimit))
+	if r.LastProbeFailed("k3") {
+		t.Fatal("rate-limited run traffic excluded the duckling")
+	}
+}
