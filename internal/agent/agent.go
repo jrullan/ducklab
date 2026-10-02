@@ -1001,7 +1001,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 	}
 	if err != nil {
-		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx, adaptiveRepairTimeout(loop.ContractRepairTimeout, slowestCallLatency))
+		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, conversation, outcome.Text, err, ectx, adaptiveRepairTimeout(loop.ContractRepairTimeout, slowestCallLatency))
 		outcome.Repairs = attempts
 		if rerr != nil {
 			// Preserve both layers. The original failure explains why repair
@@ -2255,7 +2255,7 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 		conv := append([]provider.Message{}, base...)
 		conv = append(conv,
 			provider.Message{Role: "assistant", Content: text},
-			provider.Message{Role: "user", Content: repairInstruction(turn.Contract, parseErr)},
+			provider.Message{Role: "user", Content: contractRepairInstruction(turn.Contract, parseErr)},
 		)
 
 		req := provider.ChatRequest{
@@ -2597,6 +2597,12 @@ Contract: %s
 What was wrong: %v
 
 Reply again with ONLY the required format. No prose before or after it.`, contract, parseErr)
+}
+
+func contractRepairInstruction(contract string, parseErr error) string {
+	return `TOOLS ARE UNAVAILABLE DURING CONTRACT REPAIR. The complete tool exchange and its results are already present above. Do not ask to call or repeat a tool; use that evidence and re-emit only the corrected contract.
+
+` + repairInstruction(contract, parseErr)
 }
 
 // applySampling copies the duckling's sampling parameters onto a request, so a

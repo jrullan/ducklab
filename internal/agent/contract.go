@@ -153,6 +153,30 @@ func ParseContract(contract, text string) (interface{}, error) {
 	switch {
 	case contract == "" || contract == "freeform" || contract == "edits":
 		return nil, nil
+	case strings.HasPrefix(contract, "markdown_sections:"):
+		return parseSections(strings.TrimPrefix(contract, "markdown_sections:"), text)
+	}
+
+	// A response can mention object-shaped source code before its actual
+	// contract. Try every balanced candidate against the requested schema;
+	// syntactically valid but unrelated examples are not authoritative output.
+	candidates, candidateErr := jsonObjectCandidates(text)
+	if candidateErr != nil {
+		return parseJSONContract(contract, text)
+	}
+	var lastErr error
+	for _, candidate := range candidates {
+		value, err := parseJSONContract(contract, candidate)
+		if err == nil {
+			return value, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func parseJSONContract(contract, text string) (interface{}, error) {
+	switch {
 	case contract == "verdict":
 		return parseVerdict(text, false)
 	case contract == "verdict:native":
@@ -180,8 +204,6 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parsePlanManifestPatch(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
-	case strings.HasPrefix(contract, "markdown_sections:"):
-		return parseSections(strings.TrimPrefix(contract, "markdown_sections:"), text)
 	default:
 		return nil, fmt.Errorf("unknown contract %q", contract)
 	}
@@ -845,21 +867,68 @@ func canonicalContractID(id, prefix string) (string, bool) {
 
 // extractJSONObject pulls the JSON object out of a model response.
 //
-// Models wrap JSON in prose and fences even when told not to. This strips
-// fences and then takes the outermost balanced {...}, which is tolerant of a
-// preamble without being tolerant of ambiguity: if there is no balanced
-// object, it is an error, not a guess.
+// Models wrap JSON in prose and fences even when told not to. Prefer an
+// explicitly tagged JSON fence, then choose the first syntactically valid
+// balanced object. Contract-specific callers additionally try every candidate
+// against their schema.
 func extractJSONObject(text string) (string, error) {
+	candidates, err := jsonObjectCandidates(text)
+	if err != nil {
+		return "", err
+	}
+	for _, candidate := range candidates {
+		if json.Valid([]byte(candidate)) {
+			return candidate, nil
+		}
+	}
+	// Preserve the parser's useful syntax diagnosis when balanced objects exist
+	// but none is valid JSON.
+	return candidates[0], nil
+}
+
+// jsonObjectCandidates returns balanced objects in response order. Complete or
+// partial ```json fences are authoritative when present, so braces in prose or
+// source examples outside them cannot steal the contract.
+func jsonObjectCandidates(text string) ([]string, error) {
 	s := strings.TrimSpace(text)
 	if s == "" {
-		return "", fmt.Errorf("empty response")
+		return nil, fmt.Errorf("empty response")
 	}
-	s = stripCodeFences(s)
 
-	start := strings.IndexByte(s, '{')
-	if start < 0 {
-		return "", fmt.Errorf("no JSON object found in the response")
+	sources := jsonFenceBodies(s)
+	if len(sources) == 0 {
+		sources = []string{stripCodeFences(s)}
 	}
+
+	var candidates []string
+	hadOpeningBrace := false
+	for _, source := range sources {
+		for start := 0; start < len(source); {
+			if source[start] != '{' {
+				start++
+				continue
+			}
+			hadOpeningBrace = true
+			if candidate, end, ok := balancedJSONObjectAt(source, start); ok {
+				candidates = append(candidates, candidate)
+				// Nested objects belong to this candidate; schema validation of
+				// the outer object must remain the authoritative diagnosis.
+				start = end
+				continue
+			}
+			start++
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates, nil
+	}
+	if hadOpeningBrace {
+		return nil, fmt.Errorf("unbalanced JSON object in the response")
+	}
+	return nil, fmt.Errorf("no JSON object found in the response")
+}
+
+func balancedJSONObjectAt(s string, start int) (string, int, bool) {
 	depth := 0
 	inString := false
 	escaped := false
@@ -875,17 +944,45 @@ func extractJSONObject(text string) (string, error) {
 		case c == '"':
 			inString = !inString
 		case inString:
-			// braces inside strings do not nest
+			// Braces inside JSON strings do not affect balance.
 		case c == '{':
 			depth++
 		case c == '}':
 			depth--
 			if depth == 0 {
-				return s[start : i+1], nil
+				return s[start : i+1], i + 1, true
 			}
 		}
 	}
-	return "", fmt.Errorf("unbalanced JSON object in the response")
+	return "", start + 1, false
+}
+
+func jsonFenceBodies(s string) []string {
+	lines := strings.Split(s, "\n")
+	var bodies []string
+	var body []string
+	inJSONFence := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inJSONFence {
+			if strings.EqualFold(trimmed, "```json") {
+				inJSONFence = true
+				body = nil
+			}
+			continue
+		}
+		if trimmed == "```" {
+			bodies = append(bodies, strings.Join(body, "\n"))
+			inJSONFence = false
+			body = nil
+			continue
+		}
+		body = append(body, line)
+	}
+	if inJSONFence {
+		bodies = append(bodies, strings.Join(body, "\n"))
+	}
+	return bodies
 }
 
 // stripCodeFences removes a leading ```lang line and a trailing ``` line.

@@ -279,6 +279,41 @@ func TestContractToleratesFencesAndPreamble(t *testing.T) {
 	}
 }
 
+// A reviewer in r-20261002-194740-3v2h described an AST node such as
+// {type:'const', value} before emitting its valid fenced verdict. Extraction
+// used to stop at that first brace and discard the actual contract.
+func TestContractPrefersFencedJSONAfterCodeLikeProse(t *testing.T) {
+	text := "The parser constructs nodes such as {type:'const', value}.\n\n" +
+		"```json\n" +
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"logic.mjs","line":23,"issue":"the parser drops a token","fix":"retain the token"}]}` + "\n" +
+		"```"
+
+	got, err := ParseContract("verdict", text)
+	if err != nil {
+		t.Fatalf("valid fenced verdict was discarded: %v", err)
+	}
+	verdict := got.(*Verdict)
+	if verdict.Verdict != "request-changes" || len(verdict.Findings) != 1 {
+		t.Fatalf("parsed verdict = %+v", verdict)
+	}
+}
+
+// When no JSON fence is present, each balanced object is a candidate. A
+// syntactically valid prose example must not hide a later object that actually
+// satisfies the requested contract.
+func TestContractTriesBalancedObjectsUntilOneSatisfiesSchema(t *testing.T) {
+	text := `The node was {"type":"const","value":3}. Final verdict:
+{"verdict":"approve","findings":[]}`
+
+	got, err := ParseContract("verdict", text)
+	if err != nil {
+		t.Fatalf("later contract object was discarded: %v", err)
+	}
+	if verdict := got.(*Verdict); verdict.Verdict != "approve" {
+		t.Fatalf("parsed verdict = %+v", verdict)
+	}
+}
+
 func TestExtractJSONHandlesBracesInStrings(t *testing.T) {
 	text := `{"verdict":"request-changes","findings":[{"severity":"major","file":"a.go","line":1,"issue":"uses {placeholder} syntax","fix":"escape it"}]}`
 	got, err := ParseContract("verdict", text)

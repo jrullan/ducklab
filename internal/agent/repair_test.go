@@ -390,6 +390,55 @@ func TestRepairPromptIncludesTheOriginalExchange(t *testing.T) {
 	}
 }
 
+// Contract repair is a tools-closed continuation of the same turn. The model
+// must retain the evidence it already gathered instead of being asked to
+// reconstruct a verdict from only the opening prompt and its malformed reply.
+func TestRepairPromptKeepsToolExchangeAndClosesTools(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "evidence.txt"), []byte("the decisive repair evidence\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &countingProvider{replies: []string{
+		"```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"evidence.txt\"}}\n```",
+		"I found a defect, but forgot the verdict object.",
+		`{"verdict":"approve","findings":[]}`,
+	}}
+	loop := testLoop(p, 2)
+	turn := &Turn{
+		Role: config.RoleReviewer, Prompt: "review the evidence", Contract: "verdict",
+		Toolbelt: []string{"fs_read"}, MaxTurns: 3,
+	}
+
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: dir, Role: config.RoleReviewer}); err != nil {
+		t.Fatal(err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) != 3 {
+		t.Fatalf("recorded %d requests, want tool call, final answer, and repair", len(p.requests))
+	}
+	repair := p.requests[2]
+	var transcript strings.Builder
+	for _, msg := range repair.Messages {
+		transcript.WriteString(msg.Content)
+		transcript.WriteByte('\n')
+	}
+	for _, want := range []string{
+		`{"tool":"fs_read","args":{"path":"evidence.txt"}}`,
+		"Tool result for fs_read:",
+		"the decisive repair evidence",
+		"TOOLS ARE UNAVAILABLE DURING CONTRACT REPAIR",
+	} {
+		if !strings.Contains(transcript.String(), want) {
+			t.Errorf("repair prompt lost %q:\n%s", want, transcript.String())
+		}
+	}
+	if len(repair.Tools) != 0 {
+		t.Fatalf("repair exposed %d tools, want none", len(repair.Tools))
+	}
+}
+
 // A transport failure must not be reported as the model failing its contract,
 // and must never produce a value.
 func TestTransportErrorDuringRepairProducesNoValue(t *testing.T) {
