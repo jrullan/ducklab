@@ -198,14 +198,25 @@ func existingTaskRewriteError(id, reason string) error {
 }
 
 func planTaskAmendmentRefusal(task artifact.Section) string {
+	hasOwns := false
+	hasBody := false
 	for _, line := range strings.Split(task.Body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(strings.ToLower(trimmed), "**owns:**") {
-			return "Owns is not amendable through plan extension"
+			hasOwns = true
 		}
 		if trimmed != "" && !strings.HasPrefix(trimmed, "**") {
-			return "body content is not an amendable field"
+			hasBody = true
 		}
+	}
+	// Scan the whole stub before choosing the reason. Architect drafts commonly
+	// begin with "Fixes B-..." and put Owns later; returning on the prose line
+	// hid the actionable field and sent the person to the wrong recovery door.
+	if hasOwns {
+		return "Owns is not amendable through plan extension"
+	}
+	if hasBody {
+		return "body content is not an amendable field"
 	}
 	return "the fragment contains a field that is not amendable or repeats an amendable field"
 }

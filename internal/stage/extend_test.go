@@ -327,6 +327,26 @@ func TestExtendExplainsThatOwnsCannotBeAmendedThroughAnExtension(t *testing.T) {
 	}
 }
 
+func TestExtendNamesOwnsAsTheCauseEvenWhenProseComesFirst(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Active task\n\n**Owns:** logic.mjs\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-owns-after-prose", Mode: "solo",
+		Extend: "let T-001 write its parser suite", MutablePlanTasks: map[string]bool{},
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			return "## T-001 — Active task\n\nFixes B-003.\n\n**Owns:** logic.mjs, tests/parser.test.mjs\n", nil
+		},
+	}, current)
+	if err == nil || !strings.Contains(err.Error(), "Owns is not amendable") || strings.Contains(err.Error(), "body content is not an amendable field") {
+		t.Fatalf("line ordering hid the actionable Owns refusal: %v", err)
+	}
+}
+
 func TestExtendConsumesSupersededTaskTombstones(t *testing.T) {
 	root := t.TempDir()
 	writeDoc(t, root, artifact.KindPlan, "## M-001 — Core\n\n### T-001 — Existing\n\nDone.\n")

@@ -55,7 +55,10 @@ describe("RunView worktree surface", () => {
       id: "r-lane", project_id: "p", stage: "build", mode: "solo", task_id: "T-014",
       status: "paused", verdict: "PASSED", started_at: "2026-10-03T00:00:00Z",
       pending_kind: "gate", next: ["accept", "reject"],
-      pending_data: { lane_widening: ["tests/parser.test.mjs"] },
+      pending_data: {
+		lane_widening: ["tests/parser.test.mjs"],
+		lane_findings: [{ file: "tests/parser.test.mjs", issue: "edit is outside T-014's declared write lane (owned by T-002)" }],
+	  },
     };
     let acceptBody: Record<string, unknown> | undefined;
     const client = new EngineClient({
@@ -76,7 +79,11 @@ describe("RunView worktree surface", () => {
 
     render(<RunView runId="r-lane" client={client} />);
     const approve = await screen.findByTestId("widen-lane-and-accept");
-    expect(approve).toHaveTextContent("Widen lane and accept");
+	const offer = screen.getByTestId("lane-widening-offer");
+	expect(offer).toHaveTextContent("T-014");
+	expect(offer).toHaveTextContent("tests/parser.test.mjs");
+	expect(offer).toHaveTextContent("owned by T-002");
+	expect(approve).toHaveTextContent("then accept");
     fireEvent.click(approve);
     await waitFor(() => expect(acceptBody).toMatchObject({ lane_widening: ["tests/parser.test.mjs"] }));
   });

@@ -825,7 +825,10 @@ func promotionNamedTestPaths(rec *store.Bug, globs []string) []string {
 	if rec == nil {
 		return nil
 	}
-	text := rec.TestReason + "\n" + rec.Deliverables
+	// SuspectedFiles is where the triage contract puts concrete paths. The
+	// behavioural test reason often names no file at all (TI-36X B-003), so
+	// ignoring this field silently dropped the exact suite test-first needed.
+	text := rec.TestReason + "\n" + rec.Deliverables + "\n" + rec.SuspectedFiles
 	seen := map[string]bool{}
 	var paths []string
 	for _, loc := range advisorPathPattern.FindAllStringIndex(text, -1) {

@@ -4554,6 +4554,14 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 		return nil, fmt.Errorf("run %q is paused for %s, not awaiting acceptance — resolve the condition and resume, or abort", id, rs.run.PendingKind)
 	}
 	if len(options.LaneWidening) > 0 {
+		if actor != "human" {
+			return nil, fmt.Errorf("lane widening requires direct human approval; actor %q may accept the existing contract but may not amend the accepted plan", actor)
+		}
+		// This is a separate, durable decision made before Accept. If a later
+		// acceptance guard refuses (review dissent, rebase conflict, or another
+		// invariant), keep the approved plan amendment and its lane_widened
+		// event: the person approved these exact paths and must not be asked to
+		// approve them again merely because a different blocker remains.
 		if _, err = s.approveOfferedLaneWidening(rs, rs.snapshotRun(), options.LaneWidening, actor); err != nil {
 			return nil, err
 		}

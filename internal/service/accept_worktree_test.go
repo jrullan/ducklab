@@ -205,6 +205,18 @@ func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
 	if !slices.Equal(offered, []string{"shared.txt"}) {
 		t.Fatalf("lane widening offer = %v, want the exact refused path", offered)
 	}
+	if _, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "mcp:claude", AcceptOptions{
+		LaneWidening: offered,
+	}); err == nil || !strings.Contains(err.Error(), "direct human approval") {
+		t.Fatalf("non-human lane widening was not refused: %v", err)
+	}
+	unchangedPlan, err := artifact.Load(dir, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task := unchangedPlan.Section("T-001"); task == nil || slices.Contains(task.Owns, "shared.txt") {
+		t.Fatalf("non-human actor changed T-001's lane: %+v", task)
+	}
 	if _, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{
 		LaneWidening: []string{"unoffered.txt"},
 	}); err == nil || !strings.Contains(err.Error(), "was not offered by the pending decision") {
@@ -230,6 +242,51 @@ func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
 	task := acceptedPlan.Section("T-001")
 	if task == nil || !slices.Contains(task.Owns, "shared.txt") {
 		t.Fatalf("approved lane was not recorded on T-001: %+v", task)
+	}
+}
+
+// Lane approval is its own durable human decision. If Accept later refuses on
+// another already-recorded blocker, the approved plan widening remains and
+// the event says exactly what changed; the person need not approve it twice.
+func TestAcceptedLaneWideningSurvivesALaterAcceptRefusal(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	plan := "## M-001 — Work\n\n### T-001 — Parser\n\n**Owns:** logic.mjs\n"
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: plan})
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-lane-then-refuse")
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	rs.run.PendingData = map[string]interface{}{
+		"lane_widening":  []string{"tests/parser.test.mjs"},
+		"review_verdict": "request-changes",
+	}
+
+	_, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{
+		LaneWidening: []string{"tests/parser.test.mjs"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reviewer requested changes") {
+		t.Fatalf("accept error = %v, want the later reviewer refusal", err)
+	}
+	updated, loadErr := artifact.Load(dir, artifact.KindPlan)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if task := updated.Section("T-001"); task == nil || !slices.Contains(task.Owns, "tests/parser.test.mjs") {
+		t.Fatalf("approved lane widening was rolled back after Accept refusal: %+v", task)
+	}
+	detail, getErr := s.RunGet(context.Background(), run.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	var widened bool
+	for _, event := range detail.Events {
+		if event.Type == "lane_widened" {
+			widened = true
+		}
+	}
+	if !widened {
+		t.Fatal("durable lane approval was not recorded before the later Accept refusal")
 	}
 }
 
