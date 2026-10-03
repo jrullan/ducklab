@@ -747,6 +747,11 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	if err != nil {
 		return nil, fmt.Errorf("load project config for promotion lane: %w", err)
 	}
+	if len(out) == 1 && strings.EqualFold(strings.TrimSpace(rec.TestStrategy), "test-first") {
+		for _, path := range promotionNamedTestPaths(rec, cfg.Verify.TestGlobs) {
+			add(0, path, "test-first suite named by triage")
+		}
+	}
 	var testPortions []int
 	testClaims := make([][]string, len(out))
 	for i, portion := range out {
@@ -814,6 +819,24 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 	return out, nil
+}
+
+func promotionNamedTestPaths(rec *store.Bug, globs []string) []string {
+	if rec == nil {
+		return nil
+	}
+	text := rec.TestReason + "\n" + rec.Deliverables
+	seen := map[string]bool{}
+	var paths []string
+	for _, loc := range advisorPathPattern.FindAllStringIndex(text, -1) {
+		path := cleanLanePath(text[loc[0]:loc[1]])
+		if path == "" || seen[path] || !verify.ClaimsTestLane(path, globs) {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 // promotionStackLaneHints returns hints from the stack(s) represented by a

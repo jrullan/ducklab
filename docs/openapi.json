@@ -884,6 +884,18 @@
       },
       "EngineapiacceptRequest": {
         "properties": {
+          "human_verified": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "lane_widening": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "message": {
             "type": "string"
           },

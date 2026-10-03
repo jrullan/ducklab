@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,36 @@ func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
 	encoded, _ := json.Marshal(detail.Run.PendingData["lane_findings"])
 	if !strings.Contains(string(encoded), "shared.txt") || !strings.Contains(string(encoded), "T-002") {
 		t.Fatalf("lane finding does not name path and owner: %s", encoded)
+	}
+	offered := stringSliceValue(detail.Run.PendingData["lane_widening"])
+	if !slices.Equal(offered, []string{"shared.txt"}) {
+		t.Fatalf("lane widening offer = %v, want the exact refused path", offered)
+	}
+	if _, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{
+		LaneWidening: []string{"unoffered.txt"},
+	}); err == nil || !strings.Contains(err.Error(), "was not offered by the pending decision") {
+		t.Fatalf("unoffered lane widening was not refused: %v", err)
+	}
+	if got := mustHead(t, git); got != base {
+		t.Fatalf("unauthorized lane widening advanced default to %s; want %s", got, base)
+	}
+
+	result, err := s.RunAcceptAsWithOptions(context.Background(), run.ID, "", "human", AcceptOptions{
+		LaneWidening: offered,
+	})
+	if err != nil {
+		t.Fatalf("approve lane widening and accept: %v", err)
+	}
+	if result.CommitSHA == "" || mustHead(t, git) != result.CommitSHA {
+		t.Fatalf("accepted result = %+v, default head = %s", result, mustHead(t, git))
+	}
+	acceptedPlan, err := artifact.Load(dir, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := acceptedPlan.Section("T-001")
+	if task == nil || !slices.Contains(task.Owns, "shared.txt") {
+		t.Fatalf("approved lane was not recorded on T-001: %+v", task)
 	}
 }
 

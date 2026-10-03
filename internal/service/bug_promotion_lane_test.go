@@ -94,6 +94,35 @@ func TestBugPromotionWidensOnePortionIntoAnExecutableStackLane(t *testing.T) {
 	}
 }
 
+func TestBugPromotionIncludesTheExactTestFirstSuiteNamedByTriage(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"scripts":{"test":"node --test"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "logic.mjs"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := &store.Bug{
+		TestStrategy: "test-first",
+		TestReason:   "write the failing parser cases in tests/parser.test.mjs before changing logic.mjs",
+	}
+	portions := []agent.SplitProposal{{
+		Title: "Correct parser precedence", Acceptance: []string{"parser cases pass"}, Owns: []string{"logic.mjs"},
+	}}
+
+	got, err := preparePromotionPortions(root, rec, portions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !slices.Contains(got[0].Owns, "tests/parser.test.mjs") {
+		t.Fatalf("promoted test-first lane = %#v, want the named suite", got)
+	}
+}
+
 func TestBugPromotionGivesSplitTestPortionRegistrationAndSiblingHeader(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, root := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

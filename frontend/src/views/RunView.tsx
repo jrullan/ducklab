@@ -1031,7 +1031,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   };
 
-  const acceptRun = async (resolveAdditiveConflicts = false) => {
+  const acceptRun = async (
+    resolveAdditiveConflicts = false,
+    approvedLaneWidening: string[] = [],
+  ) => {
     setActionError(null);
 	if (manualVerification.some((item) => !humanVerified.includes(item.id))) {
 	  setActionError("Confirm every manual verification item before accepting.");
@@ -1040,7 +1043,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     const store = useRuns.getState();
     store.beginAccept(runId);
     try {
-	  const res = await client.accept(runId, "", resolveAdditiveConflicts, humanVerified);
+      const res = await client.accept(
+        runId,
+        "",
+        resolveAdditiveConflicts,
+        humanVerified,
+        approvedLaneWidening,
+      );
       store.confirmAccept(runId, res.commit_sha);
       // Accept responses also carry unrelated caveats (for example, the
       // benchmark's same-model self-review warning). Treating every warning
@@ -1121,16 +1130,31 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
         accepting={acceptState.kind === "pending"}
         onAccept={onAccept}
-        extraAction={rolledBackRebaseConflict ? (
-          <button
-            type="button"
-            data-testid="accept-union-additive"
-            disabled={acceptState.kind === "pending"}
-            onClick={() => void acceptRun(true)}
-            className="rounded border border-warning px-3 py-1 text-sm text-ink disabled:opacity-50"
-          >
-            Retry with additive merge
-          </button>
+        extraAction={(rolledBackRebaseConflict || laneWidening.length > 0) ? (
+          <>
+            {laneWidening.length > 0 && (
+              <button
+                type="button"
+                data-testid="widen-lane-and-accept"
+                disabled={acceptState.kind === "pending"}
+                onClick={() => void acceptRun(false, laneWidening)}
+                className="rounded border border-serious px-3 py-1 text-sm text-serious disabled:opacity-50"
+              >
+                Widen lane and accept
+              </button>
+            )}
+            {rolledBackRebaseConflict && (
+              <button
+                type="button"
+                data-testid="accept-union-additive"
+                disabled={acceptState.kind === "pending"}
+                onClick={() => void acceptRun(true)}
+                className="rounded border border-warning px-3 py-1 text-sm text-ink disabled:opacity-50"
+              >
+                Retry with additive merge
+              </button>
+            )}
+          </>
         ) : undefined}
         onReject={() => {
           setActionError(null);
