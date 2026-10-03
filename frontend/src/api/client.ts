@@ -1568,11 +1568,12 @@ export class EngineClient {
       (r) => r.output ?? "",
     );
   }
-  accept(id: string, message = "", resolveAdditiveConflicts = false, humanVerified: number[] = []) {
+  accept(id: string, message = "", resolveAdditiveConflicts = false, humanVerified: number[] = [], laneWidening: string[] = []) {
     return this.request<AcceptResult>("POST", `/v1/runs/${id}/accept`, {
       message,
       resolve_additive_conflicts: resolveAdditiveConflicts,
 	  human_verified: humanVerified,
+	  lane_widening: laneWidening,
     });
   }
   reject(id: string, reason = "") {

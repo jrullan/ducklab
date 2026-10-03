@@ -173,7 +173,8 @@ func TestExtendRefusesToTurnAnExistingTaskEditIntoADuplicate(t *testing.T) {
 			return "## T-001 — Schema\n\nChanged body.\n", nil
 		},
 	}, current)
-	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") {
+	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") ||
+		!strings.Contains(err.Error(), "body content is not an amendable field") {
 		t.Fatalf("existing task edit was silently converted into a new id: %v", err)
 	}
 	if prop, pErr := artifact.LoadProposed(root, artifact.KindPlan); pErr != nil || prop != nil {
@@ -298,8 +299,51 @@ func TestExtendKeepsAcceptedExistingTaskProofFieldsImmutable(t *testing.T) {
 			return "## T-001 — Accepted task\n\n**Produces:** none\n", nil
 		},
 	}, current)
-	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") {
+	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") ||
+		!strings.Contains(err.Error(), "accepted or active") ||
+		!strings.Contains(err.Error(), "approve the offered lane widening") {
 		t.Fatalf("accepted task proof fields were mutable: %v", err)
+	}
+}
+
+func TestExtendExplainsThatOwnsCannotBeAmendedThroughAnExtension(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Active task\n\n**Owns:** logic.mjs\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-owns", Mode: "solo",
+		Extend: "let T-001 write its parser suite", MutablePlanTasks: map[string]bool{},
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			return "## T-001 — Active task\n\n**Owns:** logic.mjs, tests/parser.test.mjs\n", nil
+		},
+	}, current)
+	if err == nil || !strings.Contains(err.Error(), "Owns is not amendable") ||
+		!strings.Contains(err.Error(), "approve the offered lane widening") {
+		t.Fatalf("Owns amendment refusal did not name the rule and lawful path: %v", err)
+	}
+}
+
+func TestExtendNamesOwnsAsTheCauseEvenWhenProseComesFirst(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Active task\n\n**Owns:** logic.mjs\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-owns-after-prose", Mode: "solo",
+		Extend: "let T-001 write its parser suite", MutablePlanTasks: map[string]bool{},
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			return "## T-001 — Active task\n\nFixes B-003.\n\n**Owns:** logic.mjs, tests/parser.test.mjs\n", nil
+		},
+	}, current)
+	if err == nil || !strings.Contains(err.Error(), "Owns is not amendable") || strings.Contains(err.Error(), "body content is not an amendable field") {
+		t.Fatalf("line ordering hid the actionable Owns refusal: %v", err)
 	}
 }
 

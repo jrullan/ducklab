@@ -51,8 +51,10 @@ type healthResponse struct {
 }
 
 type acceptRequest struct {
-	Message                  string `json:"message"`
-	ResolveAdditiveConflicts bool   `json:"resolve_additive_conflicts,omitempty"`
+	Message                  string   `json:"message"`
+	ResolveAdditiveConflicts bool     `json:"resolve_additive_conflicts,omitempty"`
+	HumanVerified            []int    `json:"human_verified,omitempty"`
+	LaneWidening             []string `json:"lane_widening,omitempty"`
 }
 
 type restartRequest struct {

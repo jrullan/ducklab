@@ -65,12 +65,22 @@ func taskLaneFindings(projectRoot, taskID string, changed []string) []conv.Findi
 		findings = append(findings, conv.Finding{
 			Severity: "critical", File: path,
 			Issue:     fmt.Sprintf("edit is outside %s's declared write lane (owned by %s)", taskID, owner),
-			Fix:       "revert the edit, or amend and approve the plan so this task explicitly owns, produces, or modifies the path before accepting",
+			Fix:       "approve the offered lane widening at the Accept gate, or revert the edit",
 			Invariant: "a run may modify only paths in its task's Produces/Modifies/Owns lane",
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return findings
+}
+
+func laneFindingPaths(findings []conv.Finding) []string {
+	paths := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		if path := cleanLanePath(finding.File); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return uniqueStrings(paths)
 }
 
 // taskDeclaredLanePaths renders the complete lane for model-facing dossiers

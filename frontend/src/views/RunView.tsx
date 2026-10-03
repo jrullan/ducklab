@@ -687,6 +687,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 	const laneWidening = Array.isArray(run.pending_data?.lane_widening)
 	  ? (run.pending_data!.lane_widening as string[])
 	  : [];
+	const laneFindings = Array.isArray(run.pending_data?.lane_findings)
+	  ? (run.pending_data!.lane_findings as { file?: string; issue?: string }[])
+	  : [];
   // Yolo resumes immediately, so its answer cannot remain in the paused
   // question card. Keep the recorded notification visible while work continues.
   const advisorAutoAnswers = events.filter(
@@ -1031,7 +1034,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   };
 
-  const acceptRun = async (resolveAdditiveConflicts = false) => {
+  const acceptRun = async (
+    resolveAdditiveConflicts = false,
+    approvedLaneWidening: string[] = [],
+  ) => {
     setActionError(null);
 	if (manualVerification.some((item) => !humanVerified.includes(item.id))) {
 	  setActionError("Confirm every manual verification item before accepting.");
@@ -1040,7 +1046,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     const store = useRuns.getState();
     store.beginAccept(runId);
     try {
-	  const res = await client.accept(runId, "", resolveAdditiveConflicts, humanVerified);
+      const res = await client.accept(
+        runId,
+        "",
+        resolveAdditiveConflicts,
+        humanVerified,
+        approvedLaneWidening,
+      );
       store.confirmAccept(runId, res.commit_sha);
       // Accept responses also carry unrelated caveats (for example, the
       // benchmark's same-model self-review warning). Treating every warning
@@ -1121,16 +1133,48 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
         accepting={acceptState.kind === "pending"}
         onAccept={onAccept}
-        extraAction={rolledBackRebaseConflict ? (
-          <button
-            type="button"
-            data-testid="accept-union-additive"
-            disabled={acceptState.kind === "pending"}
-            onClick={() => void acceptRun(true)}
-            className="rounded border border-warning px-3 py-1 text-sm text-ink disabled:opacity-50"
-          >
-            Retry with additive merge
-          </button>
+        extraAction={(rolledBackRebaseConflict || laneWidening.length > 0) ? (
+          <>
+            {laneWidening.length > 0 && (
+              <div data-testid="lane-widening-offer" className="rounded border border-serious p-2 text-left">
+                <p className="text-xs text-ink-secondary">
+                  Add {laneWidening.length === 1 ? laneWidening[0] : `${laneWidening.length} paths`} to {run.task_id || "this task"}&apos;s lane:
+                </p>
+                {laneWidening.length > 1 && (
+                  <ul className="mt-1 list-disc pl-5 font-mono text-xs text-ink">
+                    {laneWidening.map((path) => <li key={path}>{path}</li>)}
+                  </ul>
+                )}
+                {laneFindings.length > 0 && (
+                  <ul className="mt-1 list-disc pl-5 text-xs text-ink-muted">
+                    {laneFindings.map((finding, index) => (
+                      <li key={`${finding.file ?? "lane"}-${index}`}>{finding.issue ?? finding.file}</li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  data-testid="widen-lane-and-accept"
+                  disabled={acceptState.kind === "pending"}
+                  onClick={() => void acceptRun(false, laneWidening)}
+                  className="mt-2 rounded border border-serious px-3 py-1 text-sm text-serious disabled:opacity-50"
+                >
+                  Widen lane, then accept
+                </button>
+              </div>
+            )}
+            {rolledBackRebaseConflict && (
+              <button
+                type="button"
+                data-testid="accept-union-additive"
+                disabled={acceptState.kind === "pending"}
+                onClick={() => void acceptRun(true)}
+                className="rounded border border-warning px-3 py-1 text-sm text-ink disabled:opacity-50"
+              >
+                Retry with additive merge
+              </button>
+            )}
+          </>
         ) : undefined}
         onReject={() => {
           setActionError(null);
