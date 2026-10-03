@@ -101,6 +101,11 @@ type ExecuteParams struct {
 	// InvariantFindings deterministically checks the current candidate against
 	// engine-owned contracts such as the task's declared write lane.
 	InvariantFindings func() ([]conv.Finding, error)
+	// PauseOnFindings turns a reviewer finding that cannot be resolved by more
+	// implementation work into a human decision. Nil means the ordinary review
+	// loop continues. The service uses this for an accepted test-first oracle
+	// that contradicts its authoritative acceptance contract.
+	PauseOnFindings func([]conv.Finding) *tools.PendingQuestion
 	// AdvisorLaneConflicts applies the same accepted-lane authority to an
 	// advisor note. Returned paths are observational evidence on the consult
 	// event; they never widen the lane or authorize the recommendation.
@@ -1251,6 +1256,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				state.NoFindings = len(findings) == 0
 			case *agent.Choice:
 				state.Choice = v.Choice
+			}
+
+			if turn.Role == config.RoleReviewer && params.PauseOnFindings != nil {
+				if question := params.PauseOnFindings(findings); question != nil {
+					outcome.Pending = question
+					result.Outcome = outcome
+					result.Error = tools.ErrHumanNeeded
+					emit(params, "turn_interrupted", map[string]interface{}{
+						"round": round, "turn": i, "role": string(turn.Role),
+						"notes": partialTurnNotes(outcome), "looked": seatLooked[turn.Role],
+						"findings": findings, "verified_after_mutation": false,
+					})
+					return result, tools.ErrHumanNeeded
+				}
 			}
 
 			emit(params, "turn_end", map[string]interface{}{

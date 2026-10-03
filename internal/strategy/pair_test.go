@@ -123,6 +123,43 @@ func TestPairUsesTwoDucklingsAndFeedsBackFindings(t *testing.T) {
 	}
 }
 
+func TestPairPausesInsteadOfLoopingOnAReviewerFindingThatNeedsHumanInput(t *testing.T) {
+	rec := &recorder{}
+	finding := agent.Finding{
+		Severity: "critical",
+		Issue:    "the test-first oracle contradicts the acceptance contract: 2^-3^2 must be 0.001953125",
+		Fix:      "correct the accepted oracle or amend the contract",
+	}
+	params := pairParams(rec, "red",
+		editsOutcome("implemented exponentiation"),
+		verdictOutcome("request-changes", finding),
+		editsOutcome("must not run"),
+	)
+	params.PauseOnFindings = func(findings []conv.Finding) *tools.PendingQuestion {
+		return &tools.PendingQuestion{ID: "test-first-oracle-conflict", Question: findings[0].Issue}
+	}
+	var interrupted map[string]interface{}
+	params.OnEvent = func(kind string, data map[string]interface{}) {
+		if kind == "turn_interrupted" {
+			interrupted = data
+		}
+	}
+
+	res, err := ExecutePair(context.Background(), params)
+	if !errors.Is(err, tools.ErrHumanNeeded) {
+		t.Fatalf("error = %v, want ErrHumanNeeded", err)
+	}
+	if res == nil || res.Outcome == nil || res.Outcome.Pending == nil || res.Outcome.Pending.ID != "test-first-oracle-conflict" {
+		t.Fatalf("pending question = %#v", res)
+	}
+	if len(rec.roles) != 2 {
+		t.Fatalf("roles = %v; implementer loop continued after the oracle conflict", rec.roles)
+	}
+	if interrupted == nil || interrupted["role"] != string(config.RoleReviewer) {
+		t.Fatalf("durable reviewer checkpoint = %#v", interrupted)
+	}
+}
+
 func TestPairMakesEngineInvariantFindingsBlockingAndFeedsThemBack(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green",

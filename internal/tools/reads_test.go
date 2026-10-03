@@ -132,3 +132,57 @@ func TestResearchBudgetHonorsTurnOverride(t *testing.T) {
 		t.Fatalf("turn override was not enforced: %+v", blocked)
 	}
 }
+
+// B-491/B-492: argument mistakes must remain visible after the observational
+// budget closes. The old ordering returned RESEARCH BUDGET EXHAUSTED before it
+// ever looked at /tests/parser.test.mjs, hiding the one correction the caller
+// needed to make.
+func TestResearchBudgetDoesNotMaskProjectRelativePathGuidance(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	ectx := &ExecContext{ProjectRoot: dir, ExplorationCallLimit: 1}
+	ectx.BeginTurn()
+	if err := os.WriteFile(filepath.Join(dir, "seen.txt"), []byte("seen"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"seen.txt"}`)); res.IsError {
+		t.Fatalf("setup read failed: %s", res.Content)
+	}
+
+	res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"/tests/parser.test.mjs"}`))
+	if !res.IsError || !strings.Contains(res.Content, "paths are project-relative") || !strings.Contains(res.Content, "tests/parser.test.mjs") {
+		t.Fatalf("absolute-looking project path did not get actionable guidance: %+v", res)
+	}
+	if strings.Contains(res.Content, "RESEARCH BUDGET EXHAUSTED") {
+		t.Fatalf("budget masked the invalid path: %s", res.Content)
+	}
+}
+
+// B-492: once the boundary has already explained itself, repeating the exact
+// refused call is not exploration. Close the turn on the second refusal so a
+// model cannot spend the remainder of its call budget asking the same thing.
+func TestRepeatedResearchBudgetRefusalEndsTurn(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	ectx := &ExecContext{ProjectRoot: dir, ExplorationCallLimit: 1}
+	ectx.BeginTurn()
+	for _, name := range []string{"seen.txt", "blocked.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"seen.txt"}`)); res.IsError {
+		t.Fatalf("setup read failed: %s", res.Content)
+	}
+	args := json.RawMessage(`{"path":"blocked.txt"}`)
+	first, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
+	if !first.IsError || first.EndTurn || !strings.Contains(first.Content, "RESEARCH BUDGET EXHAUSTED") {
+		t.Fatalf("first refusal = %+v", first)
+	}
+	second, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
+	if !second.IsError || !second.EndTurn || !ectx.ToolsClosed || !strings.Contains(second.Content, "exact call") {
+		t.Fatalf("second identical refusal did not end the turn: %+v", second)
+	}
+}

@@ -710,7 +710,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.
 		Prompt: s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID) +
-			humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
+			testFirstOracleNotice(mc.rs.run.TestFirstBaseSHA) + humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
 		// The task's bullets, numbered: the implementer's work contract
 		// (strategy/deliverables.go). The plan's words, never the model's.
 		Deliverables:       deliverables,
@@ -780,6 +780,14 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			}
 		},
 	}
+	if mc.rs.run.TestFirstBaseSHA != "" {
+		base.PauseOnFindings = func(findings []conv.Finding) *tools.PendingQuestion {
+			if _, answered := mc.rs.answers()["test-first-oracle-conflict"]; answered {
+				return nil
+			}
+			return testFirstOracleQuestion(findings)
+		}
+	}
 
 	switch mc.rs.run.Mode {
 	case "", "solo":
@@ -799,6 +807,25 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	default:
 		return fmt.Errorf("unknown mode %q (available: solo, pair, tournament, split)", mc.rs.run.Mode)
 	}
+}
+
+func testFirstOracleQuestion(findings []conv.Finding) *tools.PendingQuestion {
+	const marker = "test-first oracle contradicts the acceptance contract"
+	for _, finding := range findings {
+		evidence := strings.TrimSpace(strings.Join([]string{finding.Issue, finding.Fix, finding.Invariant}, " "))
+		if !strings.Contains(strings.ToLower(evidence), marker) {
+			continue
+		}
+		return &tools.PendingQuestion{
+			ID:       "test-first-oracle-conflict",
+			Question: "The independent reviewer found that the accepted test-first oracle contradicts the acceptance contract. " + evidence + " Choose which authority to preserve before this build continues.",
+			Options: []string{
+				"Authorize correcting the test-first oracle to match the cited acceptance slice, then resume.",
+				"Keep the accepted oracle; stop and amend the acceptance contract before resuming.",
+			},
+		}
+	}
+	return nil
 }
 
 func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strategy.ExecuteParams) error {

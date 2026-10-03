@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/verify"
 )
 
@@ -108,6 +109,8 @@ func TestThePromptSaysWhatIsEnforced(t *testing.T) {
 		"must **fail**",
 		"go test ./...",
 		"refuse any path that is not a test file",
+		"derive every expected value",
+		"independently recompute",
 		// A decision the task leaves open gets baked into the assertions and
 		// becomes the de-facto spec — the prompt must send it to the person
 		// instead. A model burned 2M tokens deliberating where a "week"
@@ -121,6 +124,35 @@ func TestThePromptSaysWhatIsEnforced(t *testing.T) {
 	// And it carries the task, or the model is writing a test for nothing.
 	if !strings.Contains(got, "T-001") {
 		t.Error("the prompt lost the task")
+	}
+}
+
+func TestChainedBuildNamesTheAcceptedTestFirstOracleAndConflictProtocol(t *testing.T) {
+	got := testFirstOracleNotice("0123456789abcdef")
+	for _, want := range []string{
+		"0123456",
+		"test-first oracle",
+		"test-first oracle contradicts acceptance slice N: <calculation/evidence>",
+		"Do not edit the accepted oracle",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("oracle notice does not say %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestOnlyAnExplicitTestFirstOracleConflictPausesForAHuman(t *testing.T) {
+	conflict := []conv.Finding{{
+		Issue: "The test-first oracle contradicts the acceptance contract: 2^-3^2 is 2^-9, not 2^-6.",
+		Fix:   "Correct the oracle literal to 0.001953125.",
+	}}
+	q := testFirstOracleQuestion(conflict)
+	if q == nil || q.ID != "test-first-oracle-conflict" || len(q.Options) != 2 || !strings.Contains(q.Question, "0.001953125") {
+		t.Fatalf("question = %#v", q)
+	}
+	ordinary := []conv.Finding{{Issue: "Exponentiation is left associative", Fix: "make it right associative"}}
+	if q := testFirstOracleQuestion(ordinary); q != nil {
+		t.Fatalf("ordinary implementation finding paused the run: %#v", q)
 	}
 }
 
