@@ -1444,13 +1444,14 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		// contract and tool dispatch always read the assembled response, and
 		// an endpoint that cannot stream falls back and emits the finished
 		// text as a single delta.
-		Stream:       !req.NoStream,
-		DryRun:       req.DryRun,
-		UnsafeWrites: req.UnsafeWrites,
-		Autonomy:     req.Autonomy,
-		Origin:       req.Origin,
-		Note:         req.Note,
-		AgentTurns:   req.AgentTurns,
+		Stream:           !req.NoStream,
+		DryRun:           req.DryRun,
+		UnsafeWrites:     req.UnsafeWrites,
+		Autonomy:         req.Autonomy,
+		Origin:           req.Origin,
+		Note:             req.Note,
+		AgentTurns:       req.AgentTurns,
+		TestFirstBaseSHA: req.chainBase,
 	}
 	if run.Mode == "" {
 		run.Mode, run.ModeSource = s.resolveBuildMode(entry.Path)
@@ -4024,6 +4025,7 @@ func resumeRequest(run *runlog.Run) RunRequest {
 		NoStream:     !run.Stream,
 		UnsafeWrites: run.UnsafeWrites,
 		resumed:      true,
+		chainBase:    run.TestFirstBaseSHA,
 	}
 	// The SEATS ride the record too. Without them the dispatch re-resolved
 	// the roster from the config defaults, so a run the person had

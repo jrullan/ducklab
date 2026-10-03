@@ -791,6 +791,8 @@ func testFirstPrompt(task, gateCommand string) string {
 	b.WriteString("- It must test behaviour the task describes, not the shape of an " +
 		"implementation that does not exist yet.\n")
 	b.WriteString("- Cover the boundaries the task implies, not only the obvious case.\n")
+	b.WriteString("- For every literal expected value, derive every expected value from the acceptance slice it cites; show the calculation or trace in the test when it is not self-evident.\n")
+	b.WriteString("- As reviewer, independently recompute every expected literal from its cited acceptance slice. A comment that describes one result while asserting another is a blocking test defect, not an implementation request.\n")
 	fmt.Fprintf(&b, "- The gate is `%s`. Run it with verify_run to see your test fail.\n", gateCommand)
 	// The test is where an underdetermined decision gets baked in first: a
 	// test that assumes "week = Sunday start" makes the build assume it too,
@@ -804,6 +806,24 @@ func testFirstPrompt(task, gateCommand string) string {
 	b.WriteString("\nThe filesystem tools will refuse any path that is not a test file. " +
 		"That is deliberate, not a mistake to work around.\n")
 	return b.String()
+}
+
+func testFirstOracleNotice(sha string) string {
+	if strings.TrimSpace(sha) == "" {
+		return ""
+	}
+	return fmt.Sprintf(`
+
+## Accepted test-first oracle
+
+This build starts from accepted red-test commit %s. Its assertions are the test-first oracle for this build: implement the accepted task against them.
+
+Do not edit the accepted oracle merely to make the gate green. If an expected value contradicts the authoritative acceptance contract, do not contort the implementation around it. Report the blocker exactly as:
+
+test-first oracle contradicts acceptance slice N: <calculation/evidence>
+
+The reviewer must independently compare expected literals with the cited acceptance slices. When a contradiction is proven, put the exact marker "test-first oracle contradicts the acceptance contract" in the finding so Ducklab pauses for a human decision. Do not edit the accepted oracle unless the human answer or note explicitly authorizes its correction.
+`, short(sha))
 }
 
 // checkTestGate refuses a project whose gate does not run tests.

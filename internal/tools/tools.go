@@ -372,15 +372,37 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
+	sig := name + "\x00" + string(args)
+	// Validate the filesystem path before enforcing an observational budget.
+	// Otherwise a caller that wrote /tests/foo receives only "budget
+	// exhausted" and cannot discover the single argument correction that
+	// would let the next turn progress (B-491/B-492).
+	if guidance := projectRelativePathGuidance(ectx.ProjectRoot, name, args); guidance != "" {
+		if refusal := repeatedFailureRefusal(ectx, sig, name); refusal != nil {
+			return refusal, nil
+		}
+		res := ErrorResult("%s", guidance)
+		trackEarlyFailure(ectx, sig)
+		return res, nil
+	}
 	explorationLimit := ectx.effectiveExplorationCallLimit()
 	if explorationTool[name] && ectx.explorationCalls >= explorationLimit {
 		ectx.ReadToolsClosed = true
+		// A refusal is itself information, but repeating it cannot yield more.
+		// Close the turn on the second identical budget refusal rather than
+		// letting it consume every remaining provider call (B-492).
+		if ectx.lastFailSig == sig && ectx.lastFailCount >= 1 {
+			ectx.lastFailCount++
+			ectx.ToolsClosed = true
+			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
+				"REFUSED, and tool use is now CLOSED for this reply: this exact call repeated after the %d-call research budget was exhausted. Conclude now with what you have, make progress in the next turn, or report a blocker.", explorationLimit)}, nil
+		}
+		trackEarlyFailure(ectx, sig)
 		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker.", explorationLimit), nil
 	}
 	if ectx.ReadToolsClosed && explorationTool[name] {
 		return ErrorResult("read-only tools are CLOSED for this reply: stop exploring and use what you already read; write, patch, verify, or answer"), nil
 	}
-	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
 			if ectx.fsPatchRefusalStreak == nil {
@@ -439,19 +461,8 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			return ErrorResult("REFUSED, and read-only tools are now CLOSED for this reply: %s with these arguments has been served twice already in this turn. You have everything; stop exploring. You may still write, patch, verify, or answer.", name), nil
 		}
 	}
-	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
-		ectx.lastFailCount++
-		if ectx.lastFailCount >= RepeatFailEndTurn {
-			ectx.ToolsClosed = true
-			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
-				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
-					"and you kept repeating it. Answer now with what you already have — your next message must be "+
-					"your final reply, not a tool call.", name, ectx.lastFailCount)}, nil
-		}
-		return &Result{IsError: true, Content: fmt.Sprintf(
-			"REFUSED: you have made this exact failing call %d times — %s with the same "+
-				"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
-				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
+	if refusal := repeatedFailureRefusal(ectx, sig, name); refusal != nil {
+		return refusal, nil
 	}
 	// A seat that keeps searching and keeps finding nothing is looking for
 	// something that is not there — 21 fs_search calls at 50 s each on an
@@ -531,6 +542,59 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+func trackEarlyFailure(ectx *ExecContext, sig string) {
+	if ectx.lastFailSig == sig {
+		ectx.lastFailCount++
+		return
+	}
+	ectx.lastFailSig, ectx.lastFailCount = sig, 1
+}
+
+func repeatedFailureRefusal(ectx *ExecContext, sig, name string) *Result {
+	if ectx.lastFailCount < RepeatFailLimit || ectx.lastFailSig != sig {
+		return nil
+	}
+	ectx.lastFailCount++
+	if ectx.lastFailCount >= RepeatFailEndTurn {
+		ectx.ToolsClosed = true
+		return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
+			"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
+				"and you kept repeating it. Answer now with what you already have — your next message must be "+
+				"your final reply, not a tool call.", name, ectx.lastFailCount)}
+	}
+	return &Result{IsError: true, Content: fmt.Sprintf(
+		"REFUSED: you have made this exact failing call %d times — %s with the same "+
+			"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
+			"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}
+}
+
+// projectRelativePathGuidance turns the common "/tests/foo" spelling into a
+// correction in Ducklab's vocabulary. True absolute paths already inside the
+// project remain valid for callers that intentionally use them.
+func projectRelativePathGuidance(root, name string, args json.RawMessage) string {
+	if !strings.HasPrefix(name, "fs_") {
+		return ""
+	}
+	var envelope struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(args, &envelope) != nil || envelope.Path == "" || !filepath.IsAbs(envelope.Path) {
+		return ""
+	}
+	cleanPath := filepath.Clean(envelope.Path)
+	cleanRoot, err := filepath.Abs(root)
+	if err == nil {
+		if rel, relErr := filepath.Rel(cleanRoot, cleanPath); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return ""
+		}
+	}
+	relative := strings.TrimLeft(filepath.ToSlash(cleanPath), "/")
+	if relative == "" {
+		relative = "."
+	}
+	return fmt.Sprintf("paths are project-relative: use %s (not %s)", relative, envelope.Path)
 }
 
 func (e *ExecContext) effectiveExplorationCallLimit() int {

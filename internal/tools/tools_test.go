@@ -79,6 +79,36 @@ func TestPathJail(t *testing.T) {
 	}
 }
 
+// B-491: models naturally spell project-root paths with a leading slash.
+// Every filesystem tool must answer that mistake the same way instead of
+// leaking filepath.EvalSymlinks' cryptic "lstat /tests" failure.
+func TestFilesystemToolsExplainLeadingSlashPaths(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry()
+	for _, tool := range []Tool{&FSList{}, &FSRead{}, &FSWrite{}, &FSWriteLines{}, &FSPatch{}, &FSDelete{}} {
+		reg.Register(tool)
+	}
+	cases := []struct {
+		name string
+		args json.RawMessage
+	}{
+		{"fs_list", json.RawMessage(`{"path":"/tests"}`)},
+		{"fs_read", json.RawMessage(`{"path":"/tests/parser.test.mjs"}`)},
+		{"fs_write", json.RawMessage(`{"path":"/tests/parser.test.mjs","content":"x"}`)},
+		{"fs_write_lines", json.RawMessage(`{"path":"/tests/parser.test.mjs","start":1,"end":1,"content":"x"}`)},
+		{"fs_patch", json.RawMessage(`{"path":"/tests/parser.test.mjs","search":"x","replace":"y"}`)},
+		{"fs_delete", json.RawMessage(`{"path":"/tests/parser.test.mjs"}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, _ := reg.Execute(context.Background(), &ExecContext{ProjectRoot: dir}, tc.name, tc.args)
+			if !res.IsError || !strings.Contains(res.Content, "paths are project-relative") || strings.Contains(res.Content, "lstat /tests") {
+				t.Fatalf("result = %+v", res)
+			}
+		})
+	}
+}
+
 func TestWriteGuardJail(t *testing.T) {
 	ectx := testExecContext(t)
 	guard := WriteGuard(ectx, "../outside.txt", []byte("test"), true)

@@ -627,6 +627,7 @@ export interface RunlogRun {
   support_profile_source?: string;
   task_body_hash?: string;
   task_id?: string;
+  test_first_base_sha?: string;
   tests_modified?: boolean;
   tokens_estimated?: boolean;
   tree_snapshot?: string;

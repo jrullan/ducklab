@@ -530,6 +530,17 @@ func TestResumeCarriesTheNoteAndTheLiftedCap(t *testing.T) {
 	}
 }
 
+func TestResumeCarriesTheAcceptedTestFirstOracle(t *testing.T) {
+	req := resumeRequest(&runlog.Run{
+		TaskID: "T-014", Mode: "pair", Stream: true,
+		TestFirstBaseSHA: "0123456789abcdef",
+		Roster:           map[string]string{"implementer": "glm52", "reviewer": "qwen38-max"},
+	})
+	if req.chainBase != "0123456789abcdef" {
+		t.Fatalf("chain base = %q, want accepted test-first commit", req.chainBase)
+	}
+}
+
 // A spec architect that asked the human died as "human input needed" with no
 // question on the record and no way back in: the stage's Execute closure
 // returned the raw error (the pendingErr wrap lived only in the mode

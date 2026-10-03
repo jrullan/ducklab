@@ -2153,6 +2153,9 @@
           "task_id": {
             "type": "string"
           },
+          "test_first_base_sha": {
+            "type": "string"
+          },
           "tests_modified": {
             "type": "boolean"
           },
