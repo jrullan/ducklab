@@ -279,6 +279,76 @@ func TestContractToleratesFencesAndPreamble(t *testing.T) {
 	}
 }
 
+// A reviewer in r-20261002-194740-3v2h described an AST node such as
+// {type:'const', value} before emitting its valid fenced verdict. Extraction
+// used to stop at that first brace and discard the actual contract.
+func TestContractPrefersFencedJSONAfterCodeLikeProse(t *testing.T) {
+	text := "The parser constructs nodes such as {type:'const', value}.\n\n" +
+		"```json\n" +
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"logic.mjs","line":23,"issue":"the parser drops a token","fix":"retain the token"}]}` + "\n" +
+		"```"
+
+	got, err := ParseContract("verdict", text)
+	if err != nil {
+		t.Fatalf("valid fenced verdict was discarded: %v", err)
+	}
+	verdict := got.(*Verdict)
+	if verdict.Verdict != "request-changes" || len(verdict.Findings) != 1 {
+		t.Fatalf("parsed verdict = %+v", verdict)
+	}
+}
+
+// When no JSON fence is present, each balanced object is a candidate. A
+// syntactically valid prose example must not hide a later object that actually
+// satisfies the requested contract.
+func TestContractTriesBalancedObjectsUntilOneSatisfiesSchema(t *testing.T) {
+	text := `The node was {"type":"const","value":3}. Final verdict:
+{"verdict":"approve","findings":[]}`
+
+	got, err := ParseContract("verdict", text)
+	if err != nil {
+		t.Fatalf("later contract object was discarded: %v", err)
+	}
+	if verdict := got.(*Verdict); verdict.Verdict != "approve" {
+		t.Fatalf("parsed verdict = %+v", verdict)
+	}
+}
+
+func TestContractRejectsDifferentSchemaValidObjectsAsAmbiguous(t *testing.T) {
+	finding := `{"severity":"major","file":"logic.mjs","line":23,"issue":"the parser drops a token","fix":"retain the token"}`
+	texts := []string{
+		`Last round I would have said {"verdict":"approve","findings":[]} but now: ` +
+			`{"verdict":"request-changes","findings":[` + finding + `]}`,
+		"Format example:\n```json\n{\"verdict\":\"approve\",\"findings\":[]}\n```\n" +
+			"My verdict:\n```json\n{\"verdict\":\"request-changes\",\"findings\":[" + finding + "]}\n```",
+	}
+	for _, text := range texts {
+		if _, err := ParseContract("verdict", text); err == nil || !strings.Contains(err.Error(), "2 different verdict objects") {
+			t.Errorf("ambiguous verdict diagnosis = %v", err)
+		}
+	}
+}
+
+func TestContractAcceptsRepeatedEquivalentObjects(t *testing.T) {
+	text := "Example and answer:\n```json\n{\"verdict\":\"approve\",\"findings\":[]}\n```\n" +
+		"```json\n{\"findings\":[],\"verdict\":\"approve\"}\n```"
+	got, err := ParseContract("verdict", text)
+	if err != nil {
+		t.Fatalf("equivalent repeated verdicts were treated as ambiguous: %v", err)
+	}
+	if verdict := got.(*Verdict); verdict.Verdict != "approve" {
+		t.Fatalf("parsed verdict = %+v", verdict)
+	}
+}
+
+func TestContractFailurePrefersCandidateWithContractKey(t *testing.T) {
+	text := `{"verdict":"maybe","findings":[]} For reference the shape is {"a":1}`
+	_, err := ParseContract("verdict", text)
+	if err == nil || !strings.Contains(err.Error(), `"verdict" must be "approve" or "request-changes", got "maybe"`) {
+		t.Fatalf("diagnosis = %v, want the verdict-like candidate's validation error", err)
+	}
+}
+
 func TestExtractJSONHandlesBracesInStrings(t *testing.T) {
 	text := `{"verdict":"request-changes","findings":[{"severity":"major","file":"a.go","line":1,"issue":"uses {placeholder} syntax","fix":"escape it"}]}`
 	got, err := ParseContract("verdict", text)
