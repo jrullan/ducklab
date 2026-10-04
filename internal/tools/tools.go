@@ -965,7 +965,10 @@ func PathGuard(ectx *ExecContext, path string) (string, *Result) {
 	// assertion goes to the person, with the reason; a changed oracle that a
 	// reviewer approves measures nothing (B-490).
 	if ectx.Role == config.RoleImplementer {
-		if oracle, ok := oracleFor(ectx, absPath); ok && !OracleCorrectionAllowed(ectx, oracle) {
+		for _, oracle := range oraclesFor(ectx, absPath) {
+			if OracleCorrectionAllowed(ectx, oracle) {
+				continue
+			}
 			return absPath, ErrorResult("%s is this task's oracle (%s): its test-first run wrote it to decide whether the task is done. "+
 				"Do not edit it. If an assertion contradicts the task, call oracle_dispute with the test, the assertion and why "+
 				"(the slice it contradicts and the arithmetic); the person decides.", path, oracle)

@@ -49,29 +49,38 @@ func OracleCorrectionAllowed(ectx *ExecContext, oracle string) bool {
 	return false
 }
 
-// oracleFor is the oracle test a jailed path designates, by file identity,
+// oraclesFor are the oracle tests a jailed path designates, by file identity,
 // not spelling: a symlink or hard link to the test is the test (review of
 // #147: "oracle-link.mjs -> tests/parser.test.mjs" overwrote the oracle), and
-// a directory that holds the test cannot be deleted around it.
-func oracleFor(ectx *ExecContext, absPath string) (string, bool) {
+// a directory designates every oracle under it — all of them, so approving
+// one cannot carry the others along (review of #147).
+func oraclesFor(ectx *ExecContext, absPath string) []string {
+	var out []string
 	target, targetErr := os.Stat(absPath)
 	for _, oracle := range ectx.OracleTests {
 		oracleAbs, err := PathJail(ectx.ProjectRoot, oracle)
 		if err != nil {
 			continue
 		}
-		if filepath.Clean(oracleAbs) == filepath.Clean(absPath) {
-			return oracle, true
+		switch {
+		case filepath.Clean(oracleAbs) == filepath.Clean(absPath):
+			out = append(out, oracle)
+		case targetErr != nil:
+		case target.IsDir() && strings.HasPrefix(filepath.Clean(oracleAbs), filepath.Clean(absPath)+string(filepath.Separator)):
+			out = append(out, oracle)
+		default:
+			if info, err := os.Stat(oracleAbs); err == nil && os.SameFile(target, info) {
+				out = append(out, oracle)
+			}
 		}
-		if targetErr != nil {
-			continue
-		}
-		if info, err := os.Stat(oracleAbs); err == nil && os.SameFile(target, info) {
-			return oracle, true
-		}
-		if target.IsDir() && strings.HasPrefix(filepath.Clean(oracleAbs), filepath.Clean(absPath)+string(filepath.Separator)) {
-			return oracle, true
-		}
+	}
+	return out
+}
+
+// oracleFor is the single oracle test a file path designates.
+func oracleFor(ectx *ExecContext, absPath string) (string, bool) {
+	if found := oraclesFor(ectx, absPath); len(found) > 0 {
+		return found[0], true
 	}
 	return "", false
 }

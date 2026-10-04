@@ -166,3 +166,23 @@ func TestTheOracleCannotBeReachedThroughAnAlias(t *testing.T) {
 		t.Fatalf("the oracle changed through an alias: %q, %v", data, err)
 	}
 }
+
+// Review of #147: a directory designates every oracle under it. Approving one
+// must not let a recursive delete of their directory take the other.
+func TestApprovingOneOracleDoesNotUnlockTheirDirectory(t *testing.T) {
+	reg, ectx, root := oracleProject(t)
+	if err := os.WriteFile(filepath.Join(root, "tests", "other.test.mjs"), []byte("assert other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx.OracleTests = append(ectx.OracleTests, "tests/other.test.mjs")
+	ectx.Answers = map[string]string{oracleQuestionID("tests/parser.test.mjs", "2^-3^2 = 0.015625"): OracleCorrectAnswer}
+	res, _ := reg.Execute(context.Background(), ectx, "fs_delete", json.RawMessage(`{"path":"tests","recursive":true}`))
+	if !res.IsError || !strings.Contains(res.Content, "tests/other.test.mjs") {
+		t.Fatalf("the directory of an unapproved oracle was deleted: %+v", res)
+	}
+	for _, name := range []string{"parser.test.mjs", "other.test.mjs"} {
+		if _, err := os.Stat(filepath.Join(root, "tests", name)); err != nil {
+			t.Errorf("tests/%s was removed: %v", name, err)
+		}
+	}
+}

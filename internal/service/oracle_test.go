@@ -278,3 +278,34 @@ func TestOnlyAPersonAnswersAnOracleDispute(t *testing.T) {
 		t.Fatalf("a person's answer to an oracle dispute was refused: %v", err)
 	}
 }
+
+// Review of #147: a lane-widening answer from a non-human decider is refused
+// before anything is committed — the offer stays, no lane is widened.
+func TestANonHumanLaneWideningAnswerChangesNothing(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-lane-mcp", ProjectID: "p", TaskID: "T-014", Stage: "build", Status: "paused", PendingKind: "question",
+		PendingData: map[string]interface{}{"question_id": "oracle-tests/parser.test.mjs:abc", "question": "Is the test wrong?",
+			"lane_widening": []string{"tests/parser.test.mjs"}}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	s.runsMu.Lock()
+	s.runs[run.ID] = &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.runsMu.Unlock()
+	err = s.RunAnswerWithLaneAs(context.Background(), run.ID, "", tools.OracleCorrectAnswer, []string{"tests/parser.test.mjs"}, "mcp:elena")
+	if err == nil || !strings.Contains(err.Error(), "a person must approve it") {
+		t.Fatalf("an operator widened a lane by answering: %v", err)
+	}
+	if _, ok := run.PendingData["lane_widening"]; !ok || run.PendingKind != "question" {
+		t.Fatalf("the refused answer changed the run: %+v", run.PendingData)
+	}
+	events, _ := runlog.ReadEvents(w.RunDir())
+	for _, e := range events {
+		if e.Type == "lane_widened" || e.Type == "human" {
+			t.Fatalf("the refused answer was recorded: %s", e.Type)
+		}
+	}
+}
