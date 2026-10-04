@@ -5672,7 +5672,10 @@ func runWrittenPaths(runDir string) []string {
 			continue
 		}
 		switch e.Data.Tool {
-		case "fs_write", "fs_write_lines", "fs_patch":
+		// A delete is a write: the scoped restore puts back only the paths
+		// listed here, so a file a run deleted in the shared checkout stayed
+		// deleted after reject or abort (found reviewing #145).
+		case "fs_write", "fs_write_lines", "fs_patch", "fs_delete":
 		default:
 			continue
 		}

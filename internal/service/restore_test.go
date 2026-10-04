@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -504,5 +505,56 @@ func TestAbortOutlivesCanceledRequestToStopWorker(t *testing.T) {
 	}
 	if run.Status != "failed" || run.Verdict != "ABORTED" {
 		t.Fatalf("canceled request left run active: status=%q verdict=%q", run.Status, run.Verdict)
+	}
+}
+
+// Found reviewing #145: the scoped restore puts back only the paths the run
+// wrote, and a delete was not counted as a write. A file a run deleted in the
+// shared checkout stayed deleted after reject or abort.
+func TestRejectRestoresAFileTheRunDeleted(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, nil)
+	g := gitProject(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "obsolete.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("add obsolete.txt"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{ID: "r-delete-restore", ProjectID: "p", TaskID: "T-001", Stage: "build", Status: "paused",
+		TreeSnapshot: snapshot, TreeSnapshotHead: mustHead(t, g), StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+
+	if err := os.Remove(filepath.Join(dir, "obsolete.txt")); err != nil {
+		t.Fatal(err)
+	}
+	w.AppendEvent("tool_call", map[string]interface{}{"tool": "fs_delete", "ok": true, "args": `{"path":"obsolete.txt"}`})
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("run edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.AppendEvent("tool_call", map[string]interface{}{"tool": "fs_write", "ok": true, "args": `{"path":"index.html"}`})
+	if got := runWrittenPaths(rs.runDir); !slices.Contains(got, "obsolete.txt") {
+		t.Fatalf("written paths %v omit the deleted file", got)
+	}
+	if err := restoreAfterUnaccepted(rs); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "obsolete.txt")); err != nil || string(data) != "keep me\n" {
+		t.Errorf("the deleted file was not restored: %q, %v", data, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "index.html")); string(data) != "original\n" {
+		t.Errorf("the written file was not restored: %q", data)
 	}
 }

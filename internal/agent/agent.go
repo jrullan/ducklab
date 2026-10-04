@@ -767,6 +767,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 
 		if salvagedReasoningCall != nil {
+			// Canonical before execution: a delete removes the file that lets
+			// "/obsolete.txt" be read as a project path (review of #145).
+			salvagedArgs := tools.CanonicalToolArgs(ectx, salvagedReasoningCall.Name, salvagedReasoningCall.Args)
 			result, terr := executeTextToolCall(ctx, loop, ectx, salvagedReasoningCall, turn)
 			if errors.Is(terr, tools.ErrHumanNeeded) {
 				outcome.Pending = ectx.Pending
@@ -779,8 +782,8 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				Role: "user", Content: fmt.Sprintf("Tool result for %s:\n%s", salvagedReasoningCall.Name, result.Content),
 			})
 			rec := ToolCallRecord{
-				Name: salvagedReasoningCall.Name, Args: salvagedReasoningCall.Args,
-				Result: result, Digest: tools.Digest(salvagedReasoningCall.Args),
+				Name: salvagedReasoningCall.Name, Args: salvagedArgs,
+				Result: result, Digest: tools.Digest(salvagedArgs),
 			}
 			outcome.ToolCalls = append(outcome.ToolCalls, rec)
 			if loop.OnToolCall != nil {
@@ -815,6 +818,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			toolCalls := choice.Message.ToolCalls
 			conversation = append(conversation, choice.Message)
 			for _, tc := range toolCalls {
+				// The record carries the canonical path the tool acted on, so the
+				// run's written-path list, its restore scope and retry evidence
+				// see "tests/x", not the "/tests/x" a model spelled (#145). It is
+				// computed before execution: a delete removes the file that lets
+				// "/obsolete.txt" be read as a project path.
+				nativeArgs := tools.CanonicalToolArgs(ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 				result, terr := executeToolCall(ctx, loop, ectx, tc, turn)
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
@@ -827,9 +836,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				})
 				rec := ToolCallRecord{
 					Name:   tc.Function.Name,
-					Args:   json.RawMessage(tc.Function.Arguments),
+					Args:   nativeArgs,
 					Result: result,
-					Digest: tools.Digest(json.RawMessage(tc.Function.Arguments)),
+					Digest: tools.Digest(nativeArgs),
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {
@@ -845,6 +854,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			// Check for tool call in text
 			toolCall, remainingText := parseTextToolCall(text)
 			if toolCall != nil {
+				textArgs := tools.CanonicalToolArgs(ectx, toolCall.Name, toolCall.Args)
 				result, terr := executeTextToolCall(ctx, loop, ectx, toolCall, turn)
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
@@ -860,9 +870,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				})
 				rec := ToolCallRecord{
 					Name:   toolCall.Name,
-					Args:   toolCall.Args,
+					Args:   textArgs,
 					Result: result,
-					Digest: tools.Digest(toolCall.Args),
+					Digest: tools.Digest(textArgs),
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {
