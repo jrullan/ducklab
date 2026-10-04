@@ -740,6 +740,22 @@ export interface Bug {
    * task each. A triager recommends one; the person writes, corrects or
    * discards it through bugEdit until promote consumes it. */
   proposal?: BugPortion[];
+  /** Every task the report was promoted into, with the status the runs give
+   * each. task_id names only the first task of the current promotion; a split
+   * report (TI-36X B-003: T-014 + T-015) is waiting on all of them. */
+  tasks?: BugTask[];
+  /** Sent back after its last fix, with nothing promoted since. A reopen
+   * returns the bug to triaged; in_progress alone never means this. */
+  reopened?: boolean;
+}
+
+/** One task a report was promoted into. `current` marks the latest
+ * promotion; earlier tasks were consumed by a reopen and are provenance. */
+export interface BugTask {
+  id: string;
+  /** todo | blocked | in_progress | review | accepted, as the board shows it. */
+  status: string;
+  current?: boolean;
 }
 
 /** One lane of a split proposal: a task title, the 1-2 acceptance criteria it

@@ -155,6 +155,28 @@ type Bug struct {
 	// deciding includes writing, correcting or discarding portions, not only
 	// taking the recommendation whole. Empty means promote makes one task.
 	Proposal []Portion `json:"proposal,omitempty"`
+	// Tasks are every task this report was promoted into, in promotion order,
+	// with the status the runs give each. TaskID names only the first task of
+	// the current promotion: TI-36X B-003 was split into T-014 + T-015, and a
+	// client reading TaskID alone saw the accepted T-014, missed T-015 paused
+	// at its gate, and offered to rerun finished work.
+	Tasks []Task `json:"tasks,omitempty"`
+	// Reopened is true when the person sent the report back after its last
+	// fix and nothing has been promoted since. Status alone cannot say it: a
+	// reopen returns the bug to triaged, and in_progress means a promotion.
+	Reopened bool `json:"reopened,omitempty"`
+}
+
+// Task is one task a report was promoted into.
+type Task struct {
+	ID string `json:"id"`
+	// Status is the task's board status (todo, blocked, in_progress, review,
+	// accepted), derived from its runs; empty when the plan no longer has it.
+	Status string `json:"status"`
+	// Current marks the tasks of the latest promotion. A reopened report
+	// keeps its earlier tasks as provenance, but their work was consumed and
+	// is not what the report is waiting on now.
+	Current bool `json:"current,omitempty"`
 }
 
 // Portion is one lane of a split proposal: a task title, the 1-2 acceptance
