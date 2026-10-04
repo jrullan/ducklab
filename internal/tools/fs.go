@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/skill"
 )
 
@@ -845,17 +845,12 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
-	if err != nil {
-		return ErrorResult("jail: %v", err), nil
-	}
-	// Deleting the governance file is a write to it. fs_delete calls no
-	// WriteGuard (there is no content to guard), so the rule lives here too.
-	if ectx.Role == config.RoleImplementer && isProjectGovernancePath(ectx.ProjectRoot, absPath) {
-		if ectx.OnDistress != nil {
-			ectx.OnDistress("governance_write_refused", map[string]interface{}{"path": a.Path})
-		}
-		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", a.Path), nil
+	// A delete is a write to the path: the lane, governance, test-only runs,
+	// the denylist (.git) and protected globs all apply. It used to check
+	// governance alone.
+	absPath, guard := PathGuard(ectx, a.Path)
+	if guard != nil {
+		return guard, nil
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -864,10 +859,39 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if info.IsDir() && !a.Recursive {
 		return ErrorResult("refusing to delete directory without recursive=true"), nil
 	}
+	if info.IsDir() {
+		// RemoveAll takes the whole subtree, so every path in it must pass the
+		// rules the directory's own name passed (review of #149: deleting "."
+		// removed .git, and a parent removed a protected file).
+		if guard := subtreeGuard(ectx, a.Path, absPath); guard != nil {
+			return guard, nil
+		}
+	}
 	if err := os.RemoveAll(absPath); err != nil {
 		return ErrorResult("delete: %v", err), nil
 	}
 	return SuccessResult("deleted %s", a.Path), nil
+}
+
+// subtreeGuard applies PathGuard to every path under dir, and refuses the
+// delete at the first one a rule protects. A refused directory is not entered.
+func subtreeGuard(ectx *ExecContext, requested, dir string) *Result {
+	var refused *Result
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == dir {
+			return nil
+		}
+		rel, ok := rootRelative(ectx.ProjectRoot, p)
+		if !ok {
+			return nil
+		}
+		if _, guard := PathGuard(ectx, filepath.ToSlash(rel)); guard != nil {
+			refused = ErrorResult("refusing to delete %s: it contains %s, which this run may not remove (%s)", requested, filepath.ToSlash(rel), guard.Content)
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return refused
 }
 
 // underDir reports whether rel is the named directory or inside it — a path
