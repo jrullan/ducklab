@@ -159,6 +159,13 @@ type ExecContext struct {
 	// file mutation. Exact-call brakes cannot see a research loop made of
 	// slightly different grep/find/read queries that all pursue the same fact.
 	explorationCalls int
+	// researchRefusals counts observational calls refused after the research
+	// boundary in this inspect/act cycle. Measured over every local
+	// implementer run since the boundary landed: 0 of 72 turns that hit it
+	// made an edit afterwards, and atom-local asked again 5.6 times on
+	// average — the refusal never converted reading into action, it only
+	// spent the turn's calls (B-492).
+	researchRefusals int
 	// ExplorationCallLimit overrides the ordinary per-turn research boundary.
 	// Zero uses the harness default. Strategy-level bounded retries use a
 	// smaller value because their current tree and failing evidence are already
@@ -373,12 +380,24 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
 	explorationLimit := ectx.effectiveExplorationCallLimit()
-	if explorationTool[name] && ectx.explorationCalls >= explorationLimit {
+	if explorationTool[name] && (ectx.ReadToolsClosed || ectx.explorationCalls >= explorationLimit) {
+		// A malformed path is the actionable error; the boundary message would
+		// hide it, and the seat would retry the same bad path (B-492: ten
+		// refused reads of "/tests/parser.test.mjs" never showed the cause).
+		if path := argPath(args); path != "" {
+			if _, err := PathJail(ectx.ProjectRoot, path); err != nil {
+				return ErrorResult("%v", err), nil
+			}
+		}
 		ectx.ReadToolsClosed = true
-		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker.", explorationLimit), nil
-	}
-	if ectx.ReadToolsClosed && explorationTool[name] {
-		return ErrorResult("read-only tools are CLOSED for this reply: stop exploring and use what you already read; write, patch, verify, or answer"), nil
+		ectx.researchRefusals++
+		if ectx.researchRefusals >= ResearchRefusalLimit {
+			ectx.ToolsClosed = true
+			return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: you asked to read again after the research boundary. " +
+				"Answer now, in text: the exact edit you would make next (file, lines, the new text) and why — or the blocker that stops you. " +
+				"The next attempt starts from that answer, so make it concrete."}, nil
+		}
+		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker. Another read request closes every tool for this reply.", explorationLimit), nil
 	}
 	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
@@ -476,6 +495,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		// A real file change starts a new inspect/act cycle. Re-open bounded
 		// reads so the model can inspect the result before verification.
 		ectx.explorationCalls = 0
+		ectx.researchRefusals = 0
 		ectx.ReadToolsClosed = false
 		ectx.MutationUnverified = true
 	}
@@ -602,6 +622,7 @@ func (e *ExecContext) BeginTurn() {
 	e.ToolbeltReminder = false
 	e.toolbeltViolations = 0
 	e.explorationCalls = 0
+	e.researchRefusals = 0
 	e.lastFailSig, e.lastFailCount = "", 0
 }
 
@@ -639,6 +660,12 @@ func (e *ExecContext) ToolAvailable(name string) bool {
 // must turn gathered evidence into code, verification, a question or a clear
 // blocker. A successful file mutation starts a fresh bounded phase.
 const ExplorationCallLimit = 20
+
+// ResearchRefusalLimit is how many refused observational calls end the
+// reply's tool use. The first refusal states the boundary; asking again shows
+// the seat will not turn to action, so the remaining calls are worth more as
+// a concrete written plan the next attempt can execute (B-492).
+const ResearchRefusalLimit = 2
 
 // SearchMissLimit is how many fs_search calls may find nothing in a row
 // before the next one is refused with directions.
@@ -788,6 +815,23 @@ func existingAncestor(path string) (string, error) {
 	}
 }
 
+// projectRelativeSpelling reads an absolute path outside the project as the
+// project-relative path a model meant: "/tests/x" when the project has a
+// top-level "tests". The first component must exist in the project, so an
+// absolute path to the host (/etc/passwd, /tmp/x) is never silently redirected
+// into a file the model did not name.
+func projectRelativeSpelling(rootAbs, clean string) (string, bool) {
+	rel := strings.TrimLeft(filepath.ToSlash(clean), "/")
+	if rel == "" {
+		return "", false
+	}
+	first := strings.SplitN(rel, "/", 2)[0]
+	if _, err := os.Lstat(filepath.Join(rootAbs, first)); err != nil {
+		return "", false
+	}
+	return filepath.FromSlash(rel), true
+}
+
 func PathJail(root, path string) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("project root is required")
@@ -796,16 +840,31 @@ func PathJail(root, path string) (string, error) {
 	clean := filepath.Clean(path)
 	// If it's absolute, check it's inside root
 	if filepath.IsAbs(clean) {
-		abs, err := filepath.EvalSymlinks(clean)
-		if err != nil {
-			return "", fmt.Errorf("path escapes root: %v", err)
-		}
 		rootAbs, err := filepath.EvalSymlinks(root)
 		if err != nil {
 			return "", fmt.Errorf("root error: %v", err)
 		}
-		if !strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) && abs != rootAbs {
-			return "", fmt.Errorf("path escapes root: %s", path)
+		abs, err := filepath.EvalSymlinks(clean)
+		if err != nil || (!strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) && abs != rootAbs) {
+			// Small models write project paths with a leading slash
+			// ("/tests/parser.test.mjs"). Refusing that as an escape cost the
+			// TI-36X T-014 build its whole round: the seat had the exact fix,
+			// got "path escapes root: lstat /tests", and spent its calls
+			// looking for the file (B-491). Read it as project-relative when
+			// its first component names something in the project; anything
+			// else still escapes, with the spelling that works.
+			// A not-yet-existing file under the project spelled absolutely is
+			// a project path too; the relative branch checks its ancestors.
+			for _, prefix := range []string{rootAbs, filepath.Clean(root)} {
+				if rel, ok := strings.CutPrefix(clean, prefix+string(filepath.Separator)); ok {
+					return PathJail(root, rel)
+				}
+			}
+			if rel, ok := projectRelativeSpelling(rootAbs, clean); ok {
+				return PathJail(root, rel)
+			}
+			rel := strings.TrimLeft(filepath.ToSlash(clean), "/")
+			return "", fmt.Errorf("path escapes root: %s — tool paths are project-relative; if you meant a project file, write %q with no leading slash", path, rel)
 		}
 		if IsHarnessPath(root, abs) {
 			return "", fmt.Errorf("%s is ducklab's own run log, not project content", path)
@@ -1354,4 +1413,15 @@ func RunShell(ctx context.Context, ectx *ExecContext, cmd string, timeoutS int) 
 		return string(output) + reason, exitCode, nil
 	}
 	return string(output), exitCode, nil
+}
+
+// argPath is the "path" argument of a tool call, if it has one.
+func argPath(args json.RawMessage) string {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(args, &a) != nil {
+		return ""
+	}
+	return strings.TrimSpace(a.Path)
 }
