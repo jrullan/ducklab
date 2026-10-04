@@ -139,7 +139,9 @@ describe("Now — the inbox", () => {
   // pins the interaction: a live conversation about the task keeps the
   // reopened card quiet exactly as any in-flight run does; a dead one does not.
   it("lets a live chat about the task keep a reopened report quiet, and a dead one not", async () => {
-    const reopened = { id: "B-reopened", title: "Still broken", severity: "high", status: "in_progress", task_id: "T-026", source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z", next: ["fixed"] };
+    // B-494: a report is idle by its tasks, not its task_id; this one's only
+    // task has not landed, so a dead chat leaves it owed a run.
+    const reopened = { id: "B-reopened", title: "Still broken", severity: "high", status: "in_progress", task_id: "T-026", tasks: [{ id: "T-026", status: "todo", current: true }], source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z", next: ["fixed"] };
     seed([{ ...base, id: "chat-live", stage: "chat", task_id: "T-026", status: "paused", verdict: "", pending_kind: "chat", next: ["reply", "end"] }]);
     const live = render(<Now client={clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>)} projectId="p" />);
     await screen.findByTestId("now-view");
@@ -190,7 +192,7 @@ describe("Now — the inbox", () => {
           source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:35:00Z",
           next: ["verified", "in_progress"] },
         { id: "B-reopened", title: "A reopened report", severity: "high", status: "in_progress", task_id: "T-reopened",
-          source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z",
+          tasks: [{ id: "T-reopened", status: "todo", current: true }], source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z",
           next: ["fixed"] },
       ])),
     } as Partial<EngineClient>);
@@ -778,31 +780,160 @@ describe("verification in the inbox", () => {
 // the verify card only exists at fixed, in_progress reads as "being worked
 // on", and nobody was working on it. Measured on B-003, which vanished from
 // every queue the moment its reporter sent it back.
-describe("reopened reports in the inbox", () => {
+//
+// B-494 (TI-36X Pro, 2026-10-03) then showed the opposite failure: every
+// in_progress report whose task_id had no run was called reopened, and the
+// card offered to rerun that task. B-003 there had been split into T-014 +
+// T-015; T-014 was accepted and T-015 sat PASSED at its gate. Each case below
+// is one cell of the rule: idle only when none of its tasks has work in
+// flight; "sent back" only when the engine says reopened; the door is the
+// task still owed, re-triage, or the bug's own move — never accepted work.
+describe("reports with nothing running in the inbox", () => {
   beforeEach(() => seed([]));
 
-  const reopened = {
+  const report = {
     id: "B-003", title: "Angle in red vertex does not allow changing", severity: "high",
-    status: "in_progress", task_id: "T-026", source: "desktop",
-    created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:21Z",
-    next: ["fixed", "triaged"],
+    source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:21Z",
+  };
+  const split = (second: string) => ({
+    ...report, status: "in_progress", task_id: "T-014", next: ["fixed", "triaged"],
+    tasks: [{ id: "T-014", status: "accepted", current: true }, { id: "T-015", status: second, current: true }],
+  });
+  const acceptedT014 = { ...base, id: "r-014", task_id: "T-014", mode: "pair", status: "done", verdict: "PASSED",
+    accepted: true, pending_kind: undefined, next: [], started_at: "2026-10-03T15:00:00Z" } as Run;
+  const gatedT015 = { ...base, id: "r-20261003-160620-w3xq", task_id: "T-015", status: "paused", verdict: "PASSED",
+    pending_kind: "gate", next: ["accept", "reject"], started_at: "2026-10-03T16:06:20Z" } as Run;
+  const withBugs = (bugs: unknown[]) =>
+    clientWith({ bugs: vi.fn(() => Promise.resolve(bugs)), triageBugs: vi.fn(() => Promise.resolve({ id: "r-triage" })) } as unknown as Partial<EngineClient>);
+
+  // "No card" proves nothing until the bug list has rendered. An idle anchor
+  // report shows that it has; the report under test must not stand beside it.
+  const anchor = { ...report, id: "B-900", title: "anchor", status: "in_progress", task_id: "T-900",
+    next: ["fixed", "triaged"], tasks: [{ id: "T-900", status: "todo", current: true }] };
+  const expectQuietAbout = async (id: string) => {
+    const cards = (await screen.findAllByTestId("now-reopened-card")).map((c) => c.textContent).join("|");
+    expect(cards).toContain("B-900");
+    expect(cards).not.toContain(id);
+    expect(screen.queryByTestId("now-reopened-count")).toBeNull();
+    expect(screen.getByTestId("now-stalled-count").textContent).toBe("1");
   };
 
-  it("surfaces one, offering new work in the task's own last mode", async () => {
-    seed([
-      { ...base, id: "r-old", task_id: "T-026", mode: "pair", status: "done",
-        verdict: "PASSED", accepted: true, pending_kind: undefined,
-        started_at: "2026-07-31T01:20:20Z" },
-    ]);
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>);
+  it("TI-36X B-003: keeps a split quiet while its second task waits at the gate", async () => {
+    seed([acceptedT014, gatedT015]);
+    render(<Now client={withBugs([split("review"), anchor])} projectId="p" />);
+    await screen.findByTestId("now-waiting-card");
+    await expectQuietAbout("B-003");
+  });
+
+  it("keeps a split quiet when only the store knows its second task is running", async () => {
+    seed([acceptedT014, { ...gatedT015, status: "running", pending_kind: undefined, next: ["abort"] }]);
+    render(<Now client={withBugs([split("todo"), anchor])} projectId="p" />);
+    await expectQuietAbout("B-003");
+  });
+
+  it("keeps a split quiet when only the engine knows its second task is running", async () => {
+    seed([acceptedT014]);
+    render(<Now client={withBugs([split("in_progress"), anchor])} projectId="p" />);
+    await expectQuietAbout("B-003");
+  });
+
+  it("offers the split's unstarted task, never the accepted one, and does not call it reopened", async () => {
+    seed([acceptedT014]);
+    const client = withBugs([split("todo")]);
     render(<Now client={client} projectId="p" />);
     const card = await screen.findByTestId("now-reopened-card");
-    expect(card.textContent).toContain("B-003");
-    expect(card.textContent).toContain("sent the report back");
+    expect(card.getAttribute("data-kind")).toBe("remaining");
+    expect(card.textContent).toContain("T-014 accepted; T-015 has not run");
+    expect(card.textContent).not.toContain("sent the report back");
+    expect(screen.getByTestId("now-reopened-run").textContent).toBe("Run T-015 (pair)");
+    expect(screen.queryByTestId("now-reopened-count")).toBeNull();
+    expect(screen.getByTestId("now-stalled-count").textContent).toBe("1");
     fireEvent.click(screen.getByTestId("now-reopened-run"));
-    await waitFor(() =>
-      expect(client.runStart).toHaveBeenCalledWith("p", "T-026", { mode: "pair" }),
-    );
+    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-015", { mode: "pair" }));
+    expect(client.runStart).not.toHaveBeenCalledWith("p", "T-014", expect.anything());
+  });
+
+  it("offers a failed-and-idle task again in its own last mode", async () => {
+    seed([{ ...base, id: "r-026", task_id: "T-026", mode: "council", status: "failed", verdict: "FAILED",
+      pending_kind: undefined, next: [], started_at: "2026-07-31T01:20:20Z", ended_at: "2026-07-31T01:30:00Z" }]);
+    const client = withBugs([{ ...report, status: "in_progress", task_id: "T-026", next: ["fixed", "triaged"],
+      tasks: [{ id: "T-026", status: "blocked", current: true }] }]);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-reopened-run"));
+    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-026", { mode: "council" }));
+  });
+
+  it("asks for re-triage, not a rerun, when the person really sent the report back", async () => {
+    seed([{ ...acceptedT014, task_id: "T-026" }]);
+    const reopened = { ...report, status: "triaged", reopened: true, needs_triage: true, next: ["in_progress", "duplicate", "wontfix"],
+      tasks: [{ id: "T-026", status: "accepted" }],
+      history: [{ ts: "2026-07-31T01:45:21Z", bug: "B-003", from: "fixed", to: "triaged", actor: "human", via: "reopen" }] };
+    const client = withBugs([reopened]);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-reopened-card");
+    expect(card.getAttribute("data-kind")).toBe("reopened");
+    expect(card.textContent).toContain("sent the report back");
+    expect(screen.queryByTestId("now-reopened-run")).toBeNull();
+    expect(screen.getByTestId("now-reopened-count").textContent).toBe("1");
+    expect(screen.queryByTestId("now-stalled-count")).toBeNull();
+    fireEvent.click(screen.getByTestId("now-reopened-triage"));
+    await waitFor(() => expect(client.triageBugs).toHaveBeenCalledWith("p", "B-003"));
+    expect(await screen.findByTestId("now-reopened-watch")).toBeTruthy();
+    expect(client.runStart).not.toHaveBeenCalled();
+  });
+
+  it("sends a re-triaged reopened report to the board to be promoted with a note", async () => {
+    const reopened = { ...report, status: "triaged", reopened: true, needs_triage: false, next: ["in_progress"],
+      tasks: [{ id: "T-026", status: "accepted" }] };
+    render(<Now client={withBugs([reopened])} projectId="p" />);
+    await screen.findByTestId("now-reopened-card");
+    expect(screen.getByTestId("now-reopened-promote").getAttribute("href")).toBe("#/board/bugs");
+    expect(screen.queryByTestId("now-reopened-triage")).toBeNull();
+    expect(screen.queryByTestId("now-reopened-run")).toBeNull();
+  });
+
+  it("stays quiet about a reopened report whose old task was relaunched by hand", async () => {
+    seed([{ ...base, id: "r-again", task_id: "T-026", status: "running", verdict: "", pending_kind: undefined, next: ["abort"] }]);
+    const reopened = { ...report, status: "triaged", reopened: true, needs_triage: true,
+      tasks: [{ id: "T-026", status: "accepted" }] };
+    render(<Now client={withBugs([reopened, anchor])} projectId="p" />);
+    await expectQuietAbout("B-003");
+  });
+
+  it("does not call an in_progress report reopened just because nothing runs for it", async () => {
+    // The old B-003 shape: in_progress, its one task accepted, no reopen in
+    // the engine's account. Rerunning accepted work answers nothing; the
+    // door is the bug's own move.
+    seed([{ ...acceptedT014, task_id: "T-026" }]);
+    const client = withBugs([{ ...report, status: "in_progress", task_id: "T-026", next: ["fixed", "triaged"],
+      tasks: [{ id: "T-026", status: "accepted", current: true }] }]);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-reopened-card");
+    expect(card.getAttribute("data-kind")).toBe("unsettled");
+    expect(card.textContent).not.toContain("sent the report back");
+    expect(screen.queryByTestId("now-reopened-run")).toBeNull();
+    expect(screen.queryByTestId("now-reopened-count")).toBeNull();
+    fireEvent.click(screen.getByTestId("now-reopened-fixed"));
+    await waitFor(() => expect(client.moveBug).toHaveBeenCalledWith("p", "B-003", "fixed"));
+    expect(await screen.findByTestId("now-verify")).toBeTruthy();
+  });
+
+  it("keeps a re-promoted report quiet while its new task runs", async () => {
+    seed([{ ...base, id: "r-new", task_id: "T-030", status: "running", verdict: "", pending_kind: undefined, next: ["abort"] }]);
+    render(<Now client={withBugs([{ ...report, status: "in_progress", task_id: "T-030", next: ["fixed", "triaged"],
+      tasks: [{ id: "T-026", status: "accepted" }, { id: "T-030", status: "todo", current: true }] }, anchor])} projectId="p" />);
+    await expectQuietAbout("B-003");
+  });
+
+  // A reopen leaves the old promotion's tasks as provenance, an abandoned
+  // half included (B-428). Offering it would rebuild the attempt the person
+  // already rejected.
+  it("never offers a task consumed by an earlier reopen", async () => {
+    render(<Now client={withBugs([{ ...report, status: "in_progress", task_id: "T-030", next: ["fixed", "triaged"],
+      tasks: [{ id: "T-025", status: "todo" }, { id: "T-030", status: "accepted", current: true }] }])} projectId="p" />);
+    const card = await screen.findByTestId("now-reopened-card");
+    expect(card.getAttribute("data-kind")).toBe("unsettled");
+    expect(screen.queryByTestId("now-reopened-run")).toBeNull();
   });
 
   // While new work IS running, the report is genuinely in progress and the
@@ -812,10 +943,9 @@ describe("reopened reports in the inbox", () => {
       { ...base, id: "r-live", task_id: "T-026", status: "running", verdict: "",
         pending_kind: undefined },
     ]);
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>);
-    render(<Now client={client} projectId="p" />);
-    await screen.findByTestId("now-view");
-    expect(screen.queryByTestId("now-reopened-card")).toBeNull();
+    render(<Now client={withBugs([{ ...report, status: "in_progress", task_id: "T-026", next: ["fixed", "triaged"],
+      tasks: [{ id: "T-026", status: "todo", current: true }] }, anchor])} projectId="p" />);
+    await expectQuietAbout("B-003");
   });
 });
 

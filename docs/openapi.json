@@ -130,6 +130,9 @@
             },
             "type": "array"
           },
+          "reopened": {
+            "type": "boolean"
+          },
           "reporter": {
             "type": "string"
           },
@@ -144,6 +147,12 @@
           },
           "task_id": {
             "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/BugTask"
+            },
+            "type": "array"
           },
           "title": {
             "type": "string"
@@ -186,6 +195,24 @@
           "acceptance",
           "owns",
           "title"
+        ],
+        "type": "object"
+      },
+      "BugTask": {
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
         ],
         "type": "object"
       },

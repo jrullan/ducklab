@@ -99,6 +99,7 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 		audit = readBugAudit(entry.Path)
 	}
 	out := make([]bug.Bug, 0, len(rows))
+	var taskStatus map[string]string
 	for _, r := range rows {
 		b := *toBug(r)
 		if openOnly && !b.IsOpen() {
@@ -108,6 +109,13 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 			b.Attachments = listAttachments(entry.Path, b.ID)
 			b.History = audit[b.ID]
 			b.NeedsTriage = bugNeedsRetriage(b.History)
+			b.Reopened = reopenedSinceFix(b.History)
+		}
+		if traces, terr := db.TracesFrom("bug", r.ID); terr == nil && len(traces) > 0 {
+			if taskStatus == nil {
+				taskStatus = s.boardTaskStatus(ctx, projectID)
+			}
+			b.Tasks = bugTasks(db, r.TaskID, traces, taskStatus)
 		}
 		out = append(out, b)
 	}
@@ -173,6 +181,7 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 		out := toBug(rec)
 		out.History = []bug.AuditEntry{audit}
 		out.NeedsTriage = true
+		out.Reopened = true
 		return out, nil
 	}
 	next, err := bug.Move(bug.Status(rec.Status), bug.Status(to))
@@ -1422,6 +1431,46 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		return rec.ID, nil
 	}
 	return "", nil
+}
+
+// boardTaskStatus is each task's status as the board shows it: derived from
+// the runs, not the tasks table, which only promote and the fixed gate write.
+// An unreadable plan yields an empty map and bugTasks falls back to the table.
+func (s *Service) boardTaskStatus(ctx context.Context, projectID string) map[string]string {
+	out := map[string]string{}
+	tasks, err := s.TaskList(ctx, projectID)
+	if err != nil {
+		return out
+	}
+	for _, t := range tasks {
+		out[t.ID] = t.Status
+	}
+	return out
+}
+
+// bugTasks lists every task a report's trace edges name, in promotion order,
+// marking the current promotion the same way bugProposalTasksAccepted counts
+// it: from the bound first task onward.
+func bugTasks(db *store.DB, activeFirstTask string, traces []string, status map[string]string) []bug.Task {
+	var out []bug.Task
+	active := false
+	for _, trace := range traces {
+		id, ok := strings.CutPrefix(trace, "task:")
+		if !ok {
+			continue
+		}
+		if activeFirstTask != "" && id == activeFirstTask {
+			active = true
+		}
+		st := status[id]
+		if st == "" {
+			if task, err := db.GetTask(id); err == nil {
+				st = task.Status
+			}
+		}
+		out = append(out, bug.Task{ID: id, Status: st, Current: active})
+	}
+	return out
 }
 
 func bugActiveProposalContainsTask(db *store.DB, bugID, activeFirstTask, taskID string) bool {
