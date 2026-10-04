@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -858,10 +859,39 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if info.IsDir() && !a.Recursive {
 		return ErrorResult("refusing to delete directory without recursive=true"), nil
 	}
+	if info.IsDir() {
+		// RemoveAll takes the whole subtree, so every path in it must pass the
+		// rules the directory's own name passed (review of #149: deleting "."
+		// removed .git, and a parent removed a protected file).
+		if guard := subtreeGuard(ectx, a.Path, absPath); guard != nil {
+			return guard, nil
+		}
+	}
 	if err := os.RemoveAll(absPath); err != nil {
 		return ErrorResult("delete: %v", err), nil
 	}
 	return SuccessResult("deleted %s", a.Path), nil
+}
+
+// subtreeGuard applies PathGuard to every path under dir, and refuses the
+// delete at the first one a rule protects. A refused directory is not entered.
+func subtreeGuard(ectx *ExecContext, requested, dir string) *Result {
+	var refused *Result
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == dir {
+			return nil
+		}
+		rel, ok := rootRelative(ectx.ProjectRoot, p)
+		if !ok {
+			return nil
+		}
+		if _, guard := PathGuard(ectx, filepath.ToSlash(rel)); guard != nil {
+			refused = ErrorResult("refusing to delete %s: it contains %s, which this run may not remove (%s)", requested, filepath.ToSlash(rel), guard.Content)
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return refused
 }
 
 // underDir reports whether rel is the named directory or inside it — a path
