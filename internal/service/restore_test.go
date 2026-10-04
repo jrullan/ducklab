@@ -350,3 +350,96 @@ func TestAbortRestoresPausedBuildTreeAndAllowsCleanRecovery(t *testing.T) {
 		})
 	}
 }
+
+// A restore conflict is important evidence, but it cannot veto the abort. A
+// paused run used to survive the request indefinitely when HEAD advanced and
+// the same path also carried uncommitted residue.
+func TestAbortClosesAfterRestoreRefusesMovedHead(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	g := gitProject(t, dir)
+	snapshot, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-abort-restore-conflict", ProjectID: id, TaskID: "T-001", Stage: "build",
+		Status: "paused", PendingKind: "question", PendingData: map[string]interface{}{"question_id": "toolchain-T-001"},
+		TreeSnapshot: snapshot, TreeSnapshotHead: mustHead(t, g), StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("landed while paused\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("land while run is paused"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("uncommitted overlap\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RunAbort(context.Background(), run.ID); err == nil {
+		t.Fatal("abort hid the restore conflict")
+	}
+	if run.Status != "failed" || run.Verdict != "ABORTED" || run.PendingKind != "" || run.EndedAt == "" {
+		t.Fatalf("restore conflict prevented terminal abort: %+v", run)
+	}
+	events, err := runlog.ReadEvents(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warning, ended bool
+	for _, event := range events {
+		warning = warning || event.Type == "warning"
+		ended = ended || event.Type == "run_end"
+	}
+	if !warning || !ended {
+		t.Fatalf("restore conflict events: warning=%v run_end=%v", warning, ended)
+	}
+}
+
+func TestAbortOutlivesCanceledRequestToStopWorker(t *testing.T) {
+	s := newTestService(t)
+	dir := t.TempDir()
+	run := &runlog.Run{
+		ID: "r-abort-canceled-request", ProjectID: "p", Stage: "build", Status: "running",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		<-workerCtx.Done()
+		time.Sleep(20 * time.Millisecond)
+		close(done)
+	}()
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir, cancel: stopWorker, done: done}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+
+	if err := s.RunAbort(requestCtx, run.ID); err != nil {
+		t.Fatalf("canceled request prevented abort: %v", err)
+	}
+	if run.Status != "failed" || run.Verdict != "ABORTED" {
+		t.Fatalf("canceled request left run active: status=%q verdict=%q", run.Status, run.Verdict)
+	}
+}

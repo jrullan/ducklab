@@ -4173,7 +4173,10 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return ctx.Err()
+			// Cancellation of the request does not cancel the abort. The worker
+			// owns the isolated checkout until it stops, so wait for its cancel
+			// above to take effect before restoring or removing that checkout.
+			<-done
 		}
 	}
 	w, err := s.ensureWriter(rs)
@@ -4188,9 +4191,7 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 // need the same restore, isolated-worktree cleanup and queue wake-up; omitting
 // any one of them strands either the checkout or the run behind it.
 func (s *Service) finishUnacceptedRun(rs *runState, w *runlog.Writer, status, verdict, resolution string) error {
-	if err := restoreAfterUnaccepted(rs); err != nil {
-		return err
-	}
+	restoreErr := restoreAfterUnaccepted(rs)
 	rs.wmu.Lock()
 	rs.run.Status = status
 	rs.run.Verdict = verdict
@@ -4212,7 +4213,7 @@ func (s *Service) finishUnacceptedRun(rs *runState, w *runlog.Writer, status, ve
 	// release any project hold so waiting work is reconsidered immediately.
 	s.queue.remove(rs)
 	s.queue.poke(s)
-	return werr
+	return errors.Join(restoreErr, werr)
 }
 
 // RunDir returns the run directory for a run ID, or empty if not found.

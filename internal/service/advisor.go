@@ -53,13 +53,15 @@ accepts it). No preamble, no "I recommend".`
 // and on the pending data, where the question card renders it.
 func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 	if strings.HasPrefix(q.ID, "toolchain-") {
-		// The live PATH check has already decided the safe option. Asking a
-		// model here can only contradict that evidence or spend tokens restating
-		// it, so publish the revision choice directly.
+		// The live PATH check has already decided whether this is a declaration
+		// mismatch or a host installation. Asking a model can only contradict
+		// that evidence or spend tokens restating it.
 		if w, err := s.ensureWriter(rs); err == nil {
 			w.AppendEvent("advice_started", map[string]interface{}{"advisor": "ducklab", "question_id": q.ID})
 		}
-		go s.publishQuestionAdvice(rs, q, "Change the plan (revise it) instead", "ducklab")
+		missing := s.missingToolchainFor(rs.projectPath, rs.run.TaskID)
+		answer, autoAnswer := deterministicToolchainAdvice(missing)
+		go s.publishQuestionAdvice(rs, q, answer, "ducklab", autoAnswer)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -78,11 +80,36 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		s.publishQuestionAdvice(rs, q, answer, advisor)
+		s.publishQuestionAdvice(rs, q, answer, advisor, true)
 	}()
 }
 
-func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, answer, advisor string) {
+func deterministicToolchainAdvice(missing []string) (string, bool) {
+	var install, revise []string
+	for _, item := range missing {
+		if equivalent := equivalentCommand(item); equivalent != "" {
+			revise = append(revise, fmt.Sprintf("%s to cmd:%s", item, equivalent))
+			continue
+		}
+		install = append(install, item)
+	}
+	if len(install) == 0 && len(revise) > 0 {
+		return "Change the plan (revise it) instead", true
+	}
+	if len(install) == 0 {
+		return "Install the capabilities named in the toolchain check, then choose “Installed — continue” after they are on PATH.", false
+	}
+	answer := fmt.Sprintf("Install the missing capability %s, then choose “Installed — continue” after it is on PATH.", strings.Join(install, ", "))
+	if len(install) > 1 {
+		answer = fmt.Sprintf("Install the missing capabilities %s, then choose “Installed — continue” after they are on PATH.", strings.Join(install, ", "))
+	}
+	if len(revise) > 0 {
+		answer += " The plan also needs revision from " + strings.Join(revise, ", ") + "."
+	}
+	return answer, false
+}
+
+func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, answer, advisor string, autoAnswer bool) {
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return
@@ -112,7 +139,7 @@ func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, 
 
 	// Under yolo the draft IS the answer. Submit through the same RunAnswer a
 	// person would use, with the decider on the record.
-	if autonomy == "yolo" {
+	if autonomy == "yolo" && autoAnswer {
 		w.AppendEvent("advice_taken", map[string]interface{}{
 			"question_id": q.ID, "advisor": advisor,
 		})
