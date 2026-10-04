@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"fmt"
+
 	"context"
 	"encoding/json"
+	"github.com/jrullan/ducklab/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,5 +159,95 @@ func TestALeadingSlashReadAndWriteReachTheProjectFile(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "tests", "parser.test.mjs"))
 	if !strings.Contains(string(data), "0.001953125") {
 		t.Fatalf("the write did not reach the project file: %q", data)
+	}
+}
+
+func leadingSlashProject(t *testing.T) (string, *Registry) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tests/parser.test.mjs", "index.html", "logic.mjs"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	reg.Register(&FSWrite{})
+	return root, reg
+}
+
+// Review of #145: the jail resolved "/tests/x", but the lane, test globs and
+// protected globs still compared "/tests/x", which no lane contains. Every
+// policy now sees one project-relative spelling.
+func TestALeadingSlashWriteMeetsTheRealImplementerLane(t *testing.T) {
+	root, reg := leadingSlashProject(t)
+	ectx := &ExecContext{ProjectRoot: root, Role: config.RoleImplementer, TaskWritableFiles: []string{"tests/parser.test.mjs"}}
+	ectx.BeginTurn()
+	for _, path := range []string{"/tests/parser.test.mjs", filepath.Join(root, "tests", "parser.test.mjs")} {
+		res, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(fmt.Sprintf(`{"path":%q,"content":"fixed\n"}`, path)))
+		if res.IsError {
+			t.Errorf("in-lane write via %q refused: %s", path, res.Content)
+		}
+	}
+	out, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"/index.html","content":"no\n"}`))
+	if !out.IsError || !strings.Contains(out.Content, "lane: edit to index.html is outside") {
+		t.Errorf("out-of-lane write via a leading slash should name the project path: %+v", out)
+	}
+}
+
+func TestALeadingSlashWriteMeetsProtectedAndTestOnlyGlobs(t *testing.T) {
+	root, reg := leadingSlashProject(t)
+	protected := &ExecContext{ProjectRoot: root, ShellPolicy: config.ShellPolicy{Deny: []string{"tests/*"}}}
+	protected.BeginTurn()
+	res, _ := reg.Execute(context.Background(), protected, "fs_write", json.RawMessage(`{"path":"/tests/a.mjs","content":"x\n"}`))
+	if !res.IsError || !strings.Contains(res.Content, "protected path") {
+		t.Errorf("a leading slash slipped past a protected glob: %+v", res)
+	}
+	testsOnly := &ExecContext{ProjectRoot: root, TestPathsOnly: true}
+	testsOnly.BeginTurn()
+	if res, _ := reg.Execute(context.Background(), testsOnly, "fs_write", json.RawMessage(`{"path":"/tests/new.test.mjs","content":"x\n"}`)); res.IsError {
+		t.Errorf("a test-only run refused a test file spelled with a leading slash: %s", res.Content)
+	}
+	if res, _ := reg.Execute(context.Background(), testsOnly, "fs_write", json.RawMessage(`{"path":"/logic.mjs","content":"x\n"}`)); !res.IsError || !strings.Contains(res.Content, "logic.mjs is not one") {
+		t.Errorf("a test-only run accepted a source file via a leading slash: %+v", res)
+	}
+}
+
+// Review of #145: past the boundary, the path pre-check must use the tool's
+// own root. ref_read reads authorized references outside the project, and a
+// read scope names another tree; both get the ordinary boundary, not an
+// escape error.
+func TestTheBoundaryPreCheckUsesEachToolsOwnRoot(t *testing.T) {
+	root, _ := leadingSlashProject(t)
+	external := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(external, []byte("# Spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	harness := t.TempDir()
+	if err := os.WriteFile(filepath.Join(harness, "guide.md"), []byte("guide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	reg.Register(&RefRead{})
+	ectx := &ExecContext{ProjectRoot: root, RefPaths: []string{external}, ExplorationCallLimit: 1,
+		ReadScopes: map[string]ReadScope{"harness": {ProjectRoot: harness}}}
+	ectx.BeginTurn()
+	if res, _ := reg.Execute(context.Background(), ectx, "ref_read", json.RawMessage(fmt.Sprintf(`{"path":%q}`, external))); res.IsError {
+		t.Fatalf("authorized reference refused before the boundary: %s", res.Content)
+	}
+	ref, _ := reg.Execute(context.Background(), ectx, "ref_read", json.RawMessage(fmt.Sprintf(`{"path":%q}`, external)))
+	if !strings.Contains(ref.Content, "RESEARCH BUDGET EXHAUSTED") {
+		t.Errorf("an authorized reference past the boundary was reclassified: %+v", ref)
+	}
+	ectx.BeginTurn()
+	ectx.ExplorationCallLimit = 0
+	ectx.explorationCalls = ExplorationCallLimit
+	scoped, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"scope":"harness","path":"/guide.md"}`))
+	if !strings.Contains(scoped.Content, "RESEARCH BUDGET EXHAUSTED") {
+		t.Errorf("a harness-scope read past the boundary was judged against the project root: %+v", scoped)
 	}
 }

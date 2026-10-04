@@ -379,14 +379,22 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
+	// One spelling for every policy below and in the tool: the lane, the test
+	// globs, protected globs and the messages all compare the path as given,
+	// so "/tests/x" must arrive as "tests/x" (review of #145).
+	args = canonicalPathArgs(ectx, name, args)
 	explorationLimit := ectx.effectiveExplorationCallLimit()
 	if explorationTool[name] && (ectx.ReadToolsClosed || ectx.explorationCalls >= explorationLimit) {
 		// A malformed path is the actionable error; the boundary message would
 		// hide it, and the seat would retry the same bad path (B-492: ten
 		// refused reads of "/tests/parser.test.mjs" never showed the cause).
-		if path := argPath(args); path != "" {
-			if _, err := PathJail(ectx.ProjectRoot, path); err != nil {
-				return ErrorResult("%v", err), nil
+		// Only against the tool's own root: ref_read reads authorized paths
+		// outside the project, and a read scope may name another tree.
+		if root, ok := toolPathRoot(ectx, name, args); ok {
+			if path := argPath(args); path != "" {
+				if _, err := PathJail(root, path); err != nil {
+					return ErrorResult("jail: %v", err), nil
+				}
 			}
 		}
 		ectx.ReadToolsClosed = true
@@ -1424,4 +1432,83 @@ func argPath(args json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(a.Path)
+}
+
+// toolPathRoot is the root a tool resolves its "path" argument against, for
+// the tools whose path is a file under a jailed tree: the project for writes,
+// the named read scope for reads. Other tools (ref_read's authorized
+// references, git, skills) resolve paths their own way and are left alone.
+func toolPathRoot(ectx *ExecContext, name string, args json.RawMessage) (string, bool) {
+	switch {
+	case deliveryMutationTool[name]:
+		return ectx.ProjectRoot, ectx.ProjectRoot != ""
+	case name == "fs_read" || name == "fs_list" || name == "fs_search":
+		var a struct {
+			Scope string `json:"scope"`
+		}
+		_ = json.Unmarshal(args, &a)
+		scope, err := ectx.Scope(a.Scope)
+		if err != nil || scope.ProjectRoot == "" {
+			return "", false
+		}
+		return scope.ProjectRoot, true
+	}
+	return "", false
+}
+
+// CanonicalToolArgs is the arguments a tool acts on, with its path in the
+// one spelling every policy and record uses. Callers that record a call use
+// it so the record names the file the tool actually touched.
+func CanonicalToolArgs(ectx *ExecContext, name string, args json.RawMessage) json.RawMessage {
+	if ectx == nil {
+		return args
+	}
+	return canonicalPathArgs(ectx, name, args)
+}
+
+// canonicalPathArgs rewrites an absolute "path" that the jail places inside
+// the tool's root — "/tests/x" (B-491) or the root's own absolute spelling —
+// to its root-relative form. Anything the jail refuses is left as given, so
+// the tool reports it.
+func canonicalPathArgs(ectx *ExecContext, name string, args json.RawMessage) json.RawMessage {
+	root, ok := toolPathRoot(ectx, name, args)
+	path := argPath(args)
+	if !ok || path == "" || !filepath.IsAbs(filepath.Clean(path)) {
+		return args
+	}
+	abs, err := PathJail(root, path)
+	if err != nil {
+		return args
+	}
+	rel, ok := rootRelative(root, abs)
+	if !ok {
+		return args
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(args, &m) != nil {
+		return args
+	}
+	m["path"], _ = json.Marshal(filepath.ToSlash(rel))
+	out, err := json.Marshal(m)
+	if err != nil {
+		return args
+	}
+	return out
+}
+
+// rootRelative is abs relative to root, against either spelling of the root
+// (PathJail returns a symlink-resolved path for existing files and a joined
+// one for new files).
+func rootRelative(root, abs string) (string, bool) {
+	bases := []string{filepath.Clean(root)}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		bases = append([]string{resolved}, bases...)
+	}
+	for _, base := range bases {
+		rel, err := filepath.Rel(base, abs)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return rel, true
+		}
+	}
+	return "", false
 }

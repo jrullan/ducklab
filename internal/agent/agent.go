@@ -778,9 +778,10 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			conversation = append(conversation, provider.Message{
 				Role: "user", Content: fmt.Sprintf("Tool result for %s:\n%s", salvagedReasoningCall.Name, result.Content),
 			})
+			salvagedArgs := tools.CanonicalToolArgs(ectx, salvagedReasoningCall.Name, salvagedReasoningCall.Args)
 			rec := ToolCallRecord{
-				Name: salvagedReasoningCall.Name, Args: salvagedReasoningCall.Args,
-				Result: result, Digest: tools.Digest(salvagedReasoningCall.Args),
+				Name: salvagedReasoningCall.Name, Args: salvagedArgs,
+				Result: result, Digest: tools.Digest(salvagedArgs),
 			}
 			outcome.ToolCalls = append(outcome.ToolCalls, rec)
 			if loop.OnToolCall != nil {
@@ -825,11 +826,15 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					ToolCallID: tc.ID,
 					Content:    result.Content,
 				})
+				// The record carries the canonical path the tool acted on, so the
+				// run's written-path list, its restore scope and retry evidence
+				// see "tests/x", not the "/tests/x" a model spelled (#145).
+				nativeArgs := tools.CanonicalToolArgs(ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 				rec := ToolCallRecord{
 					Name:   tc.Function.Name,
-					Args:   json.RawMessage(tc.Function.Arguments),
+					Args:   nativeArgs,
 					Result: result,
-					Digest: tools.Digest(json.RawMessage(tc.Function.Arguments)),
+					Digest: tools.Digest(nativeArgs),
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {
@@ -858,11 +863,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					Role:    "user",
 					Content: fmt.Sprintf("Tool result for %s:\n%s", toolCall.Name, result.Content),
 				})
+				textArgs := tools.CanonicalToolArgs(ectx, toolCall.Name, toolCall.Args)
 				rec := ToolCallRecord{
 					Name:   toolCall.Name,
-					Args:   toolCall.Args,
+					Args:   textArgs,
 					Result: result,
-					Digest: tools.Digest(toolCall.Args),
+					Digest: tools.Digest(textArgs),
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {
