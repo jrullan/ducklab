@@ -298,6 +298,9 @@ export const KNOWN_EVENT_TYPES = [
   "triage_applied",
   "bug_fixed",
   "tdd_build_started",
+  // A relaunched build that started from its task's accepted red test, the
+  // base its broken chain would have given it (B-493).
+  "tdd_chain_rejoined",
   "tree_restored",
   // Emitted by modes and the gate. Registered even where nothing renders them
   // yet: an event the desktop does not know cannot be stored or replayed, and

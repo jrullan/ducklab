@@ -1227,6 +1227,17 @@
         ],
         "type": "object"
       },
+      "EngineapiresumeRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "EngineapirosterSetRequest": {
         "properties": {
           "duckling": {
@@ -1892,6 +1903,27 @@
         ],
         "type": "object"
       },
+      "RunlogResumeNote": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "pending_kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "note"
+        ],
+        "type": "object"
+      },
       "RunlogReviewEvidence": {
         "properties": {
           "findings": {
@@ -2106,6 +2138,12 @@
           },
           "resolution": {
             "type": "string"
+          },
+          "resume_notes": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogResumeNote"
+            },
+            "type": "array"
           },
           "revert_sha": {
             "type": "string"
@@ -9184,6 +9222,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiresumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -9204,7 +9252,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Resume a paused run"
+        "summary": "Resume a paused run; an optional note rides its next turns beside the launch note"
       }
     },
     "/v1/runs/{id}/transcript": {

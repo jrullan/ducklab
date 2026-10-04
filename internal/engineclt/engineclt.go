@@ -875,10 +875,17 @@ type SSEEvent struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-// RunResume asks the engine to resume a paused run.
-func (c *Client) RunResume(id string) (map[string]interface{}, error) {
+// RunResume asks the engine to resume a paused run. A note rides the run's
+// next turns beside the one it was launched with (B-493); actor names an
+// operator speaker ("mcp:<client>"), empty for a person. Without a note the
+// request carries no body, exactly as before.
+func (c *Client) RunResume(id, note, actor string) (map[string]interface{}, error) {
+	var body interface{}
+	if strings.TrimSpace(note) != "" {
+		body = map[string]string{"note": note, "actor": actor}
+	}
 	var result map[string]interface{}
-	err := c.post("/v1/runs/"+id+"/resume", nil, &result)
+	err := c.post("/v1/runs/"+id+"/resume", body, &result)
 	return result, err
 }
 

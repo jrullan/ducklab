@@ -81,6 +81,7 @@ export function ConversationTurn({
         <span>
           ⏸ paused — {block.pause.reason}
           {block.pause.resumed ? " · resumed: the strategy replays from round 1 over the work already in the tree" : ""}
+          {block.pause.note ? <span data-testid="pause-resume-note"> · with the note: “{block.pause.note}”</span> : null}
         </span>
         <span className="h-px flex-1 bg-hairline" />
       </div>

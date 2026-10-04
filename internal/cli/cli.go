@@ -647,6 +647,30 @@ func resolveProjectID(client *engineclt.Client, repo string) (string, int) {
 	return "", 2
 }
 
+// parseResumeArgs reads `ducklab run resume <run-id> [--note <text>]`. The
+// note rides the resumed run's next turns beside its launch note (B-493). A
+// flag it does not know, or --note without its text, is a usage error: a
+// typo must not resume the run without the words the person meant to send.
+func parseResumeArgs(args []string) (runID, note string, ok bool) {
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		return "", "", false
+	}
+	runID = args[0]
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--note":
+			if i+1 >= len(args) {
+				return "", "", false
+			}
+			note = args[i+1]
+			i++
+		default:
+			return "", "", false
+		}
+	}
+	return runID, note, true
+}
+
 // runVerbs are the subcommands of `ducklab run`. Anything else in that
 // position must look like a task ID.
 var runVerbs = map[string]bool{
@@ -954,8 +978,9 @@ func runCmd(verb string, args []string, repo string) int {
 		// waiting on one you started: the engine, not the CLI, owns the run.
 		return followCurrentRun(engineclt.New(info), args[0])
 	case "resume":
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run resume <run-id>")
+		runID, note, ok := parseResumeArgs(args)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run resume <run-id> [--note <text>]")
 			return 2
 		}
 		info, err := daemon.ReadEngineJSON()
@@ -964,7 +989,7 @@ func runCmd(verb string, args []string, repo string) int {
 			return 9
 		}
 		client := engineclt.New(info)
-		run, err := client.RunResume(args[0])
+		run, err := client.RunResume(runID, note, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

@@ -39,7 +39,7 @@ type Engine interface {
 	RunAcceptAs(id, message, actor string) (map[string]interface{}, error)
 	RunReject(id, reason string) error
 	RunAbort(id string) error
-	RunResume(id string) (map[string]interface{}, error)
+	RunResume(id, note, actor string) (map[string]interface{}, error)
 	RunBudgetLift(id, kind, actor string) (map[string]interface{}, error)
 	RunAnswerAs(id, questionID, answer, actor string) error
 	RunFileFindings(id string) ([]map[string]interface{}, error)
