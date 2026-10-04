@@ -670,6 +670,18 @@ func (g *Git) OnDefaultBranch() (bool, error) {
 	return ref == "refs/heads/"+branch, nil
 }
 
+// CommitExists reports whether sha names a commit object in this repository.
+// A commit only a deleted branch held can be pruned by gc; a caller that
+// would branch from one must ask first.
+func (g *Git) CommitExists(sha string) bool {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return false
+	}
+	_, err := g.run("cat-file", "-e", sha+"^{commit}")
+	return err == nil
+}
+
 func (g *Git) revParse(rev string) (string, error) {
 	out, err := g.run("rev-parse", rev)
 	return strings.TrimSpace(out), err

@@ -27,6 +27,7 @@ export function DecisionCard({
   onReject,
   onRequestChanges,
   onResume,
+  resumeNote,
   onAbort,
   accepting,
   extraAction,
@@ -54,7 +55,12 @@ export function DecisionCard({
   onAccept: () => void;
   onReject: () => void;
   onRequestChanges?: (note: string) => Promise<void>;
-  onResume?: () => void;
+  /** Called with the person's note when they wrote one beside Resume. */
+  onResume?: (note?: string) => void;
+  /** B-493: a run stopped on an error, its budget or its provider can be told
+   * something as it resumes — the fix the person knows. Shows the note field
+   * beside Resume; the note rides the run's next turns with its launch note. */
+  resumeNote?: boolean;
   onAbort?: () => void;
   accepting?: boolean;
   /** A view-specific control, like the Cycle view's read/diff toggle. */
@@ -109,6 +115,7 @@ export function DecisionCard({
   const redoSeed = redoNote?.draft ?? "";
   const [redoDraft, setRedoDraft] = useState(redoSeed);
   const seededRedoDraft = useRef(redoSeed);
+  const [resumeDraft, setResumeDraft] = useState("");
   const [asking, setAsking] = useState(false);
 
   // B-485: RunView renders the run from the stream first (no redo_note) and
@@ -171,11 +178,11 @@ export function DecisionCard({
           {offers("resume") && onResume && (
             <button
               type="button"
-              onClick={onResume}
+              onClick={() => onResume(resumeNote && resumeDraft.trim() ? resumeDraft.trim() : undefined)}
               data-testid="resume-button"
               className="rounded border border-hairline px-3 py-1 text-sm text-ink"
             >
-              Resume
+              {resumeNote && resumeDraft.trim() ? "Resume with note" : "Resume"}
             </button>
           )}
           {offers("accept") && (
@@ -201,6 +208,22 @@ export function DecisionCard({
           )}
         </div>
       </div>
+
+      {offers("resume") && onResume && resumeNote && (
+        <div className="mb-2" data-testid="resume-note">
+          <textarea
+            aria-label="resume note"
+            rows={3}
+            value={resumeDraft}
+            onChange={(e) => setResumeDraft(e.target.value)}
+            placeholder="Optional: tell the run what you know before it continues — the fix, the path it got wrong."
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          />
+          <p className="text-xs text-ink-muted">
+            Rides the run's next turns beside the note it was launched with, and stays on its record.
+          </p>
+        </div>
+      )}
 
       {landedAs && (
         <p className="mb-2 rounded border border-warning px-2 py-1 text-xs text-ink" data-testid="landed-notice">

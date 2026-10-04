@@ -51,6 +51,8 @@ type fakeEngine struct {
 	landedActor         string
 	budgetLifted        string
 	resumeCount         int
+	resumeNote          string
+	resumeActor         string
 	projectStatus       map[string]interface{}
 	project             map[string]interface{}
 	remoteAction        string
@@ -173,8 +175,9 @@ func (f *fakeEngine) RunReject(id, reason string) error {
 	return nil
 }
 func (f *fakeEngine) RunAbort(string) error { return nil }
-func (f *fakeEngine) RunResume(id string) (map[string]interface{}, error) {
+func (f *fakeEngine) RunResume(id, note, actor string) (map[string]interface{}, error) {
 	f.resumeCount++
+	f.resumeNote, f.resumeActor = note, actor
 	if f.budgetLifted == "" {
 		return map[string]interface{}{"id": id, "status": "paused"}, nil
 	}

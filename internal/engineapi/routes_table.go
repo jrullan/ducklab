@@ -27,9 +27,15 @@ type Route struct {
 	// Request and Response are zero values of the DTOs. Their Go types are
 	// reflected into JSON Schema, so the schema can never disagree with what
 	// the handler actually encodes.
-	Request  any
-	Response any
-	Summary  string
+	Request any
+	// RequestOptional documents a body the handler accepts being absent:
+	// Request describes what MAY be sent, and no body keeps the endpoint's
+	// older meaning. Without it the document marked every body required, and
+	// POST /resume — callable with no body since before it took a note —
+	// read as demanding one (review of #155).
+	RequestOptional bool
+	Response        any
+	Summary         string
 	// ClientMethod names the generated client method. Empty means the endpoint
 	// is not exposed on the generated clients.
 	ClientMethod string
@@ -218,7 +224,7 @@ func routeTable() []Route {
 			ClientMethod: "ProjectGate",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleProjectGate }},
 		{Method: "POST", Path: "/v1/projects/{id}/gate", Auth: true,
-			Request:      service.GateAdoptRequest{},
+			Request: service.GateAdoptRequest{}, RequestOptional: true,
 			Response:     service.GateStatus{},
 			Summary:      "Adopt the detected gate. Never automatic: a gate decides what a verdict means.",
 			ClientMethod: "ProjectGateAdopt",
@@ -436,7 +442,7 @@ func routeTable() []Route {
 			ClientMethod: "SkillDelete",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillDelete }},
 		{Method: "POST", Path: "/v1/projects/{id}/skills/{name}/run", Auth: true,
-			Request: skillRunRequest{}, Summary: "Run a skill. No model is involved.",
+			Request: skillRunRequest{}, RequestOptional: true, Summary: "Run a skill. No model is involved.",
 			ClientMethod: "SkillRun",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillRun }},
 		{Method: "POST", Path: "/v1/bench/start", Auth: true,
@@ -485,11 +491,11 @@ func routeTable() []Route {
 			Summary: "Recorded model calls, redacted", ClientMethod: "RunLLM",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunLLM }},
 		{Method: "POST", Path: "/v1/runs/{id}/accept", Auth: true,
-			Request: acceptRequest{}, Response: service.AcceptResult{},
+			Request: acceptRequest{}, RequestOptional: true, Response: service.AcceptResult{},
 			Summary: "Accept, commit, then publish according to the configured remote.on_accept policy", ClientMethod: "RunAccept",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAccept }},
 		{Method: "POST", Path: "/v1/runs/{id}/reject", Auth: true,
-			Request: rejectRequest{}, Response: rejectReceipt{}, Summary: "Reject; a reasoned document discard returns the request-changes signpost", ClientMethod: "RunReject",
+			Request: rejectRequest{}, RequestOptional: true, Response: rejectReceipt{}, Summary: "Reject; a reasoned document discard returns the request-changes signpost", ClientMethod: "RunReject",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunReject }},
 		{Method: "POST", Path: "/v1/runs/{id}/land", Auth: true,
 			Request: landRequest{}, Summary: "Record a manual landing", ClientMethod: "RunLand",
@@ -498,7 +504,8 @@ func routeTable() []Route {
 			Summary: "Abort", ClientMethod: "RunAbort",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAbort }},
 		{Method: "POST", Path: "/v1/runs/{id}/resume", Auth: true,
-			Response: runlog.Run{}, Summary: "Resume a paused run", ClientMethod: "RunResume",
+			Request: resumeRequest{}, RequestOptional: true, Response: runlog.Run{},
+			Summary: "Resume a paused run; an optional note rides its next turns beside the launch note", ClientMethod: "RunResume",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunResume }},
 		{Method: "POST", Path: "/v1/runs/{id}/reseat", Auth: true,
 			Response: runlog.Run{}, Summary: "Reseat a weather-paused run onto a fixed or Flock-ranked fallback and resume", ClientMethod: "RunReseat",
@@ -625,7 +632,7 @@ func routeTable() []Route {
 			ClientMethod: "TestRetire",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleTestRetire }},
 		{Method: "POST", Path: "/v1/projects/{id}/stages/{stage}", Auth: true,
-			Request: service.StageRequest{}, Response: runlog.Run{},
+			Request: service.StageRequest{}, RequestOptional: true, Response: runlog.Run{},
 			Summary: "Run intake, spec or plan", ClientMethod: "StageStart",
 			handler: func(s *Server) http.HandlerFunc { return s.handleStageStart }},
 		{Method: "GET", Path: "/v1/projects/{id}/artifacts/{kind}", Auth: true,

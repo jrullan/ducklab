@@ -128,7 +128,7 @@ export interface TurnBlock {
    * that paused on its wallclock budget and was resumed replays the strategy
    * from round 1; without a marker the lane read imp → rev → imp → rev and
    * looked broken. */
-  pause?: { reason: string; resumed: boolean };
+  pause?: { reason: string; resumed: boolean; note?: string };
 }
 
 /** One thing a reviewer objected to. */
@@ -535,7 +535,11 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           for (let i = blocks.length - 1; i >= 0; i--) {
             const pb = blocks[i]!;
             if (pb.role === "pause") {
-              if (pb.pause) pb.pause.resumed = true;
+              if (pb.pause) {
+                pb.pause.resumed = true;
+                // What the person told the run as it resumed (B-493).
+                if (typeof d.note === "string" && d.note) pb.pause.note = d.note;
+              }
               break;
             }
             if (pb.role !== "pause" && !pb.messageOnly) break;

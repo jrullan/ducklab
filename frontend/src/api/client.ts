@@ -360,6 +360,9 @@ export interface Run {
   failure?: string;
   /** Editable retry recommendation for failed runs; `origin` says who wrote it. */
   redo_note?: RedoNote;
+  /** What the person added when resuming a paused run, oldest first; it rides
+   * the run's prompt beside the launch note (B-493). */
+  resume_notes?: { note: string; actor?: string; pending_kind?: string; at: string }[];
   /** The actions a person may legally take on this run, in the order to offer
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
@@ -1571,8 +1574,11 @@ export class EngineClient {
   runReseat(id: string, from: string, to: string) {
     return this.request<Run>("POST", `/v1/runs/${id}/reseat`, { from, to });
   }
-  runResume(id: string) {
-    return this.request<Run>("POST", `/v1/runs/${id}/resume`);
+  /** A note, when given, rides the resumed run's next turns beside its
+   * launch note (B-493); without one the request carries no body. */
+  runResume(id: string, note?: string) {
+    const text = note?.trim();
+    return this.request<Run>("POST", `/v1/runs/${id}/resume`, text ? { note: text } : undefined);
   }
   runDiff(id: string) {
     return this.request<{ diff: string; tests?: string }>("GET", `/v1/runs/${id}/diff`).then((r) => ({

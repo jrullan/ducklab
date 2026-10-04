@@ -362,6 +362,11 @@ export interface EngineapirestartRequest {
   requester?: string;
 }
 
+export interface EngineapiresumeRequest {
+  actor?: string;
+  note?: string;
+}
+
 export interface EngineapirosterSetRequest {
   duckling?: string;
   ducklings?: string[];
@@ -560,6 +565,13 @@ export interface RunlogRedoNote {
   reason?: string;
 }
 
+export interface RunlogResumeNote {
+  actor?: string;
+  at?: string;
+  note?: string;
+  pending_kind?: string;
+}
+
 export interface RunlogReviewEvidence {
   findings?: number;
   implementer?: string;
@@ -624,6 +636,7 @@ export interface RunlogRun {
   redo_note?: RunlogRedoNote;
   remote_receipts?: Record<string, unknown>[];
   resolution?: string;
+  resume_notes?: RunlogResumeNote[];
   revert_sha?: string;
   review_evidence?: RunlogReviewEvidence;
   roster?: Record<string, string>;

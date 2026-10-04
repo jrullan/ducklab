@@ -34,7 +34,7 @@ func BuildOpenAPI(version string) map[string]any {
 		}
 		if r.Request != nil {
 			op["requestBody"] = map[string]any{
-				"required": true,
+				"required": !r.RequestOptional,
 				"content": map[string]any{
 					"application/json": map[string]any{"schema": schemaRef(r.Request, schemas)},
 				},

@@ -78,6 +78,8 @@ func toolList() []map[string]interface{} {
 				"run_id": str("the run id"),
 				"action": str("one of the run's next actions: accept, reject, request_changes, resume, abort"),
 				"reason": str("why, in one or two sentences; recorded with the decision"),
+				"note": str("resume only, optional: an instruction the resumed run reads on its next turns, " +
+					"beside the note it was launched with — the fix you know, the path it got wrong"),
 			}, "run_id", "action", "reason"),
 		},
 		{
@@ -611,7 +613,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 	case "run_get":
 		return s.runGet(a.str("run_id"))
 	case "decide":
-		return s.decide(a.str("run_id"), a.str("action"), a.str("reason"))
+		return s.decide(a.str("run_id"), a.str("action"), a.str("reason"), a.str("note"))
 	case "file_findings":
 		bugs, err := s.eng.RunFileFindings(a.str("run_id"))
 		if err != nil {
@@ -1099,9 +1101,14 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 // decide maps the operator's verdict onto the engine's endpoints, attributed.
 // The action must be one the engine offered — read from the run, not trusted
 // from the model — so an operator can never take an action a person could not.
-func (s *Server) decide(runID, action, reason string) (map[string]interface{}, error) {
+func (s *Server) decide(runID, action, reason, note string) (map[string]interface{}, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("a decision needs a reason; it is recorded with your name")
+	}
+	// Only a resume carries a note to the run; on any other action it would
+	// be dropped without a word.
+	if strings.TrimSpace(note) != "" && action != "resume" {
+		return nil, fmt.Errorf("note rides only a resume; for %s put it in reason", action)
 	}
 	run, err := s.eng.RunGet(runID)
 	if err != nil {
@@ -1159,7 +1166,9 @@ func (s *Server) decide(runID, action, reason string) (map[string]interface{}, e
 		}
 		return toolJSON(out), nil
 	case "resume":
-		out, err := s.eng.RunResume(runID)
+		// The reason explains the decision; the note, when given, is the
+		// instruction the resumed run reads (B-493).
+		out, err := s.eng.RunResume(runID, note, actor)
 		if err != nil {
 			return nil, err
 		}

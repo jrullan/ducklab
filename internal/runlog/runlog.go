@@ -83,6 +83,11 @@ type Run struct {
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
 	Note string `json:"note,omitempty"`
+	// ResumeNotes are what the person added when resuming a paused run, in
+	// order. Kept apart from Note so the record shows what the run was
+	// launched with and what it was told later (B-493: TI-36X T-014 paused
+	// on an error whose fix the person knew, and resume had no way to say it).
+	ResumeNotes []ResumeNote `json:"resume_notes,omitempty"`
 	// PriorAcceptedSHA identifies the accepted test commit this redo is reopening.
 	// The acceptance remains in the ledger; this provenance belongs to the fresh run.
 	PriorAcceptedSHA string `json:"prior_accepted_sha,omitempty"`
@@ -383,6 +388,17 @@ type GateReproduction struct {
 	Output   string  `json:"output"`
 	Duration float64 `json:"duration_s"`
 	Green    bool    `json:"green"`
+}
+
+// ResumeNote is one instruction a person gave a paused run as it resumed.
+type ResumeNote struct {
+	Note string `json:"note"`
+	// Actor is who said it: empty or "human" for a person, "mcp:<client>"
+	// for an operator — the record never says a person said what a model did.
+	Actor string `json:"actor,omitempty"`
+	// PendingKind is the pause the note answered: error, budget, provider...
+	PendingKind string `json:"pending_kind,omitempty"`
+	At          string `json:"at"`
 }
 
 // RedoNote is the bounded retry recommendation attached to a failed run.
