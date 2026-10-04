@@ -450,7 +450,7 @@ func TestPlanRevisionStartsAfterRestoreRefusesMovedHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = s.runAnswer(context.Background(), run.ID, "toolchain-T-001", "Change the plan (revise it) instead", "")
+	err = s.runAnswer(context.Background(), run.ID, "toolchain-T-001", "Change the plan (revise it) instead", "", "")
 	if err == nil || !strings.Contains(err.Error(), "run closed and plan revision started") {
 		t.Fatalf("plan revision answer error = %v", err)
 	}

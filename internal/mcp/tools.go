@@ -625,7 +625,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(out), nil
 	case "answer":
-		if err := s.eng.RunAnswer(a.str("run_id"), a.str("question_id"), a.str("answer")); err != nil {
+		// The answer names its decider: the record must not say a person
+		// decided, and an oracle dispute refuses an operator (B-490).
+		if err := s.eng.RunAnswerAs(a.str("run_id"), a.str("question_id"), a.str("answer"), "mcp:"+s.client); err != nil {
 			return nil, err
 		}
 		return toolText("answered", false), nil

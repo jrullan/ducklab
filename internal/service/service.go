@@ -1492,6 +1492,9 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	if err := s.createRunWorktreeAt(run, entry.Path, req.chainBase); err != nil {
 		return nil, err
 	}
+	if req.chainBase != "" {
+		run.OracleTests = chainOracleTests(entry.Path, req.chainBase)
+	}
 
 	// Create writer
 	writer, err := runlog.NewWriter(entry.Path, run)
@@ -1997,7 +2000,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		WorkspaceDiff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(runDiffExclusions(rs.run, root, entry.Path)...)
 		},
-		Answers: rs.answers(),
+		Answers:     rs.answers(),
+		OracleTests: append([]string(nil), runAtLaunch.OracleTests...),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
@@ -5107,7 +5111,15 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 // The run replays its turn with the answer available, so the ask_human call
 // that paused it now resolves instead of pausing again.
 func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) error {
-	return s.runAnswer(ctx, id, questionID, answer, "")
+	return s.runAnswer(ctx, id, questionID, answer, "", "")
+}
+
+// RunAnswerAs records who decided: empty or "human" for a person, otherwise
+// the operator (an MCP client sends "mcp:<client>"). The record must never say
+// a person decided what a model decided, and some questions are a person's
+// alone (B-490: an oracle dispute).
+func (s *Service) RunAnswerAs(ctx context.Context, id, questionID, answer, actor string) error {
+	return s.runAnswer(ctx, id, questionID, answer, "", actor)
 }
 
 // RunAnswerWithLane records an answer after applying the exact lane amendment
@@ -5115,6 +5127,18 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 // human approval of engine-derived candidates, not a second unrestricted plan
 // editor hidden inside the question endpoint.
 func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer string, requested []string) error {
+	return s.RunAnswerWithLaneAs(ctx, id, questionID, answer, requested, "")
+}
+
+// RunAnswerWithLaneAs is RunAnswerWithLane with its decider named. Widening a
+// lane amends the accepted plan, so it is a person's approval, as it is at the
+// Accept gate (#143); a non-human decider is refused before anything is
+// committed (review of #147: the actor was dropped on this branch, so an
+// operator could approve the amendment — and an oracle dispute — as a person).
+func (s *Service) RunAnswerWithLaneAs(ctx context.Context, id, questionID, answer string, requested []string, actor string) error {
+	if actor != "" && actor != "human" {
+		return fmt.Errorf("widening a task lane amends the accepted plan; a person must approve it in the desktop, not %s", actor)
+	}
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5125,7 +5149,7 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 	if _, err := s.approveOfferedLaneWidening(rs, current, requested, "human"); err != nil {
 		return err
 	}
-	return s.runAnswer(ctx, id, questionID, answer, "")
+	return s.runAnswer(ctx, id, questionID, answer, "", actor)
 }
 
 func (s *Service) approveOfferedLaneWidening(rs *runState, current *runlog.Run, requested []string, actor string) ([]string, error) {
@@ -5229,7 +5253,7 @@ func stringSliceValue(v interface{}) []string {
 
 // runAnswer records an answer with its actual author when automation supplied
 // it. An empty author deliberately remains an ordinary human answer.
-func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author string) error {
+func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author, actor string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5252,6 +5276,17 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	if questionID == "" {
 		rs.wmu.Unlock()
 		return fmt.Errorf("run %q has no recorded question id", id)
+	}
+	// An oracle dispute decides whether the test the build is judged by may
+	// change. A person decides it, in the desktop or the CLI: neither the
+	// advisor's yolo draft nor an MCP operator (review of #147).
+	decider := actor
+	if decider == "" {
+		decider = author
+	}
+	if strings.HasPrefix(questionID, tools.OracleQuestionPrefix) && decider != "" && decider != "human" {
+		rs.wmu.Unlock()
+		return fmt.Errorf("this question disputes the test-first oracle; a person must answer it in the desktop or the CLI, not %s", decider)
 	}
 	// The question's text travels with the answer: the id survives only an
 	// exact re-ask, and the replayed prompt needs the words.
@@ -5277,6 +5312,9 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	}
 	if author != "" {
 		event["author"] = author
+	}
+	if actor != "" && actor != "human" {
+		event["actor"] = actor
 	}
 	planRevision := strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer)
 	if planRevision {

@@ -160,6 +160,11 @@ type Run struct {
 	// (an already-red suite makes the verdict UNVERIFIED) was accepted by
 	// hand and the promised build silently never came.
 	ChainBuild map[string]interface{} `json:"chain_build,omitempty"`
+	// OracleTests are the test files the preceding test-first run wrote, for a
+	// build that is the second half of a TDD chain: the tests it is judged by,
+	// which its implementer may not rewrite without the person (B-490). On the
+	// record so a resumed build keeps them.
+	OracleTests []string `json:"oracle_tests,omitempty"`
 	// TokensEstimated is true when any model call in this run reported no
 	// usage and its tokens were counted by estimate.
 	//

@@ -60,6 +60,12 @@ type ExecContext struct {
 	// replays its turn with these available so the same question does not
 	// pause it a second time.
 	Answers map[string]string
+	// OracleTests are the test files this task's test-first run wrote: the
+	// definition of done the build is judged by. An implementer may not edit
+	// them unless the person allowed a correction through oracle_dispute
+	// (B-490: a wrong expected value had no exit, and the build spent its
+	// turns on it).
+	OracleTests []string
 	// DeterministicAnswers are facts the harness can answer without a person,
 	// keyed by a lowercase phrase expected in the question. A plan architect
 	// paused Neocapture to ask for its project root even though Ducklab had
@@ -321,6 +327,7 @@ func (r *Registry) registerBuiltins() {
 	r.Register(&AskHuman{})
 	// The rubber duck, on demand: a consult that never pauses the run.
 	r.Register(&AskAdvisor{})
+	r.Register(&OracleDispute{})
 	// Lifecycle documents (read-only: a model proposes, it does not write)
 	r.Register(&ArtifactRead{})
 	r.Register(&TaskRead{})
@@ -661,6 +668,9 @@ func (e *ExecContext) ToolAvailable(name string) bool {
 	if e == nil {
 		return true
 	}
+	if name == "oracle_dispute" && len(e.OracleTests) == 0 {
+		return false
+	}
 	if e.ToolsClosed {
 		return false
 	}
@@ -933,10 +943,10 @@ func PathJail(root, path string) (string, error) {
 // WriteGuard checks all write guard rules before a mutating filesystem call.
 // Returns nil if the write is allowed, or an error result naming the rule.
 // PathGuard applies every rule about WHERE a run may change the tree: the
-// jail, the task lane, governance, test-only runs, the denylist and protected
-// globs. Writes and deletes both go through it; a delete used to check
-// governance alone, so a model could remove .git, a file outside its lane, a
-// protected path, or a source file in a test-only run.
+// jail, the task lane, the test-first oracle, governance, test-only runs, the
+// denylist and protected globs. Writes and deletes both go through it; a
+// delete used to check governance alone, so a model could remove .git, a file
+// outside its lane, a protected path, or a source file in a test-only run.
 func PathGuard(ectx *ExecContext, path string) (string, *Result) {
 	// 1. Jail check
 	absPath, err := PathJail(ectx.ProjectRoot, path)
@@ -960,6 +970,20 @@ func PathGuard(ectx *ExecContext, path string) (string, *Result) {
 		}
 		return absPath, ErrorResult("lane: edit to %s is outside this task's declared write lane; this task may write: %s. Revert the attempt or request an approved plan amendment if the fix needs more.",
 			path, writeLaneDescription(ectx))
+	}
+
+	// 2b. The test-first oracle is not the implementer's to rewrite. A wrong
+	// assertion goes to the person, with the reason; a changed oracle that a
+	// reviewer approves measures nothing (B-490).
+	if ectx.Role == config.RoleImplementer {
+		for _, oracle := range oraclesFor(ectx, absPath) {
+			if OracleCorrectionAllowed(ectx, oracle) {
+				continue
+			}
+			return absPath, ErrorResult("%s is this task's oracle (%s): its test-first run wrote it to decide whether the task is done. "+
+				"Do not edit it. If an assertion contradicts the task, call oracle_dispute with the test, the assertion and why "+
+				"(the slice it contradicts and the arithmetic); the person decides.", path, oracle)
+		}
 	}
 
 	// 3. A run may not alter project governance through filesystem tools.

@@ -791,6 +791,15 @@ func testFirstPrompt(task, gateCommand string) string {
 	b.WriteString("- It must test behaviour the task describes, not the shape of an " +
 		"implementation that does not exist yet.\n")
 	b.WriteString("- Cover the boundaries the task implies, not only the obvious case.\n")
+	// B-490: a test-first run wrote "right-assoc: 2^(-(3^2)) = 2^-9 =
+	// 0.015625" — 2^-9 is 0.001953125 — and the reviewer approved it. The build
+	// may not edit this test, so a wrong value blocks the task until a person
+	// steps in. Both the writer and the reviewer read this prompt.
+	b.WriteString("- Derive every expected value from the task's words, and write the derivation beside it " +
+		"(`// 2^(-(3^2)) = 2^-9 = 1/512`). Do the arithmetic; do not estimate. The build may not change this " +
+		"test, so a wrong value blocks the task. A reviewer of this test recomputes each derivation and each " +
+		"value, and treats a derivation that contradicts its own value, or a value the task does not imply, " +
+		"as a blocking finding.\n")
 	fmt.Fprintf(&b, "- The gate is `%s`. Run it with verify_run to see your test fail.\n", gateCommand)
 	// The test is where an underdetermined decision gets baked in first: a
 	// test that assumes "week = Sunday start" makes the build assume it too,
@@ -882,4 +891,46 @@ func testMode(m string) string {
 		return "pair"
 	}
 	return "solo"
+}
+
+// chainOracleTests are the test files the red-test commit added or changed:
+// the tests a chained build is judged by (B-490). The test-first run may write
+// only tests, but the filter keeps a stray non-test path out of the oracle.
+func chainOracleTests(projectRoot, chainBase string) []string {
+	paths, err := vcs.New(projectRoot).ChangedPaths(chainBase+"^", chainBase)
+	if err != nil {
+		return nil
+	}
+	cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if verify.IsTestPath(p, cfg.Verify.TestGlobs) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// oracleBrief tells a chained build which tests decide it and what to do when
+// one of them is wrong. Without it the implementer of TI-36X T-014 noticed a
+// wrong expected value and had no idea the test was the task's oracle or that
+// disputing it was a move (B-490).
+func oracleBrief(tests []string) string {
+	if len(tests) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## The tests that decide this task\n\n")
+	b.WriteString("This task's test-first run wrote these tests; they fail today, and the task is done when they pass:\n\n")
+	for _, t := range tests {
+		b.WriteString("- `" + t + "`\n")
+	}
+	b.WriteString("\nMake them pass by changing the implementation. You may not edit them. If an assertion contradicts " +
+		"the task — a wrong expected value, a requirement the acceptance slices rule out — do not work around it: " +
+		"call oracle_dispute with the test, the assertion, and why (the slice it contradicts and the arithmetic). " +
+		"The run pauses and the person decides.\n")
+	return b.String()
 }

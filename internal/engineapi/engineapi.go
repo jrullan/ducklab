@@ -872,6 +872,9 @@ func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 		QuestionID string   `json:"question_id"`
 		Answer     string   `json:"answer"`
 		WidenLane  []string `json:"widen_lane"`
+		// Actor names the decider when it is not a person: an MCP operator
+		// sends "mcp:<client>". Empty means human.
+		Actor string `json:"actor"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -879,9 +882,9 @@ func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	var err error
 	if len(body.WidenLane) > 0 {
-		err = s.svc.RunAnswerWithLane(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.WidenLane)
+		err = s.svc.RunAnswerWithLaneAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.WidenLane, body.Actor)
 	} else {
-		err = s.svc.RunAnswer(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer)
+		err = s.svc.RunAnswerAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.Actor)
 	}
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())

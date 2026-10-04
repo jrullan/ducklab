@@ -1,0 +1,153 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/jrullan/ducklab/internal/config"
+)
+
+// B-490. A test-first run writes the test that decides whether the task is
+// done; the build is judged by it. When that oracle is wrong — TI-36X T-014's
+// test expected 2^-3^2 = 0.015625, which contradicts the right associativity
+// the task required — the implementer had no sanctioned move: it noticed
+// ("So maybe the test is wrong?"), was told nothing about where the test came
+// from, and the run spent its turns until the reviewer said so. The oracle is
+// now guarded, and a contradiction goes to the person with its reason.
+
+// The two answers an oracle dispute offers. The first unlocks the oracle for
+// the rest of the build.
+const (
+	OracleCorrectAnswer = "The test is wrong — let the implementer correct it"
+	OracleKeepAnswer    = "The test is right — implement to it"
+)
+
+// OracleQuestionPrefix marks an oracle dispute's question id. Its answer is a
+// person's call, never an advisor's or an operator's.
+const OracleQuestionPrefix = "oracle-"
+
+// oracleQuestionID names the disputed test in the id, so an approval unlocks
+// that test and no other (review of #147: one approval unlocked every oracle
+// test of the run).
+func oracleQuestionID(oracle, assertion string) string {
+	return OracleQuestionPrefix + oracle + ":" + QuestionID(assertion)
+}
+
+// OracleCorrectionAllowed reports whether the person allowed correcting this
+// oracle test in this run.
+func OracleCorrectionAllowed(ectx *ExecContext, oracle string) bool {
+	prefix := OracleQuestionPrefix + oracle + ":"
+	for id, answer := range ectx.Answers {
+		if strings.HasPrefix(id, prefix) && strings.TrimSpace(answer) == OracleCorrectAnswer {
+			return true
+		}
+	}
+	return false
+}
+
+// oraclesFor are the oracle tests a jailed path designates, by file identity,
+// not spelling: a symlink or hard link to the test is the test (review of
+// #147: "oracle-link.mjs -> tests/parser.test.mjs" overwrote the oracle), and
+// a directory designates every oracle under it — all of them, so approving
+// one cannot carry the others along (review of #147).
+func oraclesFor(ectx *ExecContext, absPath string) []string {
+	var out []string
+	target, targetErr := os.Stat(absPath)
+	for _, oracle := range ectx.OracleTests {
+		oracleAbs, err := PathJail(ectx.ProjectRoot, oracle)
+		if err != nil {
+			continue
+		}
+		switch {
+		case filepath.Clean(oracleAbs) == filepath.Clean(absPath):
+			out = append(out, oracle)
+		case targetErr != nil:
+		case target.IsDir() && strings.HasPrefix(filepath.Clean(oracleAbs), filepath.Clean(absPath)+string(filepath.Separator)):
+			out = append(out, oracle)
+		default:
+			if info, err := os.Stat(oracleAbs); err == nil && os.SameFile(target, info) {
+				out = append(out, oracle)
+			}
+		}
+	}
+	return out
+}
+
+// oracleFor is the single oracle test a file path designates.
+func oracleFor(ectx *ExecContext, absPath string) (string, bool) {
+	if found := oraclesFor(ectx, absPath); len(found) > 0 {
+		return found[0], true
+	}
+	return "", false
+}
+
+// OracleDispute pauses the build for the person when the implementer finds
+// the test-first oracle wrong.
+type OracleDispute struct{}
+
+func (t *OracleDispute) Name() string   { return "oracle_dispute" }
+func (t *OracleDispute) Mutating() bool { return false }
+
+func (t *OracleDispute) Description() string {
+	return "Report that a test written by this task's test-first run is wrong: its assertion contradicts the " +
+		"task. You may not edit those tests yourself. Name the test, the assertion, and why — the acceptance " +
+		"slice it contradicts and the arithmetic (expected X, but the task implies Y because …). The run " +
+		"pauses for the person, who either lets you correct the test or keeps it."
+}
+
+func (t *OracleDispute) Schema() interface{} {
+	return NewSchema().
+		AddString("test", "The test file", true).
+		AddString("assertion", "The assertion you dispute, as written", true).
+		AddString("why", "The slice it contradicts and the arithmetic", true)
+}
+
+type oracleDisputeArgs struct {
+	Test      string `json:"test"`
+	Assertion string `json:"assertion"`
+	Why       string `json:"why"`
+}
+
+func (t *OracleDispute) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	if len(ectx.OracleTests) == 0 {
+		return ErrorResult("this task has no test-first oracle; if a test is wrong, fix it in your change and say so in your report"), nil
+	}
+	var a oracleDisputeArgs
+	if err := ParseArgs(args, &a); err != nil {
+		return ErrorResult("invalid args: %v", err), nil
+	}
+	if strings.TrimSpace(a.Assertion) == "" || strings.TrimSpace(a.Why) == "" {
+		return ErrorResult("name the assertion and why it is wrong: the slice it contradicts and the arithmetic"), nil
+	}
+	test := strings.TrimSpace(a.Test)
+	oracle := ""
+	if abs, err := PathJail(ectx.ProjectRoot, test); err == nil {
+		oracle, _ = oracleFor(ectx, abs)
+	}
+	if oracle == "" {
+		return ErrorResult("%s is not one of this task's test-first tests (%s); a test you wrote yourself is yours to fix", test, strings.Join(ectx.OracleTests, ", ")), nil
+	}
+	test = oracle
+	if OracleCorrectionAllowed(ectx, oracle) {
+		return SuccessResult("The person already allowed correcting %s: edit it, and say in your report what you changed and why.", test), nil
+	}
+	id := oracleQuestionID(oracle, a.Assertion)
+	if ans, ok := ectx.Answers[id]; ok {
+		if strings.TrimSpace(ans) == OracleKeepAnswer {
+			return SuccessResult("The person keeps the test: implement to it as written."), nil
+		}
+		return SuccessResult("%s", ans), nil
+	}
+	if ectx.NoHuman || ectx.Autonomy == config.AutonomyAuto {
+		return ErrorResult("no human available to decide; keep the test as written, implement to it, and state the disagreement in your report"), nil
+	}
+	question := fmt.Sprintf("The implementer says a test written by this task's test-first run is wrong.\n\nTest: %s\nAssertion: %s\nWhy: %s\n\n"+
+		"Correcting it lets the implementer edit the test; keeping it means the implementation must satisfy it as written.",
+		test, strings.TrimSpace(a.Assertion), strings.TrimSpace(a.Why))
+	ectx.Pending = &PendingQuestion{ID: id, Question: question, Options: []string{OracleCorrectAnswer, OracleKeepAnswer}}
+	return nil, ErrHumanNeeded
+}

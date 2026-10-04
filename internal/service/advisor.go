@@ -82,7 +82,9 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		s.publishQuestionAdvice(rs, q, answer, advisor, true)
+		// An oracle dispute is the person's call: an advisor's draft is shown,
+		// never submitted, even under yolo (B-490).
+		s.publishQuestionAdvice(rs, q, answer, advisor, !strings.HasPrefix(q.ID, tools.OracleQuestionPrefix))
 	}()
 }
 
@@ -145,7 +147,7 @@ func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, 
 		w.AppendEvent("advice_taken", map[string]interface{}{
 			"question_id": q.ID, "advisor": advisor,
 		})
-		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
+		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)", ""); err != nil {
 			w.AppendEvent("warning", map[string]interface{}{
 				"detail": "advisor auto-answer failed: " + err.Error(),
 			})

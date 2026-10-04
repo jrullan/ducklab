@@ -62,6 +62,7 @@ type fakeEngine struct {
 	bugMoveCalls        int
 	adoptedGateProject  string
 	adoptedGateActor    string
+	answerActor         string
 	startReq            map[string]interface{}
 	visualSet           map[string]interface{}
 	visualImport        string
@@ -186,7 +187,10 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 	f.budgetLifted = kind + " by " + actor
 	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
 }
-func (f *fakeEngine) RunAnswer(string, string, string) error { return nil }
+func (f *fakeEngine) RunAnswerAs(_, _, _, actor string) error {
+	f.answerActor = actor
+	return nil
+}
 func (f *fakeEngine) RunFileFindings(id string) ([]map[string]interface{}, error) {
 	run, ok := f.runs[id]
 	if !ok {
@@ -1357,5 +1361,18 @@ func TestDucklingAddRefusesAnExistingID(t *testing.T) {
 	}
 	if eng.ducklingSetID != "" {
 		t.Fatalf("duplicate add reached write API: %q", eng.ducklingSetID)
+	}
+}
+
+// Review of #147: an operator's answer names its decider. The record must not
+// say a person decided, and an oracle dispute is refused to an operator.
+func TestAnswerIsAttributedToTheOperator(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "answer", `{"run_id":"r-1","question_id":"q","answer":"yes"}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("answer failed")
+	}
+	if !strings.HasPrefix(eng.answerActor, "mcp:") {
+		t.Errorf("answered as %q; an operator's answer must be attributed to it", eng.answerActor)
 	}
 }

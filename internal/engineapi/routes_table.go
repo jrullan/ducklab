@@ -96,6 +96,7 @@ type landRequest struct {
 type answerRequest struct {
 	QuestionID string `json:"question_id"`
 	Answer     string `json:"answer"`
+	Actor      string `json:"actor,omitempty"`
 }
 
 // candidateCriteriaRequest is the PUT body: the configured criteria per role.
