@@ -178,23 +178,47 @@ func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Sectio
 			continue
 		}
 		if strings.TrimSpace(task.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(old.Title)) {
-			return nil, nil, existingTaskRewriteError(task.ID)
+			return nil, nil, existingTaskRewriteError(task.ID, "the title is not an amendable field")
 		}
 		amendment, ok := planTaskAmendmentFromStub(task)
 		if !ok {
-			return nil, nil, existingTaskRewriteError(task.ID)
+			return nil, nil, existingTaskRewriteError(task.ID, planTaskAmendmentRefusal(task))
 		}
 		amendment.TaskID = old.ID
 		if len(amendment.Replacements) > 0 && (mutable == nil || !mutable[strings.ToUpper(old.ID)]) {
-			return nil, nil, existingTaskRewriteError(task.ID)
+			return nil, nil, existingTaskRewriteError(task.ID, "proof-field replacement is allowed only on a dormant task; this task is accepted or active")
 		}
 		amendments = append(amendments, amendment)
 	}
 	return additions, amendments, nil
 }
 
-func existingTaskRewriteError(id string) error {
-	return fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks, add dependencies, and replace proof fields only on dormant tasks, but must not silently rewrite accepted or active work", id)
+func existingTaskRewriteError(id, reason string) error {
+	return fmt.Errorf("plan extension tried to rewrite existing task %s: %s. Extension may add tasks, add dependencies, and replace proof fields only on dormant tasks. If this followed an out-of-lane Accept refusal, return to that gate and approve the offered lane widening; otherwise add a new task instead of rewriting accepted or active work", id, reason)
+}
+
+func planTaskAmendmentRefusal(task artifact.Section) string {
+	hasOwns := false
+	hasBody := false
+	for _, line := range strings.Split(task.Body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "**owns:**") {
+			hasOwns = true
+		}
+		if trimmed != "" && !strings.HasPrefix(trimmed, "**") {
+			hasBody = true
+		}
+	}
+	// Scan the whole stub before choosing the reason. Architect drafts commonly
+	// begin with "Fixes B-..." and put Owns later; returning on the prose line
+	// hid the actionable field and sent the person to the wrong recovery door.
+	if hasOwns {
+		return "Owns is not amendable through plan extension"
+	}
+	if hasBody {
+		return "body content is not an amendable field"
+	}
+	return "the fragment contains a field that is not amendable or repeats an amendable field"
 }
 
 func planTaskAmendmentFromStub(task artifact.Section) (planTaskAmendment, bool) {

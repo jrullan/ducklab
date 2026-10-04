@@ -1746,9 +1746,10 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Message                  string `json:"message"`
-		ResolveAdditiveConflicts bool   `json:"resolve_additive_conflicts"`
-		HumanVerified            []int  `json:"human_verified"`
+		Message                  string   `json:"message"`
+		ResolveAdditiveConflicts bool     `json:"resolve_additive_conflicts"`
+		HumanVerified            []int    `json:"human_verified"`
+		LaneWidening             []string `json:"lane_widening"`
 		// Actor names the decider when it is not a person: an MCP operator
 		// sends "mcp:<client>". Empty means human. The record must never say
 		// a human decided what a model decided.
@@ -1758,6 +1759,7 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, body.Actor, service.AcceptOptions{
 		ResolveAdditiveConflicts: body.ResolveAdditiveConflicts,
 		HumanVerified:            body.HumanVerified,
+		LaneWidening:             body.LaneWidening,
 	})
 	if err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())

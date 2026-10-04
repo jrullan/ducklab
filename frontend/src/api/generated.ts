@@ -247,6 +247,8 @@ export interface DucklingDuckling {
 }
 
 export interface EngineapiacceptRequest {
+  human_verified?: number[];
+  lane_widening?: string[];
   message?: string;
   resolve_additive_conflicts?: boolean;
 }

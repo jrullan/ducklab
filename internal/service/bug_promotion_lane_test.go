@@ -94,6 +94,113 @@ func TestBugPromotionWidensOnePortionIntoAnExecutableStackLane(t *testing.T) {
 	}
 }
 
+func TestBugPromotionIncludesTheExactTestFirstSuiteNamedByTriage(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"scripts":{"test":"node --test"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "logic.mjs"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &store.Bug{
+		TestStrategy: "test-first",
+		TestReason:   "write the failing parser cases in tests/parser.test.mjs before changing logic.mjs",
+	}
+	portions := []agent.SplitProposal{{
+		Title: "Correct parser precedence", Acceptance: []string{"parser cases pass"}, Owns: []string{"logic.mjs"},
+	}}
+
+	got, err := preparePromotionPortions(root, rec, portions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !slices.Contains(got[0].Owns, "tests/parser.test.mjs") {
+		t.Fatalf("promoted test-first lane = %#v, want the named suite", got)
+	}
+}
+
+// B-488's real TI-36X triage named the suite only in suspected_files. The
+// prose described behaviour, not filenames; promotion must still preserve
+// both the regression and its registration file and must grant the stack's
+// test root to the single test-first portion.
+func TestBugPromotionUsesTheRealB003TestFirstEvidence(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("ti36x", "TI-36X")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		"package.json":          `{"scripts":{"test":"node tests/index.js"}}`,
+		"logic.mjs":             "",
+		"tests/parser.test.mjs": "",
+		"tests/index.js":        "",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &store.Bug{
+		TestStrategy:   "test-first",
+		TestReason:     "Parse `2^-3` and assert it evaluates to 0.125 rather than a tagged error.",
+		Deliverables:   "Parser regression coverage asserts negated exponent evaluation.\nThe test entry continues to discover and run the parser regression suite.",
+		SuspectedFiles: "tests/parser.test.mjs\ntests/index.js",
+	}
+	for _, want := range []string{"tests/parser.test.mjs", "tests/index.js"} {
+		if !slices.Contains(promotionNamedTestPaths(rec, cfg.Verify.TestGlobs), want) {
+			t.Errorf("named test paths omitted suspected file %q", want)
+		}
+	}
+	got, err := preparePromotionPortions(root, rec, []agent.SplitProposal{{
+		Title: "Correct negated exponent parsing", Acceptance: []string{"negated exponents evaluate correctly"}, Owns: []string{"logic.mjs"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"tests/parser.test.mjs", "tests/index.js", "tests"} {
+		if len(got) != 1 || !slices.Contains(got[0].Owns, want) {
+			t.Errorf("promoted B-003 lane omitted %q: %#v", want, got)
+		}
+	}
+}
+
+func TestSinglePortionTestFirstPromotionFallsBackToTheStackTestRoot(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultProject("p", "P")
+	if err := config.SaveProject(filepath.Join(root, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"scripts":{"test":"node --test"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "logic.mjs"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := preparePromotionPortions(root, &store.Bug{
+		TestStrategy: "test-first",
+		TestReason:   "assert the reported parser behaviour before implementation",
+	}, []agent.SplitProposal{{Title: "Correct parser", Acceptance: []string{"parser regression passes"}, Owns: []string{"logic.mjs"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !slices.Contains(got[0].Owns, "tests") {
+		t.Fatalf("single test-first portion did not receive the stack test root: %#v", got)
+	}
+}
+
 func TestBugPromotionGivesSplitTestPortionRegistrationAndSiblingHeader(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, root := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

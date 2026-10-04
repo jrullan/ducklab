@@ -1295,8 +1295,9 @@ type AcceptResult struct {
 // request additive conflict union, but ordinary acceptance never guesses how
 // to resolve a rebase.
 type AcceptOptions struct {
-	ResolveAdditiveConflicts bool  `json:"resolve_additive_conflicts,omitempty"`
-	HumanVerified            []int `json:"human_verified,omitempty"`
+	ResolveAdditiveConflicts bool     `json:"resolve_additive_conflicts,omitempty"`
+	HumanVerified            []int    `json:"human_verified,omitempty"`
+	LaneWidening             []string `json:"lane_widening,omitempty"`
 }
 
 // RunFilter is a run filter.
@@ -3351,13 +3352,15 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return fmt.Errorf("read candidate worktree paths: %w", err)
 	}
 	if laneFindings := taskLaneFindings(entry.Path, rs.run.TaskID, changedPaths); len(laneFindings) > 0 {
-		detail := fmt.Sprintf("accept refused: %d edit(s) are outside %s's declared Produces/Modifies/Owns lane; amend and approve the plan, or revert those edits", len(laneFindings), rs.run.TaskID)
+		paths := laneFindingPaths(laneFindings)
+		detail := fmt.Sprintf("accept refused: %d edit(s) are outside %s's declared Produces/Modifies/Owns lane; approve the offered lane widening, or revert those edits", len(laneFindings), rs.run.TaskID)
 		if rs.run.PendingData == nil {
 			rs.run.PendingData = map[string]interface{}{}
 		}
 		rs.run.PendingData["lane_findings"] = laneFindings
+		rs.run.PendingData["lane_widening"] = paths
 		rs.writer.AppendEvent("invariant_violation", map[string]interface{}{
-			"phase": "accept", "findings": laneFindings, "detail": detail,
+			"phase": "accept", "findings": laneFindings, "lane_widening": paths, "detail": detail,
 		})
 		_ = rs.writer.WriteState()
 		return fmt.Errorf("%s", detail)
@@ -4544,6 +4547,19 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	if rs.run.Status == "paused" && rs.run.PendingKind != "gate" {
 		return nil, fmt.Errorf("run %q is paused for %s, not awaiting acceptance — resolve the condition and resume, or abort", id, rs.run.PendingKind)
 	}
+	if len(options.LaneWidening) > 0 {
+		if actor != "human" {
+			return nil, fmt.Errorf("lane widening requires direct human approval; actor %q may accept the existing contract but may not amend the accepted plan", actor)
+		}
+		// This is a separate, durable decision made before Accept. If a later
+		// acceptance guard refuses (review dissent, rebase conflict, or another
+		// invariant), keep the approved plan amendment and its lane_widened
+		// event: the person approved these exact paths and must not be asked to
+		// approve them again merely because a different blocker remains.
+		if _, err = s.approveOfferedLaneWidening(rs, rs.snapshotRun(), options.LaneWidening, actor); err != nil {
+			return nil, err
+		}
+	}
 	if err = s.acceptRunWithOptions(ctx, rs, entry, msg, actor, options); err != nil {
 		return nil, err
 	}
@@ -5106,6 +5122,13 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 		return fmt.Errorf("run %q not found", id)
 	}
 	current := rs.snapshotRun()
+	if _, err := s.approveOfferedLaneWidening(rs, current, requested, "human"); err != nil {
+		return err
+	}
+	return s.runAnswer(ctx, id, questionID, answer, "")
+}
+
+func (s *Service) approveOfferedLaneWidening(rs *runState, current *runlog.Run, requested []string, actor string) ([]string, error) {
 	offered := stringSliceValue(current.PendingData["lane_widening"])
 	allowed := map[string]bool{}
 	for _, path := range offered {
@@ -5113,27 +5136,27 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 	}
 	for _, path := range requested {
 		if clean := cleanLanePath(path); clean == "" || !allowed[clean] {
-			return fmt.Errorf("lane path %q was not offered by the pending question", path)
+			return nil, fmt.Errorf("lane path %q was not offered by the pending decision", path)
 		}
 	}
 	entry, err := s.entryFor(rs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	planPath := artifact.Path(entry.Path, artifact.KindPlan)
 	planBefore, err := os.ReadFile(planPath)
 	if err != nil {
-		return fmt.Errorf("read accepted plan before lane widening: %w", err)
+		return nil, fmt.Errorf("read accepted plan before lane widening: %w", err)
 	}
 	added, err := widenTaskLane(entry.Path, current.TaskID, requested)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(added) > 0 {
 		planRel, err := filepath.Rel(entry.Path, planPath)
 		if err != nil {
 			_ = os.WriteFile(planPath, planBefore, 0o644)
-			return fmt.Errorf("resolve accepted plan path: %w", err)
+			return nil, fmt.Errorf("resolve accepted plan path: %w", err)
 		}
 		sha, err := vcs.New(entry.Path).CommitPathsWithTrailer(
 			fmt.Sprintf("ducklab: widen %s lane", current.TaskID),
@@ -5142,9 +5165,9 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 		)
 		if err != nil {
 			if restoreErr := os.WriteFile(planPath, planBefore, 0o644); restoreErr != nil {
-				return fmt.Errorf("commit accepted lane amendment: %v (also failed to restore plan: %v)", err, restoreErr)
+				return nil, fmt.Errorf("commit accepted lane amendment: %v (also failed to restore plan: %v)", err, restoreErr)
 			}
-			return fmt.Errorf("commit accepted lane amendment: %w", err)
+			return nil, fmt.Errorf("commit accepted lane amendment: %w", err)
 		}
 
 		// A paused run retains the ExecContext that enforces its write lane and
@@ -5162,13 +5185,29 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 
 		w, err := s.ensureWriter(rs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		w.AppendEvent("lane_widened", map[string]interface{}{
-			"actor": "human", "task_id": current.TaskID, "paths": added, "commit_sha": sha,
+			"actor": actor, "task_id": current.TaskID, "paths": added, "commit_sha": sha,
 		})
 	}
-	return s.runAnswer(ctx, id, questionID, answer, "")
+	// The approval is durable even when a later Accept guard refuses. Consume
+	// the offer at the same boundary so the surviving gate state presents only
+	// the blocker that still needs attention, not a plan amendment the person
+	// has already approved. Keep every unrelated pending field intact.
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return nil, err
+	}
+	rs.wmu.Lock()
+	delete(rs.run.PendingData, "lane_widening")
+	delete(rs.run.PendingData, "lane_findings")
+	err = w.WriteState()
+	rs.wmu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("persist consumed lane widening offer: %w", err)
+	}
+	return added, nil
 }
 
 func stringSliceValue(v interface{}) []string {
