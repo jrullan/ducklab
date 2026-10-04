@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section, RosterEntry } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables, questionOptions } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -15,6 +15,7 @@ import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
+import { QuestionOptions } from "../components/QuestionOptions";
 import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
@@ -2168,6 +2169,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
+              <QuestionOptions
+                options={pending.options ?? questionOptions(run.pending_data?.options)}
+                onChoose={(option) => client.answer(runId, pending.questionId ?? "", option).catch(() => {})}
+                testId="question-option"
+              />
               {pending.advisorPending && (
                 <p className="mt-1 text-sm text-ink-muted" data-testid="advisor-pending"><span className="cog-turn" aria-hidden="true">⚙</span> {pending.advisorPending} is preparing a recommendation</p>
               )}

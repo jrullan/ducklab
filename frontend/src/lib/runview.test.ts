@@ -196,6 +196,16 @@ describe("buildPending", () => {
     ])!;
     expect(p.kind).toBe("question");
     expect(p.questionId).toBe("q1");
+    expect(p.options).toBeUndefined();
+  });
+
+  // TI-36X T-005 (B-502): the options rode on human_needed and no card read
+  // them. Order and text are kept exactly — position is what "option 2" means.
+  it("carries the question's offered options, in order and untouched", () => {
+    const p = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which?", question_id: "q1", options: [" Export statusRow(state)", "No separate function"] }),
+    ])!;
+    expect(p.options).toEqual([" Export statusRow(state)", "No separate function"]);
   });
 
   it("opens the advisor drafting window at advice_started and closes it only for that question's result", () => {

@@ -273,6 +273,58 @@ describe("RunView", () => {
     await waitFor(() => expect(answered).toHaveBeenCalled());
   });
 
+  // TI-36X T-005 r-20261004-234305-dwzv (B-502): the question offered two
+  // options and the card showed none, so the person could only type. Each
+  // option is a button that answers with exactly its text; typing stays.
+  it("offers each question option as a button that answers with its text", async () => {
+    const options = [
+      "Export statusRow(state) returning { angle, second, menu }",
+      "No separate function; status information is the existing state fields",
+    ];
+    useRuns.getState().setRun({ ...run, pending_kind: "question" });
+    useRuns.getState().applyEvent({
+      type: "human_needed", run_id: "r-1", seq: 1,
+      data: { kind: "question", question: "statusRow or fields?", question_id: "q1", options },
+    });
+    const bodies: unknown[] = [];
+    const client = clientWith((path, init) => {
+      if (path.endsWith("/answer")) { bodies.push(JSON.parse(String(init?.body))); return new Response(null, { status: 204 }); }
+      if (path.endsWith("/candidates")) return json({ items: [] });
+      return json({});
+    });
+    render(<RunView runId="r-1" client={client} />);
+
+    expect(screen.getByTestId("question-option").querySelectorAll("button")).toHaveLength(2);
+    expect(screen.getByTestId("question-option-2").textContent).toContain(options[1]);
+    expect(screen.getByLabelText("answer")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("question-option-2"));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ question_id: "q1", answer: options[1] });
+  });
+
+  // A pause recorded before human_needed carried options still shows the
+  // ones the hydrated checkpoint holds.
+  it("falls back to the checkpoint's options", () => {
+    useRuns.getState().applyEvent({
+      type: "human_needed", run_id: "r-1", seq: 1,
+      data: { kind: "question", question: "Which?", question_id: "q1" },
+    });
+    useRuns.getState().setRun({ ...run, status: "paused", pending_kind: "question", pending_data: { question: "Which?", question_id: "q1", options: ["Keep", "Replace"] } });
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.getByTestId("question-option-1").textContent).toContain("Keep");
+    expect(screen.getByTestId("question-option-2").textContent).toContain("Replace");
+  });
+
+  it("shows no option list for a question without options", () => {
+    useRuns.getState().setRun({ ...run, pending_kind: "question" });
+    useRuns.getState().applyEvent({
+      type: "human_needed", run_id: "r-1", seq: 1,
+      data: { kind: "question", question: "Wrap or saturate?", question_id: "q1" },
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.queryByTestId("question-option")).toBeNull();
+  });
+
   // AC-32 end to end in the view: a tournament run anonymises its lanes.
   it("anonymises conversation lanes for a tournament run", () => {
     useRuns.getState().setRun({ ...run, mode: "tournament" });

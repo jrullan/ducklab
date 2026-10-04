@@ -15,6 +15,8 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorCard } from "../components/ErrorCard";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
+import { QuestionOptions } from "../components/QuestionOptions";
+import { questionOptions } from "../lib/runview";
 import { WaitingCard } from "../components/WaitingCard";
 import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import type { MeasuredSpend } from "../components/SeatChips";
@@ -1405,6 +1407,7 @@ function TaskRunner({
             {question && (
               <div className="mt-2" data-testid="task-question">
                 <p className="text-sm text-ink">{question}</p>
+                <QuestionOptions options={questionOptions(pd.options)} onChoose={send} testId="task-question-option" compact />
                 {!advice && !adviceFailed && advisor && liveRun.status === "paused" && (
                   <p className="mt-1 text-ink-muted" data-testid="task-advisor-pending">{advisor} is preparing a recommendation</p>
                 )}
