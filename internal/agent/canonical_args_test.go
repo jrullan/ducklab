@@ -87,3 +87,58 @@ func TestANativeRecordedCallNamesTheCanonicalProjectPath(t *testing.T) {
 		t.Errorf("native record args = %s, want the canonical project path", args)
 	}
 }
+
+// Review of #145: the canonical path was computed after execution, and a
+// delete removes the file that lets "/obsolete.txt" be read as a project
+// path. The record kept "/obsolete.txt", so the run's written paths, which
+// the restore uses to put the file back, never named it.
+func TestADeletedTopLevelFileIsRecordedByItsProjectPath(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "obsolete.txt"), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var loop *Loop
+		if native {
+			fake := provider.NewFake("f")
+			var call int
+			fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+				call++
+				if call == 1 {
+					tc := provider.ToolCall{ID: "c1", Type: "function"}
+					tc.Function.Name = "fs_delete"
+					tc.Function.Arguments = `{"path":"/obsolete.txt"}`
+					return &provider.ChatResponse{Choices: []provider.Choice{{
+						Message: provider.Message{Role: "assistant", ToolCalls: []provider.ToolCall{tc}}, FinishReason: provider.FinishToolCalls,
+					}}}
+				}
+				return &provider.ChatResponse{Choices: []provider.Choice{{
+					Message: provider.Message{Role: "assistant", Content: "Deleted."}, FinishReason: provider.FinishStop,
+				}}}
+			}
+			loop = &Loop{Provider: fake, Duckling: &DucklingConfig{ID: "pato", Model: "m", Caps: provider.Capabilities{NativeTools: true}},
+				Registry: tools.NewRegistry(), MaxTurns: 4,
+				Budget: budget.NewTracker(&budget.Budget{MaxUSD: 10, MaxTokens: 1e6, MaxTurns: 50, MaxWallclockS: 600})}
+		} else {
+			loop = testLoop(&countingProvider{replies: []string{
+				"```ducklab\n{\"tool\":\"fs_delete\",\"args\":{\"path\":\"/obsolete.txt\"}}\n```",
+				"Deleted.",
+			}}, 0)
+		}
+		loop.Registry.Register(&tools.FSDelete{})
+		turn := &Turn{Role: config.RoleImplementer, Prompt: "remove the obsolete file", Contract: "freeform", Toolbelt: []string{"fs_delete"}, MaxTurns: 3}
+		out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: dir, Role: config.RoleImplementer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.ToolCalls) != 1 || out.ToolCalls[0].Result.IsError {
+			t.Fatalf("native=%v: delete did not run: %+v", native, out.ToolCalls)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "obsolete.txt")); !os.IsNotExist(err) {
+			t.Errorf("native=%v: the file was not deleted: %v", native, err)
+		}
+		if args := string(out.ToolCalls[0].Args); !strings.Contains(args, `"path":"obsolete.txt"`) {
+			t.Errorf("native=%v: record args = %s, want obsolete.txt", native, args)
+		}
+	}
+}

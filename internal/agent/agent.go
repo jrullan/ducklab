@@ -767,6 +767,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 
 		if salvagedReasoningCall != nil {
+			// Canonical before execution: a delete removes the file that lets
+			// "/obsolete.txt" be read as a project path (review of #145).
+			salvagedArgs := tools.CanonicalToolArgs(ectx, salvagedReasoningCall.Name, salvagedReasoningCall.Args)
 			result, terr := executeTextToolCall(ctx, loop, ectx, salvagedReasoningCall, turn)
 			if errors.Is(terr, tools.ErrHumanNeeded) {
 				outcome.Pending = ectx.Pending
@@ -778,7 +781,6 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			conversation = append(conversation, provider.Message{
 				Role: "user", Content: fmt.Sprintf("Tool result for %s:\n%s", salvagedReasoningCall.Name, result.Content),
 			})
-			salvagedArgs := tools.CanonicalToolArgs(ectx, salvagedReasoningCall.Name, salvagedReasoningCall.Args)
 			rec := ToolCallRecord{
 				Name: salvagedReasoningCall.Name, Args: salvagedArgs,
 				Result: result, Digest: tools.Digest(salvagedArgs),
@@ -816,6 +818,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			toolCalls := choice.Message.ToolCalls
 			conversation = append(conversation, choice.Message)
 			for _, tc := range toolCalls {
+				// The record carries the canonical path the tool acted on, so the
+				// run's written-path list, its restore scope and retry evidence
+				// see "tests/x", not the "/tests/x" a model spelled (#145). It is
+				// computed before execution: a delete removes the file that lets
+				// "/obsolete.txt" be read as a project path.
+				nativeArgs := tools.CanonicalToolArgs(ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 				result, terr := executeToolCall(ctx, loop, ectx, tc, turn)
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
@@ -826,10 +834,6 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					ToolCallID: tc.ID,
 					Content:    result.Content,
 				})
-				// The record carries the canonical path the tool acted on, so the
-				// run's written-path list, its restore scope and retry evidence
-				// see "tests/x", not the "/tests/x" a model spelled (#145).
-				nativeArgs := tools.CanonicalToolArgs(ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 				rec := ToolCallRecord{
 					Name:   tc.Function.Name,
 					Args:   nativeArgs,
@@ -850,6 +854,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			// Check for tool call in text
 			toolCall, remainingText := parseTextToolCall(text)
 			if toolCall != nil {
+				textArgs := tools.CanonicalToolArgs(ectx, toolCall.Name, toolCall.Args)
 				result, terr := executeTextToolCall(ctx, loop, ectx, toolCall, turn)
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
@@ -863,7 +868,6 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					Role:    "user",
 					Content: fmt.Sprintf("Tool result for %s:\n%s", toolCall.Name, result.Content),
 				})
-				textArgs := tools.CanonicalToolArgs(ectx, toolCall.Name, toolCall.Args)
 				rec := ToolCallRecord{
 					Name:   toolCall.Name,
 					Args:   textArgs,
