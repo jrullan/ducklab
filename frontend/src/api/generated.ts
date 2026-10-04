@@ -548,6 +548,8 @@ export interface RunlogRedoNote {
   advisor?: string;
   draft?: string;
   editable?: boolean;
+  origin?: string;
+  reason?: string;
 }
 
 export interface RunlogReviewEvidence {
