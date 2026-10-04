@@ -493,6 +493,21 @@ func (d *DB) UpdateBug(b *Bug) error {
 	return err
 }
 
+// RestoreBug writes a bug row back exactly as GetBug or ListBugs read it,
+// timestamps included. UpdateBug stamps updated_at with now, so undoing a
+// refused operation through it left the bug looking freshly changed by an
+// operation that never happened (review of #153).
+func (d *DB) RestoreBug(b *Bug) error {
+	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
+		duplicate_of = ?, task_id = ?, source = ?, reporter = ?, created_at = ?, updated_at = ?,
+		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?, test_strategy = ?, test_reason = ?, deliverables = ?, proposal = ?
+		WHERE id = ?`,
+		b.Title, b.Body, b.Severity, b.Status,
+		nullable(b.DuplicateOf), nullable(b.TaskID), b.Source, b.Reporter, b.CreatedAt, b.UpdatedAt,
+		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.TestStrategy, b.TestReason, b.Deliverables, b.Proposal, b.ID)
+	return err
+}
+
 // AddTrace records an edge in the traceability graph.
 //
 // Idempotent: the primary key is the whole edge, so recording the same link
@@ -560,10 +575,72 @@ ALTER TABLE bug ADD COLUMN proposal TEXT NOT NULL DEFAULT '';
 //
 // The edges go too: an edge to a task that no longer exists is a break the
 // spine check would report forever, against something nobody can fix.
+//
+// One transaction: the edges and the row go together or not at all. Two bare
+// statements could fail between them and leave a task row with no edges, a
+// state no caller's undo knew to repair (review of #153).
 func (d *DB) DeleteTask(id string) error {
-	if _, err := d.db.Exec(`DELETE FROM traceability WHERE (from_kind = 'task' AND from_id = ?) OR (to_kind = 'task' AND to_id = ?)`, id, id); err != nil {
+	tx, err := d.db.Begin()
+	if err != nil {
 		return err
 	}
-	_, err := d.db.Exec(`DELETE FROM task WHERE id = ?`, id)
-	return err
+	if _, err := tx.Exec(`DELETE FROM traceability WHERE (from_kind = 'task' AND from_id = ?) OR (to_kind = 'task' AND to_id = ?)`, id, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM task WHERE id = ?`, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// Edge is one traceability edge.
+type Edge struct {
+	FromKind, FromID, ToKind, ToID string
+}
+
+// TaskEdges lists every edge that names a task, in either direction: what
+// DeleteTask removes, kept so a removal that has to be undone can put it back.
+func (d *DB) TaskEdges(id string) ([]Edge, error) {
+	rows, err := d.db.Query(`SELECT from_kind, from_id, to_kind, to_id FROM traceability
+		WHERE (from_kind = 'task' AND from_id = ?) OR (to_kind = 'task' AND to_id = ?)
+		ORDER BY from_kind, from_id, to_kind, to_id`, id, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Edge
+	for rows.Next() {
+		var e Edge
+		if err := rows.Scan(&e.FromKind, &e.FromID, &e.ToKind, &e.ToID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// RestoreTask puts back a task row exactly as GetTask read it, timestamps
+// included, with its edges, in one transaction. It is the undo of DeleteTask
+// for an operation whose later step was refused.
+func (d *DB) RestoreTask(t *Task, edges []Edge) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO task (id, title, body, milestone_id, status, complexity, role_hint, branch, depends_on, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Title, t.Body, t.MilestoneID, t.Status, t.Complexity, t.RoleHint, t.Branch, t.DependsOn, t.CreatedAt, t.UpdatedAt); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, e := range edges {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO traceability (from_kind, from_id, to_kind, to_id) VALUES (?, ?, ?, ?)`,
+			e.FromKind, e.FromID, e.ToKind, e.ToID); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }

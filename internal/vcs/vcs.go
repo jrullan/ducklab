@@ -276,6 +276,18 @@ func (g *Git) AddPaths(paths ...string) error {
 	return err
 }
 
+// UnstagePaths returns the named paths' index entries to HEAD, leaving the
+// working tree alone. It undoes an engine-owned `git add` whose commit was
+// refused, so the refused content does not ride the person's next commit.
+func (g *Git) UnstagePaths(paths ...string) error {
+	args := []string{"reset", "-q", "--"}
+	for _, path := range paths {
+		args = append(args, shellEscape(path))
+	}
+	_, err := g.run(args...)
+	return err
+}
+
 // ExistsOrTracked reports whether a path can lawfully be passed to git add:
 // present files and tracked deletions qualify; a never-tracked absent proposal
 // does not.

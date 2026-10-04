@@ -3164,7 +3164,9 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 				s.resolveSuperseded(id, "superseded: "+rs.run.ID+"'s proposal was accepted")
 			}
 		}()
-		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, actor); err != nil {
+		// Uncommitted here: the documents land below in this run's own commit,
+		// under its Ducklab-Run trailer.
+		if _, err := s.artifactPromote(ctx, rs.run.ProjectID, kind, actor, false); err != nil {
 			// A stale proposal is the one promotion error that must STOP the
 			// accept: the approved document moved while this proposal waited,
 			// and writing the photograph over it would erase those edits in
@@ -5124,16 +5126,12 @@ func stageSharedCheckoutRun(git *vcs.Git, rs *runState, projectRoot string) ([]s
 	present := presentExclusions(git.Root, excluded)
 	candidates := runWrittenPaths(rs.runDir)
 	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
-		candidates = append(candidates,
-			artifact.Path(projectRoot, artifact.Kind(kind)),
-			artifact.ProposedPath(projectRoot, artifact.Kind(kind)),
-		)
 		// The intake records the person's own brief in intent.md before a
 		// model sees it; it lands with the requirements it produced (review
-		// of #121: a clone lost the human brief).
-		if rs.run.Stage == "intake" {
-			candidates = append(candidates, artifact.Path(projectRoot, artifact.KindIntent))
-		}
+		// of #121: a clone lost the human brief). An accepted spec wires the
+		// plan's Implements lines, and that plan edit lands with it (B-489:
+		// it was left in the working tree).
+		candidates = append(candidates, acceptedDocPaths(projectRoot, artifact.Kind(kind))...)
 	}
 	// A durable start snapshot is the fallback for legacy/synthetic tool logs
 	// and for explicitly unsafe shell writes. It compares two tree objects, so
