@@ -24,6 +24,16 @@ func TestParseResumeArgs(t *testing.T) {
 		{[]string{"r-1"}, "r-1", "", true},
 		{[]string{"r-1", "--note", "2^-9 is 0.001953125"}, "r-1", "2^-9 is 0.001953125", true},
 		{[]string{"r-1", "--note"}, "", "", false},
+		// Review of #155: a flag after --note is not its text.
+		{[]string{"r-1", "--note", "--bogus"}, "", "", false},
+		{[]string{"r-1", "--note", "-x"}, "", "", false},
+		// A note that needs a leading dash says so with =.
+		{[]string{"r-1", "--note=-0.5 is the expected value"}, "r-1", "-0.5 is the expected value", true},
+		{[]string{"r-1", "--note=--bogus"}, "r-1", "--bogus", true},
+		{[]string{"r-1", "--note="}, "", "", false},
+		{[]string{"r-1", "--note", "   "}, "", "", false},
+		// Two notes: the second must not silently replace the first.
+		{[]string{"r-1", "--note", "a", "--note=b"}, "", "", false},
 		{[]string{"r-1", "--nite", "x"}, "", "", false},
 		{[]string{"--note", "x"}, "", "", false},
 		{nil, "", "", false},
