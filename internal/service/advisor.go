@@ -85,6 +85,9 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 }
 
 func deterministicToolchainAdvice(missing []string) (string, bool) {
+	if len(missing) == 0 {
+		return "Installed — continue", true
+	}
 	var install, revise []string
 	for _, item := range missing {
 		if equivalent := equivalentCommand(item); equivalent != "" {
@@ -95,9 +98,6 @@ func deterministicToolchainAdvice(missing []string) (string, bool) {
 	}
 	if len(install) == 0 && len(revise) > 0 {
 		return "Change the plan (revise it) instead", true
-	}
-	if len(install) == 0 {
-		return "Install the capabilities named in the toolchain check, then choose “Installed — continue” after they are on PATH.", false
 	}
 	answer := fmt.Sprintf("Install the missing capability %s, then choose “Installed — continue” after it is on PATH.", strings.Join(install, ", "))
 	if len(install) > 1 {

@@ -5243,11 +5243,19 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	w.AppendEvent("human", event)
 	if planRevision {
 		projectID := rs.snapshotRun().ProjectID
-		if err := s.finishUnacceptedRun(rs, w, "done", "", "plan_revision"); err != nil {
-			return err
+		closeErr := s.finishUnacceptedRun(rs, w, "done", "", "plan_revision")
+		_, startErr := s.StageStart(ctx, projectID, StageRequest{Stage: "plan", Revise: "Resolve the missing toolchain capability before build work: " + questionText})
+		switch {
+		case closeErr != nil && startErr == nil:
+			return fmt.Errorf("run closed and plan revision started, but cleanup reported: %w", closeErr)
+		case closeErr != nil && startErr != nil:
+			return errors.Join(
+				fmt.Errorf("run closed, but cleanup reported: %w", closeErr),
+				fmt.Errorf("plan revision could not be started: %w", startErr),
+			)
+		default:
+			return startErr
 		}
-		_, err := s.StageStart(ctx, projectID, StageRequest{Stage: "plan", Revise: "Resolve the missing toolchain capability before build work: " + questionText})
-		return err
 	}
 	if author != "" {
 		// This is an attention event, not another human decision: unattended

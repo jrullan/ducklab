@@ -410,6 +410,69 @@ func TestAbortClosesAfterRestoreRefusesMovedHead(t *testing.T) {
 	}
 }
 
+func TestPlanRevisionStartsAfterRestoreRefusesMovedHead(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	id, dir := projectWithDocs(t, s, nil)
+	g := gitProject(t, dir)
+	snapshot, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const question = "cmd:python is not on PATH; python3 is available"
+	run := &runlog.Run{
+		ID: "r-plan-revision-restore-conflict", ProjectID: id, TaskID: "T-001", Stage: "build",
+		Status: "paused", PendingKind: "question", PendingData: map[string]interface{}{
+			"question_id": "toolchain-T-001", "question": question,
+		},
+		TreeSnapshot: snapshot, TreeSnapshotHead: mustHead(t, g), StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("landed while paused\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("land while run is paused"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("uncommitted overlap\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.runAnswer(context.Background(), run.ID, "toolchain-T-001", "Change the plan (revise it) instead", "")
+	if err == nil || !strings.Contains(err.Error(), "run closed and plan revision started") {
+		t.Fatalf("plan revision answer error = %v", err)
+	}
+	if run.Status != "done" || run.Resolution != "plan_revision" || run.PendingKind != "" {
+		t.Fatalf("plan revision did not close build: %+v", run)
+	}
+	runs, err := s.RunList(context.Background(), RunFilter{ProjectID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revision *runlog.Run
+	for _, candidate := range runs {
+		if candidate.ID != run.ID && candidate.Stage == "plan" {
+			revision = candidate
+			break
+		}
+	}
+	if revision == nil {
+		t.Fatal("restore conflict closed the build without starting a plan revision")
+	}
+	cleanupStartedRun(t, s, revision.ID)
+}
+
 func TestAbortOutlivesCanceledRequestToStopWorker(t *testing.T) {
 	s := newTestService(t)
 	dir := t.TempDir()

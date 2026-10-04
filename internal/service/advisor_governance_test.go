@@ -314,6 +314,13 @@ func TestEquivalentToolchainAdviceChoosesPlanRevision(t *testing.T) {
 	}
 }
 
+func TestResolvedToolchainAdviceContinues(t *testing.T) {
+	advice, autoAnswer := deterministicToolchainAdvice(nil)
+	if advice != "Installed — continue" || !autoAnswer {
+		t.Fatalf("resolved toolchain advice = %q, auto=%v", advice, autoAnswer)
+	}
+}
+
 func TestMissingToolchainAdviceRequiresHumanInstallationWithoutAModelCall(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-dos")
 	p := &advisorTestProvider{replies: []string{"Do not choose Installed — continue until installation succeeds."}}
