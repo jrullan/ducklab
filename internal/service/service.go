@@ -1890,7 +1890,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// to install, asked for by name, now (toolchain.go).
 	if req.TaskID != "" {
 		if missing := s.missingToolchainFor(entry.Path, req.TaskID); len(missing) > 0 {
-			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing))
+			_, recheck := rs.answers()["toolchain-"+req.TaskID]
+			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing, recheck))
 			return
 		}
 	}
@@ -4161,7 +4162,6 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	}
 	current := rs.snapshotRun()
 	wasQueued := current.Status == "queued"
-	wasActive := current.Status == "running"
 	rs.wmu.Lock()
 	cancel := rs.cancel
 	done := rs.done
@@ -4176,53 +4176,47 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			// Cancellation of the request does not cancel the abort. The worker
+			// owns the isolated checkout until it stops, so wait for its cancel
+			// above to take effect before restoring or removing that checkout.
+			<-done
 		}
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return err
 	}
+	return s.finishUnacceptedRun(rs, w, "failed", "ABORTED", "")
+}
+
+// finishUnacceptedRun is the one terminal path for work that will not land.
+// Its caller must first stop any live worker. Both abort and plan revision
+// need the same restore, isolated-worktree cleanup and queue wake-up; omitting
+// any one of them strands either the checkout or the run behind it.
+func (s *Service) finishUnacceptedRun(rs *runState, w *runlog.Writer, status, verdict, resolution string) error {
+	restoreErr := restoreAfterUnaccepted(rs)
 	rs.wmu.Lock()
-	rs.run.Status = "failed"
-	rs.run.Verdict = "ABORTED"
+	rs.run.Status = status
+	rs.run.Verdict = verdict
+	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
-	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
-	w.WriteState()
+	event := map[string]interface{}{"verdict": verdict}
+	if resolution != "" {
+		event["resolution"] = resolution
+	}
+	w.AppendEvent("run_end", event)
+	werr := w.WriteState()
+	hasWorktree := rs.run.WorktreePath != ""
 	rs.wmu.Unlock()
-	// A paused or already-failed run has no goroutine left to unwind, so its
-	// cancellation cannot reach failRun. Restore those runs here. For an active
-	// run, leave restoration to failRun after its last write; restoring while it
-	// is still running would race the model's final filesystem operation.
-	if wasQueued {
+	if hasWorktree {
 		s.cleanupRunWorktree(rs, rs.projectPath)
 	}
-	if done == nil {
-		restoreAfterUnaccepted(rs)
-	} else {
-		select {
-		case <-done:
-			restoreAfterUnaccepted(rs)
-			if !wasActive {
-				s.cleanupRunWorktree(rs, rs.projectPath)
-			}
-		default:
-		}
-	}
-	// The run stays in the map: it is still inspectable through RunGet and
-	// still on disk. Deleting it made an aborted run vanish from run list.
-	rs.wmu.Lock()
-	werr := w.WriteState()
-	rs.wmu.Unlock()
-	// The abort changes the queue's answers twice over: a QUEUED run must
-	// leave the line (promoted later it would be resurrected), and whatever
-	// this run was holding — a slot about to free, a paused tree — may now
-	// let a waiting run start. Nothing else re-examines the line on abort:
-	// T-075's relaunch sat queued forever in a project where nothing ran,
-	// because the only pokes lived on the gate decisions.
+	// The run stays in the map for inspection, but it must leave the queue and
+	// release any project hold so waiting work is reconsidered immediately.
 	s.queue.remove(rs)
 	s.queue.poke(s)
-	return werr
+	return errors.Join(restoreErr, werr)
 }
 
 // RunDir returns the run directory for a run ID, or empty if not found.
@@ -5245,7 +5239,27 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 	if author != "" {
 		event["author"] = author
 	}
+	planRevision := strings.HasPrefix(questionID, "toolchain-") && toolchainPlanRevisionAnswer(answer)
+	if planRevision {
+		event["resolution"] = "plan_revision"
+	}
 	w.AppendEvent("human", event)
+	if planRevision {
+		projectID := rs.snapshotRun().ProjectID
+		closeErr := s.finishUnacceptedRun(rs, w, "done", "", "plan_revision")
+		_, startErr := s.StageStart(ctx, projectID, StageRequest{Stage: "plan", Revise: "Resolve the missing toolchain capability before build work: " + questionText})
+		switch {
+		case closeErr != nil && startErr == nil:
+			return fmt.Errorf("run closed and plan revision started, but cleanup reported: %w", closeErr)
+		case closeErr != nil && startErr != nil:
+			return errors.Join(
+				fmt.Errorf("run closed, but cleanup reported: %w", closeErr),
+				fmt.Errorf("plan revision could not be started: %w", startErr),
+			)
+		default:
+			return startErr
+		}
+	}
 	if author != "" {
 		// This is an attention event, not another human decision: unattended
 		// runs continue, but the operator can inspect and correct the answer.
@@ -5257,6 +5271,10 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author 
 
 	_, err = s.RunResume(ctx, id)
 	return err
+}
+
+func toolchainPlanRevisionAnswer(answer string) bool {
+	return strings.EqualFold(strings.TrimSpace(answer), "Change the plan (revise it) instead")
 }
 
 // writeProjectTOML persists a project config. Delegates to config.SaveProject

@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/capability"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -100,6 +102,16 @@ func capabilityAvailable(item string) bool {
 	return err == nil
 }
 
+// equivalentCommand describes a known compatible command found on PATH.
+func equivalentCommand(item string) string {
+	if binaryOf(item) == "python" {
+		if _, err := exec.LookPath("python3"); err == nil {
+			return "python3"
+		}
+	}
+	return ""
+}
+
 // missingTools reports which declared environment capabilities are absent.
 func missingTools(declared []string) []string {
 	var missing []string
@@ -134,8 +146,18 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 		}
 		for _, item := range strings.Split(sec.Field("toolchain"), ",") {
 			item = strings.TrimSpace(strings.Trim(item, "`"))
+			if item == "" || capabilityAvailable(item) {
+				continue
+			}
+			if equivalent := equivalentCommand(item); equivalent != "" {
+				key := "command|" + strings.ToLower(item)
+				if !seen[key] {
+					seen[key] = true
+					out = append(out, fmt.Sprintf("%s declares %s, but it is not on PATH; %s is available (install a compatible %s command, or change the plan to cmd:%s)", sec.ID, item, equivalent, binaryOf(item), equivalent))
+				}
+			}
 			m := pkgConfigCapability.FindStringSubmatch(item)
-			if m == nil || capabilityAvailable(item) {
+			if m == nil {
 				continue
 			}
 			if suggestion := closestCapability(m[1], modules); suggestion != "" && suggestion != m[1] {
@@ -143,6 +165,25 @@ func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []
 				if !seen[key] {
 					seen[key] = true
 					out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable; installed pkg-config metadata suggests pkg-config:%s — use the module name, not the OS package name", sec.ID, item, suggestion))
+				}
+			}
+		}
+	}
+	// Project commands are local evidence that a binary name is wrong, not
+	// merely absent. This finding intentionally blocks plan acceptance before a
+	// build can pause on a mismatch the project configuration already exposes.
+	if projectRoot != "" {
+		if cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml")); err == nil {
+			command := strings.Fields(cfg.Run.Command)
+			if len(command) > 0 {
+				for _, item := range declaredToolchain(plan, "") {
+					if eq := equivalentCommand(item); eq != "" && command[0] == eq {
+						key := "command|" + strings.ToLower(item)
+						if !seen[key] {
+							seen[key] = true
+							out = append(out, fmt.Sprintf("plan declares %s while [run].command uses %s; revise the declared command or install a compatible %s command", item, eq, binaryOf(item)))
+						}
+					}
 				}
 			}
 		}
@@ -240,13 +281,27 @@ func editDistance(a, b string) int {
 }
 
 // toolchainQuestion is the pause a build stops on when the plan's toolchain
-// is not on the machine.
-func toolchainQuestion(taskID string, missing []string) *tools.PendingQuestion {
-	return &tools.PendingQuestion{
-		ID:       "toolchain-" + taskID,
-		Question: fmt.Sprintf("The plan declares environment capabilities this machine does not have: %s. Install them and continue, or change the plan.", strings.Join(missing, ", ")),
-		Options:  []string{"Installed — continue", "Change the plan (revise it) instead"},
+// is not on the machine. A repeated pause says explicitly that the answer did
+// not change PATH, rather than presenting the same question as new.
+func toolchainQuestion(taskID string, missing []string, recheck bool) *tools.PendingQuestion {
+	details := make([]string, 0, len(missing))
+	for _, item := range missing {
+		detail := item
+		if recheck {
+			detail += " is still not on PATH after your answer"
+		} else {
+			detail += " is not on PATH"
+		}
+		if eq := equivalentCommand(item); eq != "" {
+			detail += fmt.Sprintf("; %s is available (install a compatible %s command, or change the plan to cmd:%s)", eq, binaryOf(item), eq)
+		}
+		details = append(details, detail)
 	}
+	prefix := "The plan declares environment capabilities this machine does not have"
+	if recheck {
+		prefix = "The toolchain was re-checked after your answer and"
+	}
+	return &tools.PendingQuestion{ID: "toolchain-" + taskID, Question: fmt.Sprintf("%s: %s. Install them and continue, or change the plan.", prefix, strings.Join(details, "; ")), Options: []string{"Installed — continue", "Change the plan (revise it) instead"}}
 }
 
 // missingToolchainFor loads the plan and reports the declared tools this

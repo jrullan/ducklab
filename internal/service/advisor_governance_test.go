@@ -304,6 +304,75 @@ func TestAdvisorDraftStartPrecedesRecommendation(t *testing.T) {
 	t.Fatal("advisor recommendation was not recorded")
 }
 
+func TestEquivalentToolchainAdviceChoosesPlanRevision(t *testing.T) {
+	if equivalentCommand("cmd:python") != "python3" {
+		t.Skip("python3 is not available on this host")
+	}
+	advice, autoAnswer := deterministicToolchainAdvice([]string{"cmd:python"})
+	if advice != "Change the plan (revise it) instead" || !autoAnswer {
+		t.Fatalf("equivalent toolchain advice = %q, auto=%v", advice, autoAnswer)
+	}
+}
+
+func TestResolvedToolchainAdviceContinues(t *testing.T) {
+	advice, autoAnswer := deterministicToolchainAdvice(nil)
+	if advice != "Installed — continue" || !autoAnswer {
+		t.Fatalf("resolved toolchain advice = %q, auto=%v", advice, autoAnswer)
+	}
+}
+
+func TestMissingToolchainAdviceRequiresHumanInstallationWithoutAModelCall(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-dos")
+	p := &advisorTestProvider{replies: []string{"Do not choose Installed — continue until installation succeeds."}}
+	s.ducklings.RegisterProvider(p)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const missing = "definitely-not-a-toolchain-command-xyz"
+	plan := "## M-01 — Build\n\n**Toolchain:** cmd:" + missing + "\n\n### T-001 — Build\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-toolchain-advice", ProjectID: "p", TaskID: "T-001", Status: "paused", PendingKind: "question",
+		PendingData: map[string]interface{}{"question_id": "toolchain-T-001"}, Autonomy: "yolo",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.adviseQuestion(rs, &tools.PendingQuestion{
+		ID: "toolchain-T-001", Question: "cmd:python is not on PATH",
+		Options: []string{"Installed — continue", "Change the plan (revise it) instead"},
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		rs.wmu.Lock()
+		advice, _ := rs.run.PendingData["advice"].(string)
+		rs.wmu.Unlock()
+		if advice != "" {
+			if !strings.Contains(advice, "Install the missing capability") || !strings.Contains(advice, missing) {
+				t.Fatalf("toolchain advice = %q", advice)
+			}
+			if run.Status != "paused" || run.PendingKind != "question" {
+				t.Fatalf("yolo auto-answered a host installation: status=%q pending=%q", run.Status, run.PendingKind)
+			}
+			p.mu.Lock()
+			calls := len(p.calls)
+			p.mu.Unlock()
+			if calls != 0 {
+				t.Fatalf("toolchain advice made %d provider calls, want none", calls)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deterministic toolchain advice was not recorded")
+}
+
 func TestAdvisorFailureIsRecordedOnQuestion(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-dos")
 	s.ducklings.RegisterProvider(&advisorTestProvider{err: errors.New("advisor offline")})
