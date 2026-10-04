@@ -602,6 +602,7 @@ export interface RunlogRun {
   next?: string[];
   no_changes?: boolean;
   note?: string;
+  oracle_tests?: string[];
   origin?: string;
   pending_data?: Record<string, unknown>;
   pending_kind?: string;

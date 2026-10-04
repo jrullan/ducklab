@@ -82,7 +82,9 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		s.publishQuestionAdvice(rs, q, answer, advisor, true)
+		// An oracle dispute is the person's call: an advisor's draft is shown,
+		// never submitted, even under yolo (B-490).
+		s.publishQuestionAdvice(rs, q, answer, advisor, !strings.HasPrefix(q.ID, tools.OracleQuestionPrefix))
 	}()
 }
 

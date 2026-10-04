@@ -710,7 +710,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.
 		Prompt: s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID) +
-			humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
+			oracleBrief(mc.ectx.OracleTests) + humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
 		// The task's bullets, numbered: the implementer's work contract
 		// (strategy/deliverables.go). The plan's words, never the model's.
 		Deliverables:       deliverables,

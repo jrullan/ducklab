@@ -1492,6 +1492,9 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	if err := s.createRunWorktreeAt(run, entry.Path, req.chainBase); err != nil {
 		return nil, err
 	}
+	if req.chainBase != "" {
+		run.OracleTests = chainOracleTests(entry.Path, req.chainBase)
+	}
 
 	// Create writer
 	writer, err := runlog.NewWriter(entry.Path, run)
@@ -1997,7 +2000,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		WorkspaceDiff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(runDiffExclusions(rs.run, root, entry.Path)...)
 		},
-		Answers: rs.answers(),
+		Answers:     rs.answers(),
+		OracleTests: append([]string(nil), runAtLaunch.OracleTests...),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}

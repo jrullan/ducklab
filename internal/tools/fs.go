@@ -845,9 +845,9 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	// A delete is a write to the path: the lane, governance, test-only runs,
-	// the denylist (.git) and protected globs all apply. It used to check
-	// governance alone.
+	// A delete is a write to the path: the lane, the test-first oracle,
+	// governance, test-only runs, the denylist (.git) and protected globs all
+	// apply. It used to check governance alone.
 	absPath, guard := PathGuard(ectx, a.Path)
 	if guard != nil {
 		return guard, nil

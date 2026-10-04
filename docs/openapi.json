@@ -2063,6 +2063,12 @@
           "note": {
             "type": "string"
           },
+          "oracle_tests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "origin": {
             "type": "string"
           },
