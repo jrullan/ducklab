@@ -328,8 +328,14 @@ func TestUnreportedDeliverablesRetryBeforeReview(t *testing.T) {
 	if !strings.Contains(rec.prompts[1], "without the required deliverables JSON report") || !strings.Contains(rec.prompts[1], "do not restart research") {
 		t.Errorf("retry did not receive the deterministic protocol correction:\n%s", rec.prompts[1])
 	}
-	if len(implementerLimits) != 2 || implementerLimits[0] != 12 || implementerLimits[1] != 4 {
-		t.Errorf("implementer exploration limits = %v, want [12 4]", implementerLimits)
+	// B-496: the retry keeps the seat's ordinary boundary; it carries the
+	// previous attempt in its prompt instead of a 4-call limit justified by a
+	// transcript it does not have.
+	if len(implementerLimits) != 2 || implementerLimits[0] != 12 || implementerLimits[1] != 12 {
+		t.Errorf("implementer exploration limits = %v, want [12 12]", implementerLimits)
+	}
+	if strings.Contains(rec.prompts[0], "Your previous attempt") || !strings.Contains(rec.prompts[1], "## Your previous attempt at this turn") || !strings.Contains(rec.prompts[1], "Did it all.") {
+		t.Errorf("only the retry should carry the previous attempt:\nfirst:\n%s\nretry:\n%s", rec.prompts[0], rec.prompts[1])
 	}
 	if len(implementerTurns) != 2 || implementerTurns[0] != 24 || implementerTurns[1] != 24 {
 		t.Errorf("implementer turn limits = %v, want [24 24]: a red or absent verify means the retry still has implementation work", implementerTurns)

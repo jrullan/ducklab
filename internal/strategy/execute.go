@@ -472,6 +472,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// same-seat retry lets the implementer finish from the current tree.
 		reportRetries := 0
 		reportRetryNeedsWork := false
+		// What the implementer turn that triggered a retry did, for that retry
+		// only: the retry is a new conversation (B-496).
+		priorAttempt := ""
 		// The implementer's latest deliverables report this round: data for
 		// the reviewer, evidence for the duck, a gap to flag on approve.
 		var lastReport *DeliverablesReport
@@ -634,7 +637,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 				}
 			}
-			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role], priorAttempt)
+			priorAttempt = ""
 			if manifestPatchBase != nil {
 				prompt += "\n\n## Canonical plan manifest — patch this object\n\n```json\n" +
 					planManifestDraft.Text +
@@ -765,12 +769,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					// reopens another bounded inspect/act cycle.
 					params.ExecContext.ExplorationCallLimit = 12
 				}
-				if turn.Role == config.RoleImplementer && (reportRetries > 0 || consultRetries > 0) {
-					// A protocol retry continues on the same tree with the prior
-					// evidence in its transcript. Give it enough observation for a
-					// targeted re-read, not another full research phase.
-					params.ExecContext.ExplorationCallLimit = 4
-				}
+				// A retry used to get 4 observational calls, on the premise that
+				// it "continues with the prior evidence in its transcript". It
+				// has no transcript: it is a new conversation. Measured over every
+				// local implementer run since 2026-09-02, retries refused 6.7% of
+				// their calls (39% in TI-36X) against 0.2% for ordinary turns,
+				// and no turn that hit the boundary ever edited afterwards
+				// (B-496). The retry now carries the previous attempt in its
+				// prompt and keeps the seat's ordinary boundary; a narrow
+				// continuation is still bounded by its 8-call cap below.
 			}
 			narrowContinuation := (consultRetries > 0 && !consultRetryNeedsWork) ||
 				(reportRetries > 0 && !reportRetryNeedsWork)
@@ -1294,6 +1301,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if lastReport.Unreported && reportRetries == 0 {
 						reportRetries++
 						reportRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)
+						priorAttempt = previousAttempt(outcome)
 						correctiveNotes = append(correctiveNotes,
 							"Your previous implementer turn ended without the required deliverables JSON report. Continue from the CURRENT tree; do not restart research. Finish any work still pending, run verify_run, and end with one status entry for every numbered deliverable.")
 						emit(params, "deliverables_retry", map[string]interface{}{
@@ -1360,6 +1368,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						if consultRetries < consultLimit {
 							consultRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)
 							consultRetries++
+							priorAttempt = previousAttempt(outcome)
 							emit(params, "advisor_retry", map[string]interface{}{
 								"round": round, "retry": consultRetries, "of": consultLimit,
 							})
@@ -1583,7 +1592,7 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if script.MaterializeCandidate != nil {
 			promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
 		}
-		prompt, err := buildPrompt(&turn, params, promptTranscript, nil, nil, "", nil, nil, nil)
+		prompt, err := buildPrompt(&turn, params, promptTranscript, nil, nil, "", nil, nil, nil, "")
 		if err != nil {
 			return err
 		}
@@ -1730,7 +1739,7 @@ func hasParentEvidence(prompt string) bool {
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string, prior string) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 	if hasParentEvidence(params.Prompt) {
@@ -1754,6 +1763,9 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString("\n\n## Validated topology\n\nThe earlier JSON plan manifest is the structural source of truth. Render it as milestones and H3 tasks without changing task ownership, producers, consumers, or verification. Ducklab derives `Owns` and `Depends on` from that graph; do not invent broad aggregate lanes such as `src/`.")
 		}
 	case config.RoleImplementer:
+		if prior != "" {
+			b.WriteString("\n\n" + prior)
+		}
 		if len(correctiveNotes) > 0 {
 			b.WriteString("\n\n## Advisor corrective note\n\n" + strings.Join(correctiveNotes, "\n\n"))
 		}
