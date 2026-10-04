@@ -383,6 +383,13 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	// globs, protected globs and the messages all compare the path as given,
 	// so "/tests/x" must arrive as "tests/x" (review of #145).
 	args = canonicalPathArgs(ectx, name, args)
+	// A file tool with no path used to resolve "" to the project root and
+	// answer "read: read <root>: is a directory" — which never says the
+	// argument is missing; atom-local repeated such calls seven times in
+	// TI-36X T-004 (B-497). Say it, before any boundary can hide it.
+	if pathRequired[name] && argPath(args) == "" {
+		return ErrorResult("%s needs a \"path\": the project-relative file to act on, e.g. {\"path\": \"logic.mjs\"}", name), nil
+	}
 	explorationLimit := ectx.effectiveExplorationCallLimit()
 	if explorationTool[name] && (ectx.ReadToolsClosed || ectx.explorationCalls >= explorationLimit) {
 		// A malformed path is the actionable error; the boundary message would
@@ -1472,9 +1479,18 @@ func CanonicalToolArgs(ectx *ExecContext, name string, args json.RawMessage) jso
 // the tool reports it.
 func canonicalPathArgs(ectx *ExecContext, name string, args json.RawMessage) json.RawMessage {
 	root, ok := toolPathRoot(ectx, name, args)
-	path := argPath(args)
-	if !ok || path == "" || !filepath.IsAbs(filepath.Clean(path)) {
+	raw := rawArgPath(args)
+	path := strings.TrimSpace(raw)
+	if !ok || path == "" {
 		return args
+	}
+	// " logic.mjs" and "tests/state.test.mjs\n" name project files too; the
+	// padding came from the model, not the tree (B-497).
+	if !filepath.IsAbs(filepath.Clean(path)) {
+		if path == raw {
+			return args
+		}
+		return withArgPath(args, path)
 	}
 	abs, err := PathJail(root, path)
 	if err != nil {
@@ -1484,16 +1500,38 @@ func canonicalPathArgs(ectx *ExecContext, name string, args json.RawMessage) jso
 	if !ok {
 		return args
 	}
+	return withArgPath(args, filepath.ToSlash(rel))
+}
+
+// withArgPath is args with "path" replaced.
+func withArgPath(args json.RawMessage, path string) json.RawMessage {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(args, &m) != nil {
 		return args
 	}
-	m["path"], _ = json.Marshal(filepath.ToSlash(rel))
+	m["path"], _ = json.Marshal(path)
 	out, err := json.Marshal(m)
 	if err != nil {
 		return args
 	}
 	return out
+}
+
+// rawArgPath is the "path" argument exactly as sent.
+func rawArgPath(args json.RawMessage) string {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(args, &a) != nil {
+		return ""
+	}
+	return a.Path
+}
+
+// pathRequired names the file tools that act on one file and have no
+// meaningful default; fs_list and fs_search default to the project.
+var pathRequired = map[string]bool{
+	"fs_read": true, "fs_write": true, "fs_write_lines": true, "fs_patch": true, "fs_delete": true,
 }
 
 // rootRelative is abs relative to root, against either spelling of the root
