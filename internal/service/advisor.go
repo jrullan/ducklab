@@ -630,23 +630,31 @@ func (s *Service) pickAdvisorForRun(run *runlog.Run) config.DucklingID {
 
 // draftRedoNote creates a bounded, editable recommendation from facts already
 // recorded for the run. It deliberately never changes run state or starts a
-// retry; the note is an advisor recommendation, not a decision.
-func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoNote {
-	if rs == nil || rs.run == nil {
+// retry; the note is a recommendation, not a decision.
+//
+// No model is consulted: the engine assembles the note, and says so in
+// Origin (B-485 — the desktop called it "advisor-drafted by qwen38-max").
+// run is the caller's copy, whose Failure may have been recovered from
+// events; events carry the verdict detail and the reviewer's findings, which
+// the run record does not.
+func (s *Service) draftRedoNote(ctx context.Context, rs *runState, run *runlog.Run, events []*runlog.Event) *runlog.RedoNote {
+	if rs == nil || run == nil {
 		return nil
 	}
-	run := rs.snapshotRun()
 	if !redoNoteEligible(run) {
 		return nil
 	}
-	parts := make([]string, 0, 4)
+	reason := redoReason(run, events)
+	parts := make([]string, 0, 5)
+	// The reason leads: it is the one fact a retry needs, and it was the one
+	// the T-003 note left out (B-485).
+	if reason != "" {
+		parts = append(parts, reason)
+	}
 	if run.TaskID != "" {
 		if task := s.buildTaskPrompt(ctx, run.ProjectID, rs.projectPath, run.TaskID); strings.TrimSpace(task) != "" {
 			parts = append(parts, "Task: "+firstN(strings.TrimSpace(task), 2400))
 		}
-	}
-	if strings.TrimSpace(run.Failure) != "" {
-		parts = append(parts, "Failure: "+firstN(strings.TrimSpace(run.Failure), 1600))
 	}
 	if gate, err := s.RunVerify(ctx, run.ID, 20); err == nil && strings.TrimSpace(gate) != "" {
 		parts = append(parts, "Gate tail:\n"+firstN(strings.TrimSpace(gate), 4000))
@@ -657,9 +665,65 @@ func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoN
 	if len(parts) == 0 {
 		return nil
 	}
-	advisor := s.pickAdvisorForRun(run)
 	note := "Retry the task after addressing the failure.\n\n" + strings.Join(parts, "\n\n")
-	return &runlog.RedoNote{Draft: firstN(note, 12000), Advisor: string(advisor), Editable: true}
+	return &runlog.RedoNote{Draft: firstN(note, 12000), Origin: runlog.RedoOriginDucklab, Reason: reason, Editable: true}
+}
+
+// redoReason says why the run failed, in the words the engine and the
+// reviewer recorded: the verdict's detail (a test-first FAILED verdict leaves
+// run.Failure empty and its detail only in the verdict event), the run's
+// Failure when it says something else, and the last reviewer verdict's
+// blocking findings. Empty when nothing was recorded.
+func redoReason(run *runlog.Run, events []*runlog.Event) string {
+	var detail string
+	var blocking []string
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		switch e.Type {
+		case "verdict":
+			if d, _ := e.Data["detail"].(string); strings.TrimSpace(d) != "" {
+				detail = strings.TrimSpace(d)
+			}
+		case "message":
+			// The last semantic verdict wins, as in finalReview: an earlier
+			// round's objections may since have been addressed.
+			if v, _ := e.Data["verdict"].(string); v == "" {
+				continue
+			}
+			blocking = blocking[:0]
+			fs, _ := e.Data["findings"].([]interface{})
+			for _, raw := range fs {
+				f, _ := raw.(map[string]interface{})
+				sev, _ := f["severity"].(string)
+				issue, _ := f["issue"].(string)
+				// critical|major are what agent.Verdict.Blocking keeps.
+				if (sev != "critical" && sev != "major") || strings.TrimSpace(issue) == "" {
+					continue
+				}
+				line := "- [" + sev + "] " + strings.TrimSpace(issue)
+				if file, _ := f["file"].(string); file != "" {
+					line += " (" + file + ")"
+				}
+				if fix, _ := f["fix"].(string); strings.TrimSpace(fix) != "" {
+					line += " Fix: " + strings.TrimSpace(fix)
+				}
+				blocking = append(blocking, line)
+			}
+		}
+	}
+	var parts []string
+	if detail != "" {
+		parts = append(parts, "Why it failed: "+firstN(detail, 1600))
+	}
+	if failure := strings.TrimSpace(run.Failure); failure != "" && failure != detail {
+		parts = append(parts, "Failure: "+firstN(failure, 1600))
+	}
+	if len(blocking) > 0 {
+		parts = append(parts, "Reviewer's blocking findings:\n"+firstN(strings.Join(blocking, "\n"), 2400))
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func redoNoteEligible(r *runlog.Run) bool {

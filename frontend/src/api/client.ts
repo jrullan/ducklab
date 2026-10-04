@@ -282,6 +282,18 @@ export interface VisualGate {
   results: VisualCompare[];
 }
 
+/** The retry note the engine offers on a failed run. B-485: `origin` is who
+ * wrote `draft` — "ducklab" when the engine assembled it from the run record,
+ * "advisor" when an advisor seat did (then `advisor` names it). `reason` is
+ * why the run failed, shown beside the editable draft. */
+export interface RedoNote {
+  draft: string;
+  origin?: string;
+  advisor?: string;
+  reason?: string;
+  editable: boolean;
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -346,8 +358,8 @@ export interface Run {
   /** Why the run failed, in the engine's words. Some of these are written to be
    * acted on — split names the file two subtasks both claimed. */
   failure?: string;
-  /** Advisor-authored, editable retry recommendation for failed runs. */
-  redo_note?: { draft: string; advisor: string; editable: boolean };
+  /** Editable retry recommendation for failed runs; `origin` says who wrote it. */
+  redo_note?: RedoNote;
   /** The actions a person may legally take on this run, in the order to offer
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */

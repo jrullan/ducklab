@@ -1883,12 +1883,18 @@
           },
           "editable": {
             "type": "boolean"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [
-          "advisor",
           "draft",
-          "editable"
+          "editable",
+          "origin"
         ],
         "type": "object"
       },
