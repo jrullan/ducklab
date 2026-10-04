@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -820,17 +821,20 @@ func runCmd(verb string, args []string, repo string) int {
 		return 0
 	case "accept":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run accept <run-id> [--message <msg>] [--union-additive]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run accept <run-id> [--message <msg>] [--union-additive] [--widen-lane [path,...]]")
 			return 2
 		}
 		msg := ""
 		unionAdditive := false
+		widen := laneWideningFlag{}
 		for i := 1; i < len(args); i++ {
 			if args[i] == "--message" && i+1 < len(args) {
 				msg = args[i+1]
 				i++
 			} else if args[i] == "--union-additive" {
 				unionAdditive = true
+			} else if args[i] == "--widen-lane" {
+				i = widen.parse(args, i)
 			}
 		}
 		info, err := daemon.ReadEngineJSON()
@@ -839,10 +843,33 @@ func runCmd(verb string, args []string, repo string) int {
 			return 9
 		}
 		client := engineclt.New(info)
-		result, err := client.RunAcceptWithOptions(args[0], msg, unionAdditive)
+		// The Accept gate offers the same plan amendment as a question does
+		// (#143), and the CLI could not take it either (B-484's class): a
+		// refused accept left the person only "revert those edits".
+		var lane []string
+		if widen.set {
+			run, err := client.RunGet(args[0])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 1
+			}
+			if lane, err = widen.resolve(offeredLaneWidening(run)); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 2
+			}
+		}
+		result, err := client.RunAcceptWithOptions(args[0], msg, unionAdditive, lane)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			// The refusal that offers a widening records it on the run before
+			// answering; name the paths and the flag where the person is looking.
+			if run, getErr := client.RunGet(args[0]); getErr == nil && len(lane) == 0 {
+				printLaneOffer(os.Stderr, args[0], "gate", offeredLaneWidening(run))
+			}
 			return 1
+		}
+		if len(lane) > 0 {
+			printLaneWidened(client, args[0], lane)
 		}
 		fmt.Printf("accepted: commit %s\n", result["commit_sha"])
 		return 0
@@ -905,11 +932,13 @@ func runCmd(verb string, args []string, repo string) int {
 		return 0
 	case "answer":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run answer <run-id> --answer <text> [--question <id>]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run answer <run-id> --answer <text> [--question <id>] [--widen-lane [path,...] | --keep-lane]")
 			return 2
 		}
 		runID := args[0]
 		var answer, question string
+		widen := laneWideningFlag{}
+		keepLane := false
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--answer":
@@ -922,10 +951,18 @@ func runCmd(verb string, args []string, repo string) int {
 					question = args[i+1]
 					i++
 				}
+			case "--widen-lane":
+				i = widen.parse(args, i)
+			case "--keep-lane":
+				keepLane = true
 			}
 		}
 		if answer == "" {
 			fmt.Fprintln(os.Stderr, "error: --answer is required")
+			return 2
+		}
+		if widen.set && keepLane {
+			fmt.Fprintln(os.Stderr, "error: --widen-lane and --keep-lane are opposite decisions; pass one")
 			return 2
 		}
 		info, err := daemon.ReadEngineJSON()
@@ -934,9 +971,40 @@ func runCmd(verb string, args []string, repo string) int {
 			return 9
 		}
 		client := engineclt.New(info)
-		if err := client.RunAnswer(runID, question, answer); err != nil {
+		// B-484: r-20261002-184627-suwe offered a lane widening, the person
+		// answered "Amend T-290 Owns to include ..." in text, and the run
+		// resumed with its lane unchanged — then died refusing the edits the
+		// person had just approved. Text cannot amend a plan; when the question
+		// carries an offer, the person must say which way it goes before the
+		// run resumes.
+		run, err := client.RunGet(runID)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
+		}
+		offered := offeredLaneWidening(run)
+		var lane []string
+		if widen.set {
+			if lane, err = widen.resolve(offered); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 2
+			}
+		} else if len(offered) > 0 && !keepLane {
+			fmt.Fprintln(os.Stderr, "error: this question offers a lane widening; an answer's text does not apply it")
+			printLaneOffer(os.Stderr, runID, "question", offered)
+			return 2
+		}
+		if len(lane) > 0 {
+			err = client.RunAnswerWithLane(runID, question, answer, lane)
+		} else {
+			err = client.RunAnswer(runID, question, answer)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		if len(lane) > 0 {
+			printLaneWidened(client, runID, lane)
 		}
 		fmt.Printf("answered; run %s resumed\n", runID)
 		return followCurrentRun(client, runID)
@@ -1007,6 +1075,101 @@ func printRunSummary(w io.Writer, run map[string]interface{}) {
 	if why := str(run["failure"]); why != "" {
 		fmt.Fprintf(w, "  failure: %s\n", why)
 	}
+	if pending, ok := run["pending_data"].(map[string]interface{}); ok {
+		if q := str(pending["question"]); q != "" {
+			fmt.Fprintf(w, "  question: %s\n", q)
+			for _, option := range asStrings(pending["options"]) {
+				fmt.Fprintf(w, "    - %s\n", option)
+			}
+		}
+		printLaneOffer(w, str(run["id"]), str(run["pending_kind"]), offeredLaneWidening(run))
+	}
+}
+
+// offeredLaneWidening reads the engine's pending lane amendment: the paths a
+// question named or a refused Accept found outside the task's lane. Only these
+// may be approved; the engine refuses anything else.
+func offeredLaneWidening(run map[string]interface{}) []string {
+	pending, _ := run["pending_data"].(map[string]interface{})
+	return asStrings(pending["lane_widening"])
+}
+
+// printLaneOffer names an offered lane amendment and the command that applies
+// it. B-484: the CLI showed none of it, so the only visible door was a text
+// answer, which resumes the run without amending anything.
+func printLaneOffer(w io.Writer, runID, kind string, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  lane widening offered (outside the task's approved lane):")
+	for _, p := range paths {
+		fmt.Fprintf(w, "      %s\n", p)
+	}
+	if kind == "question" {
+		fmt.Fprintf(w, "    approve: ducklab run answer %s --answer \"...\" --widen-lane\n", runID)
+		fmt.Fprintf(w, "    decline: ducklab run answer %s --answer \"...\" --keep-lane\n", runID)
+		return
+	}
+	fmt.Fprintf(w, "    approve and accept: ducklab run accept %s --widen-lane\n", runID)
+}
+
+// laneWideningFlag is --widen-lane with an optional comma-separated subset.
+// Bare, it approves exactly what the engine offered: the person reads the
+// paths from the run, not from memory.
+type laneWideningFlag struct {
+	set   bool
+	paths []string
+}
+
+func (f *laneWideningFlag) parse(args []string, i int) int {
+	f.set = true
+	if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+		for _, p := range strings.Split(args[i+1], ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				f.paths = append(f.paths, p)
+			}
+		}
+		return i + 1
+	}
+	return i
+}
+
+// resolve fails before anything is sent: an empty or unoffered path would only
+// be refused by the engine, and a widening with no offer is a person's mistake
+// about which run or gate they are looking at.
+func (f *laneWideningFlag) resolve(offered []string) ([]string, error) {
+	if len(offered) == 0 {
+		return nil, fmt.Errorf("--widen-lane: this run has no pending lane widening offer")
+	}
+	if len(f.paths) == 0 {
+		return offered, nil
+	}
+	for _, p := range f.paths {
+		if !slices.Contains(offered, p) {
+			return nil, fmt.Errorf("--widen-lane: %q was not offered; offered: %s", p, strings.Join(offered, ", "))
+		}
+	}
+	return f.paths, nil
+}
+
+// printLaneWidened shows what the person's approval changed: the paths and the
+// plan-amendment commit the engine recorded in its lane_widened event.
+func printLaneWidened(client *engineclt.Client, runID string, lane []string) {
+	commit := ""
+	if events, err := client.RunEvents(runID); err == nil {
+		for _, raw := range events {
+			if event, ok := raw.(map[string]interface{}); ok && str(event["type"]) == "lane_widened" {
+				if data, ok := event["data"].(map[string]interface{}); ok {
+					commit = str(data["commit_sha"])
+				}
+			}
+		}
+	}
+	fmt.Printf("lane widened: %s", strings.Join(lane, ", "))
+	if commit != "" {
+		fmt.Printf(" (plan amended in %s)", commit)
+	}
+	fmt.Println()
 }
 
 // asStrings reads a JSON array of strings out of an event payload.
@@ -1219,6 +1382,7 @@ func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *e
 				fmt.Printf("  ⏸ waiting for you (budget) — lift the binding cap, then resume: ducklab run lift %s %s\n", runID, cap)
 			case "question":
 				fmt.Printf("  ⏸ waiting for you (question) — ducklab run answer %s --answer \"...\"\n", runID)
+				printLaneOffer(os.Stdout, runID, "question", asStrings(e.Data["lane_widening"]))
 			default:
 				fmt.Printf("  ⏸ waiting for you (%s) — fix the condition, then ducklab run resume %s\n", kind, runID)
 			}

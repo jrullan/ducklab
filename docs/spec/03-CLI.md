@@ -164,11 +164,23 @@ ducklab run list [--status s] [--project p]
 ducklab run show <run-id> [--transcript] [--diff] [--llm] [--candidates]
 ducklab run watch <run-id>                 # attach to the event stream and render
 ducklab run accept <run-id> [--message <commit msg>] [--union-additive]
+                           [--widen-lane [path,...]]
 ducklab run reject <run-id> [--reason <text>]
 ducklab run answer <run-id> --question <qid> --answer <text>
+                           [--widen-lane [path,...] | --keep-lane]
 ducklab run abort <run-id>
 ducklab run gc [--older-than 30d] [--keep-accepted]
 ```
+
+A question or a refused Accept may offer a **lane widening**: paths outside the
+task's approved lane (`pending_data.lane_widening`), shown by `run show`,
+`run watch` and the refusal itself. `--widen-lane` approves exactly the offered
+paths as a person — amending the task's Owns in the accepted plan before the
+run resumes or the Accept proceeds; `--widen-lane a,b` approves a subset; a
+path that was not offered is refused. An answer's text cannot apply the
+amendment (B-484), so `run answer` on a question carrying an offer requires
+`--widen-lane` or `--keep-lane` and refuses to resume otherwise. The MCP
+operator has no such door: a lane amendment is a person's approval.
 
 To retry rejected work with its correction, start a new run explicitly:
 
