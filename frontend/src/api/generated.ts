@@ -41,11 +41,13 @@ export interface BugBug {
   needs_triage?: boolean;
   next?: string[];
   proposal?: BugPortion[];
+  reopened?: boolean;
   reporter?: string;
   severity?: string;
   source?: string;
   status?: string;
   task_id?: string;
+  tasks?: BugTask[];
   title?: string;
   updated_at?: string;
 }
@@ -54,6 +56,12 @@ export interface BugPortion {
   acceptance?: string[];
   owns?: string[];
   title?: string;
+}
+
+export interface BugTask {
+  current?: boolean;
+  id?: string;
+  status?: string;
 }
 
 export interface ConfigBudget {
@@ -553,6 +561,8 @@ export interface RunlogRedoNote {
   advisor?: string;
   draft?: string;
   editable?: boolean;
+  origin?: string;
+  reason?: string;
 }
 
 export interface RunlogResumeNote {

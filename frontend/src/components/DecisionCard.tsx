@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import type { RedoNote } from "../api/client";
 
 export function DecisionCard({
   next,
@@ -66,8 +67,9 @@ export function DecisionCard({
   extraAction?: React.ReactNode;
   /** The run started by the last Request changes, so it can be watched. */
   revisionRun?: string | null;
-  /** An advisor recommendation shown as an editable retry draft. */
-  redoNote?: { draft: string; advisor: string; editable: boolean };
+  /** The engine's retry recommendation, shown as an editable draft beside
+   * the reason the run failed. */
+  redoNote?: RedoNote;
   onRetry?: (note: string) => void;
   /** Document gates revise; their other exit is explicitly a discard. */
   documentGate?: boolean;
@@ -110,9 +112,24 @@ export function DecisionCard({
   const seed = composeRequestChangesSeed(requestChangesDraft, documentDissent?.findings ?? []);
   const [note, setNote] = useState(seed);
   const seededRequestChangesDraft = useRef(seed);
-  const [redoDraft, setRedoDraft] = useState(redoNote?.draft ?? "");
+  const redoSeed = redoNote?.draft ?? "";
+  const [redoDraft, setRedoDraft] = useState(redoSeed);
+  const seededRedoDraft = useRef(redoSeed);
   const [resumeDraft, setResumeDraft] = useState("");
   const [asking, setAsking] = useState(false);
+
+  // B-485: RunView renders the run from the stream first (no redo_note) and
+  // RunGet adds the note later; initial state alone left the editor empty
+  // and "Retry with this note" disabled. Same rule as the request-changes
+  // seed: a late note fills an untouched editor, never a human edit.
+  useEffect(() => {
+    if (!redoSeed || redoSeed === seededRedoDraft.current) return;
+    setRedoDraft((current) => {
+      if (current.trim() && current !== seededRedoDraft.current) return current;
+      seededRedoDraft.current = redoSeed;
+      return redoSeed;
+    });
+  }, [redoSeed]);
 
   // A seed that arrives after mount (the run record hydrates in pieces)
   // still fills an untouched editor, but never overwrites what the person
@@ -232,12 +249,18 @@ export function DecisionCard({
 
       {redoNote && redoNote.editable && (
         <div className="mb-3 border-b border-hairline pb-3" data-testid="redo-note">
-          <div className="text-xs text-ink-muted">Retry with this note · advisor-drafted by {redoNote.advisor}</div>
+          <div className="text-xs text-ink-muted" data-testid="redo-note-origin">Retry with this note · {redoNoteOrigin(redoNote)}</div>
+          {/* Beside the draft, not only inside it: the reason is what the
+              person judges the draft against, and it must survive their
+              rewriting the note (B-485). */}
+          {redoNote.reason && (
+            <p className="mt-1 whitespace-pre-wrap rounded border border-serious px-2 py-1 text-sm text-ink" data-testid="redo-note-reason">{redoNote.reason}</p>
+          )}
           <textarea aria-label="retry note" rows={5} value={redoDraft} onChange={(e) => setRedoDraft(e.target.value)}
             className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
           <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted">
             {onRetry && <button type="button" onClick={() => onRetry(redoDraft)} disabled={!redoDraft.trim()} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Retry with this note</button>}
-            <span>Edit before retrying; the advisor recommends, never decides.</span>
+            <span>Edit before retrying; the note recommends, never decides.</span>
           </div>
         </div>
       )}
@@ -378,6 +401,15 @@ export function DecisionCard({
       )}
     </div>
   );
+}
+
+/** Who wrote the retry note, as the engine recorded it. B-485: every note
+ * read "advisor-drafted by <the advisor seat>" while the engine assembled it
+ * without consulting any model. An advisor is named only when the engine says
+ * one wrote the draft; anything else is Ducklab's own summary. */
+export function redoNoteOrigin(note: RedoNote): string {
+  if (note.origin === "advisor" && note.advisor) return `drafted by the advisor, ${note.advisor}`;
+  return "assembled by Ducklab from the run record — no model was asked";
 }
 
 /** The note a document revision starts from: one line per finding, in the

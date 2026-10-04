@@ -144,6 +144,54 @@ describe("event application", () => {
     expect(run.pending_kind).toBe("gate");
   });
 
+  // B-495: a T-015 build fetched while running (next=[abort]) paused at its
+  // gate PASSED, and Now offered only Abort while the engine already offered
+  // accept/reject. Each pause kind changes what is legal, and the event does
+  // not say what: the previous state's offers and payload must go, so App
+  // hydrates the run from the engine.
+  it.each(["gate", "question", "chat", "dissent", "budget", "provider", "error", "engine_restart"])(
+    "drops the previous state's offers when a run pauses for %s",
+    (kind) => {
+      const s = useRuns.getState();
+      s.setRun({ ...baseRun, status: "running", next: ["abort"] });
+      s.applyEvent({ type: "human_needed", run_id: "r-1", seq: 1, data: { kind } });
+      const run = useRuns.getState().runs["r-1"]!;
+      expect(run.status).toBe("paused");
+      expect(run.pending_kind).toBe(kind);
+      expect(run.next).toBeUndefined();
+    },
+  );
+
+  it("drops a previous pause's offers and payload when the run pauses again", () => {
+    const s = useRuns.getState();
+    s.setRun({ ...baseRun, status: "paused", pending_kind: "question", pending_since: "2026-10-03T16:00:00Z",
+      pending_data: { question: "which file?" }, next: ["answer", "abort"] });
+    s.applyEvent({ type: "human_needed", run_id: "r-1", seq: 2, data: { kind: "gate" } });
+    const run = useRuns.getState().runs["r-1"]!;
+    expect(run.pending_kind).toBe("gate");
+    expect(run.next).toBeUndefined();
+    expect(run.pending_data).toBeUndefined();
+    expect(run.pending_since).toBeUndefined();
+  });
+
+  it("drops a resumed run's offers when it is resumed from its checkpoint", () => {
+    const s = useRuns.getState();
+    s.setRun({ ...baseRun, status: "paused", pending_kind: "engine_restart", next: ["resume", "abort"] });
+    s.applyEvent({ type: "checkpoint", run_id: "r-1", seq: 3, data: { reason: "resume" } });
+    const run = useRuns.getState().runs["r-1"]!;
+    expect(run.status).toBe("running");
+    expect(run.next).toBeUndefined();
+  });
+
+  it("drops a running run's offers when it fails on the stream", () => {
+    const s = useRuns.getState();
+    s.setRun({ ...baseRun, status: "running", next: ["abort"] });
+    s.applyEvent({ type: "error", run_id: "r-1", seq: 4, data: { error: "response truncated" } });
+    const run = useRuns.getState().runs["r-1"]!;
+    expect(run.status).toBe("failed");
+    expect(run.next).toBeUndefined();
+  });
+
   it("resumes a paused run and clears its pending kind when a human answers", () => {
     const s = useRuns.getState();
     s.setRun({ ...baseRun, status: "paused", pending_kind: "question" });

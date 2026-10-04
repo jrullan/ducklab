@@ -459,6 +459,13 @@ export function App() {
   const hydrated = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!client) return;
+    // Remembered per pause, not per run: a run that resumes and pauses again
+    // (gate after a resume, a second question) arrives with its offers
+    // cleared and must be fetched again, or it keeps no buttons (B-495).
+    for (const id of hydrated.current) {
+      const r = runs[id];
+      if (!r || r.status !== "paused" || r.next) hydrated.current.delete(id);
+    }
     for (const r of pendingForHuman(runs)) {
       if (r.next || hydrated.current.has(r.id)) continue;
       hydrated.current.add(r.id);

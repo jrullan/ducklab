@@ -4540,9 +4540,11 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	}
 	// Failed runs carry a bounded, editable retry recommendation. Generation is
 	// deterministic and uses only the run record and captured artefacts; it
-	// never decides or relaunches anything.
+	// never decides or relaunches anything. It reads this copy — whose
+	// Failure was just recovered from events — and the events in hand, where
+	// the verdict's detail and the reviewer's findings live (B-485).
 	if run.RedoNote == nil && redoNoteEligible(run) {
-		if note := s.draftRedoNote(ctx, rs); note != nil {
+		if note := s.draftRedoNote(ctx, rs, run, events); note != nil {
 			run.RedoNote = note
 		}
 	}

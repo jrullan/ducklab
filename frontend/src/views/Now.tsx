@@ -26,6 +26,7 @@ import { duration, moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
+import { idleBugs, tasksInFlight, type IdleBug } from "../lib/bugwork";
 import { ContextStrip, PageHeader } from "../components/PageShell";
 
 
@@ -157,24 +158,26 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   // person said "still broken", and then the system said nothing at all: the
   // verify card only exists at fixed, in_progress reads as "being worked on",
   // and nobody was working on it. The reopened state is a queue item — the
-  // next act is a new run — or it is a silence shaped like progress.
-  const inFlight = new Set(
-    nowList
-      .filter((r) => r.status === "running" || r.status === "queued" || r.status === "paused")
-      .map((r) => r.task_id),
-  );
-  const reopened = bugs.filter(
-    (b) => b.status === "in_progress" && !!b.task_id && !inFlight.has(b.task_id),
-  );
-  const lastModeFor = (taskID: string) =>
-    nowList
-      .filter((r) => r.task_id === taskID)
-      .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]?.mode ?? "solo";
+  // next act is new work — or it is a silence shaped like progress.
+  // TI-36X B-003: reading task_id alone called a split report "reopened"
+  // while its second task waited at the gate; idleBugs reads every task.
+  const idle = idleBugs(bugs, tasksInFlight(nowList));
+  const reopenedCount = idle.filter((item) => item.kind === "reopened").length;
+  const stalledCount = idle.length - reopenedCount;
+  // The task's own last mode, else a sibling's from the same report, else
+  // the project's build default — a split's second half has never run.
+  const lastModeFor = (item: IdleBug & { kind: "remaining" }) => {
+    const latest = (ids: string[]) =>
+      nowList
+        .filter((r) => ids.includes(r.task_id))
+        .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]?.mode;
+    return latest([item.task]) ?? latest((item.bug.tasks ?? []).map((t) => t.id)) ?? buildMode;
+  };
 
   const quiet =
-    waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
+    waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && idle.length === 0;
   const waitingCount = waiting.length + (standalonePlan ? 1 : 0);
-  const attentionCount = waitingCount + toVerify.length + failures.length + reopened.length;
+  const attentionCount = waitingCount + toVerify.length + failures.length + idle.length;
 
   // The launcher seeds its seats from the PROJECT's resolved roster for the
   // mode it will run, never from the global saved line-up: a global default
@@ -258,7 +261,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
               {waitingCount > 0 && <span><strong className="font-medium text-ink" data-testid="now-waiting-count">{waitingCount}</strong> waiting for you</span>}
               {toVerify.length > 0 && <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>}
               {failures.length > 0 && <span><strong className="font-medium text-critical">{failures.length}</strong> failed</span>}
-              {reopened.length > 0 && <span><strong className="font-medium text-serious">{reopened.length}</strong> reopened</span>}
+              {reopenedCount > 0 && <span><strong className="font-medium text-serious" data-testid="now-reopened-count">{reopenedCount}</strong> reopened</span>}
+              {stalledCount > 0 && <span><strong className="font-medium text-serious" data-testid="now-stalled-count">{stalledCount}</strong> with nothing running</span>}
             </>
           )}
           {active.length > 0 && <span><strong className="font-medium text-ink">{active.length}</strong> in progress</span>}
@@ -334,17 +338,18 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         </section>
       )}
 
-      {reopened.length > 0 && (
+      {idle.length > 0 && (
         <section className="mt-4" data-testid="now-reopened">
-          <h2 className="text-sm font-medium text-ink">Still broken — nothing is running for these</h2>
+          <h2 className="text-sm font-medium text-ink">Still open — nothing is running for these</h2>
           <ul className="mt-2 space-y-2">
-            {reopened.map((b) => (
-              <ReopenedCard
-                key={b.id}
-                bug={b}
-                mode={lastModeFor(b.task_id!)}
+            {idle.map((item) => (
+              <IdleBugCard
+                key={item.bug.id}
+                item={item}
+                mode={item.kind === "remaining" ? lastModeFor(item) : ""}
                 client={client}
                 projectId={projectId}
+                onMoved={(id, status) => setBugs((cur) => cur.map((x) => (x.id === id ? { ...x, status } : x)))}
               />
             ))}
           </ul>
@@ -621,45 +626,92 @@ function NowFooter({ runs }: { runs: Run[] }) {
   );
 }
 
-/** A reopened report, and the one act that moves it: new work. Launched with
- * the task's own last mode; the engine fills the mode's saved line-up, the
- * same as any launch that names no ducklings. */
-function ReopenedCard({
-  bug,
+/** A report nothing is running for, and the one act that moves it — which
+ * depends on why it is idle (see IdleBug). Remaining work launches with the
+ * task's last mode; the engine fills the mode's saved line-up, the same as any
+ * launch that names no ducklings. */
+function IdleBugCard({
+  item,
   mode,
   client,
   projectId,
+  onMoved,
 }: {
-  bug: Bug;
+  item: IdleBug;
   mode: string;
   client: EngineClient;
   projectId: string;
+  onMoved: (id: string, status: string) => void;
 }) {
   const [started, setStarted] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const { bug } = item;
+  const act = (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setFailure(null);
+    void fn()
+      .catch((e) => setFailure(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  const accepted = (bug.tasks ?? []).filter((t) => t.current && t.status === "accepted").map((t) => t.id);
+  const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
   return (
-    <li data-testid="now-reopened-card" className="rounded-card border border-serious p-3">
+    <li data-testid="now-reopened-card" data-kind={item.kind} className="rounded-card border border-serious p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="font-mono text-ink">{bug.id}</span>
         <span className="text-sm text-ink-secondary">{bug.title}</span>
-        <span className="text-xs text-ink-muted">
-          {bug.task_id}&apos;s fix was accepted, and you sent the report back
+        <span className="text-xs text-ink-muted" data-testid="now-reopened-why">
+          {item.kind === "reopened"
+            ? "Its fix was accepted, and you sent the report back"
+            : item.kind === "remaining"
+              ? accepted.length > 0
+                ? `${accepted.join(", ")} accepted; ${item.task} has not run`
+                : `${item.task} has not run`
+              : `${item.tasks.join(", ")} accepted, but the report is still in progress`}
         </span>
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          data-testid="now-reopened-run"
-          onClick={() =>
-            void client
-              .runStart(projectId, bug.task_id!, { mode })
-              .then((r) => setStarted(r.id))
-              .catch((e) => setFailure(e instanceof Error ? e.message : String(e)))
-          }
-          className="rounded border border-hairline px-2 py-1 text-xs"
-        >
-          Run {bug.task_id} again ({mode})
-        </button>
+        {item.kind === "reopened" && (bug.needs_triage ? (
+          // The engine refuses to promote a reopened report until a fresh
+          // contract is written from the reopen evidence; rerunning the old
+          // task would rebuild the fix that already failed.
+          <button
+            type="button"
+            data-testid="now-reopened-triage"
+            disabled={busy}
+            onClick={() => act(() => client.triageBugs(projectId, bug.id).then((r) => setStarted(r.id)))}
+            className={button}
+          >
+            Triage {bug.id} again
+          </button>
+        ) : (
+          <a href={routeHref({ name: "board", tab: "bugs" })} data-testid="now-reopened-promote" className="text-xs text-ink underline">
+            Make it a task — say what the previous fix missed
+          </a>
+        ))}
+        {item.kind === "remaining" && (
+          <button
+            type="button"
+            data-testid="now-reopened-run"
+            disabled={busy}
+            onClick={() => act(() => client.runStart(projectId, item.task, { mode }).then((r) => setStarted(r.id)))}
+            className={button}
+          >
+            Run {item.task} ({mode})
+          </button>
+        )}
+        {item.kind === "unsettled" && (bug.next ?? []).includes("fixed") && (
+          <button
+            type="button"
+            data-testid="now-reopened-fixed"
+            disabled={busy}
+            onClick={() => act(() => client.moveBug(projectId, bug.id, "fixed").then(() => onMoved(bug.id, "fixed")))}
+            className={button}
+          >
+            Mark {bug.id} fixed
+          </button>
+        )}
         {started && (
           <a href={`#/runs/${started}`} data-testid="now-reopened-watch" className="text-xs text-ink underline">
             watch {started}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1377,5 +1378,49 @@ func TestAnswerIsAttributedToTheOperator(t *testing.T) {
 	}
 	if !strings.HasPrefix(eng.answerActor, "mcp:") {
 		t.Errorf("answered as %q; an operator's answer must be attributed to it", eng.answerActor)
+	}
+}
+
+// B-484: the CLI gained the human door that widens a task lane. The MCP
+// operator is a model, and widening a lane amends the accepted plan — a
+// person's approval — so this surface must have no way to ask for it: no
+// engine method that sends widen_lane or lane_widening, none of the human
+// (actor-less) answer/accept calls, and no tool argument that names a lane.
+// The engine also refuses a non-human widening (engineapi
+// TestALaneWideningAnswerCarriesItsActor); this keeps the door shut here too.
+func TestOperatorCannotWidenALane(t *testing.T) {
+	engine := reflect.TypeOf((*Engine)(nil)).Elem()
+	for i := 0; i < engine.NumMethod(); i++ {
+		name := engine.Method(i).Name
+		if strings.Contains(name, "Lane") || name == "RunAnswer" || name == "RunAccept" || name == "RunAcceptWithOptions" {
+			t.Errorf("mcp.Engine exposes %s: an operator could answer or accept as a person, or widen a lane", name)
+		}
+	}
+
+	resps := drive(t, &fakeEngine{}, initFrame, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	tools, _ := resps[1]["result"].(map[string]interface{})["tools"].([]interface{})
+	if len(tools) == 0 {
+		t.Fatal("tools/list returned no tools")
+	}
+	for _, tl := range tools {
+		tool := tl.(map[string]interface{})
+		schema, _ := tool["inputSchema"].(map[string]interface{})
+		props, _ := schema["properties"].(map[string]interface{})
+		for prop := range props {
+			if strings.Contains(prop, "lane") {
+				t.Errorf("tool %v takes %q: an operator could ask to widen a lane", tool["name"], prop)
+			}
+		}
+	}
+
+	// An argument the schema does not name is dropped: the answer still goes
+	// out as the operator's, through the call that cannot carry a lane.
+	eng := &fakeEngine{}
+	resps = drive(t, eng, initFrame, callFrame(3, "answer", `{"run_id":"r-1","question_id":"q","answer":"amend it","widen_lane":["frontend/src/store/runs.ts"]}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("answer failed")
+	}
+	if !strings.HasPrefix(eng.answerActor, "mcp:") {
+		t.Errorf("answered as %q; the operator's answer must stay attributed to it", eng.answerActor)
 	}
 }
