@@ -5197,6 +5197,22 @@ func (s *Service) approveOfferedLaneWidening(rs *runState, current *runlog.Run, 
 			"actor": actor, "task_id": current.TaskID, "paths": added, "commit_sha": sha,
 		})
 	}
+	// The approval is durable even when a later Accept guard refuses. Consume
+	// the offer at the same boundary so the surviving gate state presents only
+	// the blocker that still needs attention, not a plan amendment the person
+	// has already approved. Keep every unrelated pending field intact.
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return nil, err
+	}
+	rs.wmu.Lock()
+	delete(rs.run.PendingData, "lane_widening")
+	delete(rs.run.PendingData, "lane_findings")
+	err = w.WriteState()
+	rs.wmu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("persist consumed lane widening offer: %w", err)
+	}
 	return added, nil
 }
 

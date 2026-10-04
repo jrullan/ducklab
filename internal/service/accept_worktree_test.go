@@ -259,6 +259,7 @@ func TestAcceptedLaneWideningSurvivesALaterAcceptRefusal(t *testing.T) {
 	s.runsMu.RUnlock()
 	rs.run.PendingData = map[string]interface{}{
 		"lane_widening":  []string{"tests/parser.test.mjs"},
+		"lane_findings":  []map[string]string{{"file": "tests/parser.test.mjs", "issue": "outside T-001's lane"}},
 		"review_verdict": "request-changes",
 	}
 
@@ -287,6 +288,15 @@ func TestAcceptedLaneWideningSurvivesALaterAcceptRefusal(t *testing.T) {
 	}
 	if !widened {
 		t.Fatal("durable lane approval was not recorded before the later Accept refusal")
+	}
+	if _, ok := detail.Run.PendingData["lane_widening"]; ok {
+		t.Fatalf("accepted lane widening is still offered after the later refusal: %+v", detail.Run.PendingData["lane_widening"])
+	}
+	if _, ok := detail.Run.PendingData["lane_findings"]; ok {
+		t.Fatalf("historical lane findings remain after approval: %+v", detail.Run.PendingData["lane_findings"])
+	}
+	if got := detail.Run.PendingData["review_verdict"]; got != "request-changes" {
+		t.Fatalf("later blocker was not preserved: review_verdict = %v", got)
 	}
 }
 
