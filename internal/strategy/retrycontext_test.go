@@ -122,3 +122,65 @@ func TestPreviousAttemptIsEmptyWhenTheTurnDidNothing(t *testing.T) {
 		t.Errorf("a long message should keep its end, bounded")
 	}
 }
+
+// TI-36X T-005: a test-first writer read until the boundary, wrote its plan as
+// text and changed nothing; the reviewer asked for the test; the gate stayed
+// green. The run stopped as "settled" — but in test-first green means the
+// failing test is still missing. Round 2 must run, and its writer starts from
+// round 1's plan instead of from zero.
+func TestATestFirstRoundThatWroteNothingIsNotSettled(t *testing.T) {
+	rec := &recorder{}
+	var settled bool
+	params := &ExecuteParams{
+		Prompt: "Task T-005: specify the LCD workflow.",
+		Runner: rec.runner(
+			&agent.Outcome{Text: "I have enough to write the test: tests/lcd-flow.test.mjs will assert backspace, delete and the clear hierarchy."},
+			verdictOutcome("request-changes", agent.Finding{Severity: "critical", File: "*", Issue: "The diff is empty: no test was written", Fix: "Write tests/lcd-flow.test.mjs"}),
+			&agent.Outcome{Text: "Wrote the test.", ToolCalls: []agent.ToolCallRecord{
+				{Name: "fs_write", Args: json.RawMessage(`{"path":"tests/lcd-flow.test.mjs"}`), Result: &tools.Result{Content: "wrote"}},
+			}},
+			verdictOutcome("approve"),
+		),
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "pato-atom", config.RoleReviewer: "pato-sonnet"},
+		Gate:   func(context.Context) (string, string, error) { return "green", "", nil },
+		Diff:   func() (string, error) { return "", nil },
+		OnEvent: func(kind string, _ map[string]interface{}) {
+			settled = settled || kind == "settled"
+		},
+	}
+	res, err := ExecuteTestFirstMode(context.Background(), "pair", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled || res.Rounds != 2 {
+		t.Fatalf("test-first stopped as settled after %d round(s); green means the test is missing", res.Rounds)
+	}
+	round2 := rec.prompts[2]
+	if rec.roles[2] != config.RoleImplementer || !strings.Contains(round2, "## Your previous attempt at this turn") ||
+		!strings.Contains(round2, "tests/lcd-flow.test.mjs will assert backspace") {
+		t.Errorf("round 2's writer did not start from round 1's plan:\n%s", round2)
+	}
+	if strings.Contains(rec.prompts[0], "Your previous attempt") {
+		t.Error("round 1 carried an attempt that did not exist")
+	}
+}
+
+// A round whose implementer did edit carries nothing forward: the reviewer's
+// findings and the tree are its continuation.
+func TestARoundThatEditedCarriesNoAttemptForward(t *testing.T) {
+	rec := &recorder{}
+	params := pairParams(rec, "red",
+		&agent.Outcome{Text: "Patched.", ToolCalls: []agent.ToolCallRecord{
+			{Name: "fs_patch", Args: json.RawMessage(`{"path":"add.go"}`), Result: &tools.Result{Content: "patched"}},
+		}},
+		verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "add.go", Issue: "wrong sign", Fix: "use +"}),
+		&agent.Outcome{Text: "Fixed."},
+		verdictOutcome("approve"),
+	)
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if rec.roles[2] != config.RoleImplementer || strings.Contains(rec.prompts[2], "Your previous attempt") {
+		t.Errorf("round 2's implementer carried an attempt although round 1 edited:\n%s", rec.prompts[2])
+	}
+}

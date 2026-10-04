@@ -76,18 +76,24 @@ func researchBoundaryReached(t *testing.T) (*Registry, *ExecContext, string) {
 	return reg, ectx, dir
 }
 
-// B-492: a second read request after the boundary closes tool use and asks
+// B-492: repeated read requests after the boundary close tool use and ask
 // for the concrete next edit, instead of letting the seat spend every
 // remaining call on refusals (atom-local: 10 in a row, three times, T-014).
-func TestASecondReadAfterTheResearchBoundaryClosesTools(t *testing.T) {
+// Not sooner than the fifth: most turns that hit the boundary edit after 1-3
+// refusals (TI-36X T-005 lost its test to a brake at the second).
+func TestRepeatedReadsAfterTheResearchBoundaryCloseTools(t *testing.T) {
 	reg, ectx, _ := researchBoundaryReached(t)
-	first, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"a.txt"}`))
-	if !first.IsError || !strings.Contains(first.Content, "RESEARCH BUDGET EXHAUSTED") || first.EndTurn || ectx.ToolsClosed {
-		t.Fatalf("first refusal should state the boundary and keep action tools: %+v", first)
+	// Four, literally: the measured turns that edit after the boundary need
+	// up to 3-4 refusals, so the limit must not drop below five.
+	for i := 1; i <= 4; i++ {
+		res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"a.txt"}`))
+		if !res.IsError || !strings.Contains(res.Content, "RESEARCH BUDGET EXHAUSTED") || res.EndTurn || ectx.ToolsClosed {
+			t.Fatalf("refusal %d should state the boundary and keep action tools: %+v", i, res)
+		}
 	}
-	second, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"a.txt"}`))
-	if !second.IsError || !second.EndTurn || !ectx.ToolsClosed || !strings.Contains(second.Content, "exact edit you would make next") {
-		t.Fatalf("second refusal should close tools and ask for the concrete edit: %+v", second)
+	last, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"a.txt"}`))
+	if !last.IsError || !last.EndTurn || !ectx.ToolsClosed || !strings.Contains(last.Content, "exact edit you would make next") {
+		t.Fatalf("the fifth refusal should close tools and ask for the concrete edit: %+v", last)
 	}
 	if ectx.ToolAvailable("fs_write") {
 		t.Fatal("tools stayed available after the close")

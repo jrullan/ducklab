@@ -449,6 +449,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		}
 	}
 
+	// The implementer's last turn of the previous round. When it changed
+	// nothing, the next round's implementer starts from it instead of from
+	// zero (TI-36X T-005: the writer read until the boundary, wrote its plan
+	// as text, and the next turn would have started the research again).
+	var lastImplementer *agent.Outcome
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
 		// One structure retry per ROUND: per run, a plan whose round-2
@@ -475,6 +480,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// What the implementer turn that triggered a retry did, for that retry
 		// only: the retry is a new conversation (B-496).
 		priorAttempt := ""
+		if lastImplementer != nil && !madeEdit(lastImplementer) {
+			priorAttempt = previousAttempt(lastImplementer)
+		}
+		lastImplementer = nil
 		// The implementer's latest deliverables report this round: data for
 		// the reviewer, evidence for the duck, a gap to flag on approve.
 		var lastReport *DeliverablesReport
@@ -793,6 +802,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 			turnContext := TurnContext{Round: round, Index: script.TurnIndexBase + i}
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, turnContext)
+			if turn.Role == config.RoleImplementer && outcome != nil {
+				lastImplementer = outcome
+			}
 			turn.Contract = documentContract
 			if err == nil && manifestPatchBase != nil {
 				const maxApplicationAttempts = 2
@@ -1495,7 +1507,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// to say "the code is right, the plan is wrong". The loop cannot
 		// terminate on an objection the implementer cannot act on, so it is
 		// terminated here instead.
-		if !state.Changed && state.Gate == "green" {
+		if !state.Changed && state.Gate == "green" && !script.GreenMeansUnfinished {
 			emit(params, "settled", map[string]interface{}{
 				"round":  round,
 				"detail": "no round changed the tree and the gate is green — further rounds cannot alter either",
