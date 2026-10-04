@@ -120,3 +120,16 @@ func lastRunes(s string, n int) string {
 	}
 	return "…" + string(r[len(r)-n:])
 }
+
+// madeEdit reports whether a turn changed a file.
+func madeEdit(outcome *agent.Outcome) bool {
+	for _, c := range outcome.ToolCalls {
+		switch c.Name {
+		case "fs_write", "fs_write_lines", "fs_patch", "fs_delete":
+			if c.Result != nil && !c.Result.IsError {
+				return true
+			}
+		}
+	}
+	return false
+}

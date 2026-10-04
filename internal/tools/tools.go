@@ -160,11 +160,7 @@ type ExecContext struct {
 	// slightly different grep/find/read queries that all pursue the same fact.
 	explorationCalls int
 	// researchRefusals counts observational calls refused after the research
-	// boundary in this inspect/act cycle. Measured over every local
-	// implementer run since the boundary landed: 0 of 72 turns that hit it
-	// made an edit afterwards, and atom-local asked again 5.6 times on
-	// average — the refusal never converted reading into action, it only
-	// spent the turn's calls (B-492).
+	// boundary in this inspect/act cycle (see ResearchRefusalLimit).
 	researchRefusals int
 	// ExplorationCallLimit overrides the ordinary per-turn research boundary.
 	// Zero uses the harness default. Strategy-level bounded retries use a
@@ -405,7 +401,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 				"Answer now, in text: the exact edit you would make next (file, lines, the new text) and why — or the blocker that stops you. " +
 				"The next attempt starts from that answer, so make it concrete."}, nil
 		}
-		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker. Another read request closes every tool for this reply.", explorationLimit), nil
+		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker. Repeated read requests close every tool for this reply.", explorationLimit), nil
 	}
 	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
@@ -670,10 +666,18 @@ func (e *ExecContext) ToolAvailable(name string) bool {
 const ExplorationCallLimit = 20
 
 // ResearchRefusalLimit is how many refused observational calls end the
-// reply's tool use. The first refusal states the boundary; asking again shows
-// the seat will not turn to action, so the remaining calls are worth more as
-// a concrete written plan the next attempt can execute (B-492).
-const ResearchRefusalLimit = 2
+// reply's tool use, closing it into a concrete written plan (B-492).
+//
+// It was 2, on a measurement that said no turn ever edited after the
+// boundary. That measurement was wrong (it read the tool name from the wrong
+// field). Over every build and test turn from 2026-09-02 to 2026-10-04, most
+// turns that hit the boundary DID edit afterwards, after 1-3 refusals (p90:
+// 3 local, 4 cloud; max 8-9). The turns that never edit either stop at the
+// first refusal or loop for 12-20. At 2, the brake cut real work, and a
+// test-first writer that had not written yet lost its turn (TI-36X T-005).
+// At 5 it keeps over 90% of the turns that go on to edit and still ends the
+// loops.
+const ResearchRefusalLimit = 5
 
 // SearchMissLimit is how many fs_search calls may find nothing in a row
 // before the next one is refused with directions.

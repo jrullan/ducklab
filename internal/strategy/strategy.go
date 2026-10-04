@@ -93,6 +93,10 @@ func TestFirstScriptFor(mode string) *Script {
 		},
 		Until:     `gate == "red" and verdict == "approve"`,
 		MaxRounds: 2,
+		// Green is this script's unfinished state: the failing test does not
+		// exist yet, so an untouched tree is work still to do, not a settled
+		// disagreement (TI-36X T-005: round 2 was skipped as "settled").
+		GreenMeansUnfinished: true,
 	}
 }
 
@@ -107,6 +111,10 @@ type Script struct {
 	// critic sees them and before returning the proposal; otherwise a revision
 	// of REQ-001 makes unchanged REQ-006/009 appear deleted in the next round.
 	FragmentPrefix string
+	// GreenMeansUnfinished marks a script whose success needs a RED gate
+	// (test-first). The "settled" stop — an untouched tree and a green gate —
+	// means the work is missing there, not that nothing could change.
+	GreenMeansUnfinished bool
 	// TurnIndexBase offsets every turn's Index. A sectioned document update
 	// runs MANY small conversations in one run; without distinct
 	// coordinates their streamed text lands in the same delta key and the
