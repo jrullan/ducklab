@@ -54,6 +54,18 @@ accepts it). No preamble, no "I recommend".`
 // a model call. The recommendation lands on the record as an `advice` event
 // and on the pending data, where the question card renders it.
 func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
+	if strings.HasPrefix(q.ID, "toolchain-") {
+		// The live PATH check has already decided whether this is a declaration
+		// mismatch or a host installation. Asking a model can only contradict
+		// that evidence or spend tokens restating it.
+		if w, err := s.ensureWriter(rs); err == nil {
+			w.AppendEvent("advice_started", map[string]interface{}{"advisor": "ducklab", "question_id": q.ID})
+		}
+		missing := s.missingToolchainFor(rs.projectPath, rs.run.TaskID)
+		answer, autoAnswer := deterministicToolchainAdvice(missing)
+		go s.publishQuestionAdvice(rs, q, answer, "ducklab", autoAnswer)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	call, err := s.prepareAdvice(ctx, rs, advisorSystemPrompt, "## The question the human was asked", q)
 	if err != nil {
@@ -70,50 +82,75 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
-		w, werr := s.ensureWriter(rs)
-		if werr != nil {
-			return
-		}
-		// The person can answer while the advisor is still assembling context or
-		// waiting on its model. Check and publish under the same lock used by run
-		// snapshots and resume: otherwise the old question's advisor races the
-		// resumed run and can file advice on the next attempt (B-411).
-		rs.wmu.Lock()
-		questionID, _ := rs.run.PendingData["question_id"].(string)
-		_, answered := rs.givenAnswers[q.ID]
-		if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
-			rs.wmu.Unlock()
-			return
-		}
-		if rs.run.PendingData == nil {
-			rs.run.PendingData = map[string]interface{}{}
-		}
-		rs.run.PendingData["advice"] = answer
-		rs.run.PendingData["advisor"] = advisor
-		autonomy := rs.run.Autonomy
-		runID := rs.run.ID
-		w.AppendEvent("advice", map[string]interface{}{
-			"question_id": q.ID, "advisor": advisor, "answer": answer,
-		})
-		_ = w.WriteState()
-		rs.wmu.Unlock()
-
-		// Under yolo the draft IS the answer: the run asked, an advisor
-		// reasoned from the same documents, and nobody is watching the
-		// inbox. Submitted through the same RunAnswer a person would use,
-		// with the decider on the record — a failed submit degrades back to
-		// an ordinary question card.
-		if autonomy == "yolo" {
-			w.AppendEvent("advice_taken", map[string]interface{}{
-				"question_id": q.ID, "advisor": advisor,
-			})
-			if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
-				w.AppendEvent("warning", map[string]interface{}{
-					"detail": "advisor auto-answer failed: " + err.Error(),
-				})
-			}
-		}
+		s.publishQuestionAdvice(rs, q, answer, advisor, true)
 	}()
+}
+
+func deterministicToolchainAdvice(missing []string) (string, bool) {
+	if len(missing) == 0 {
+		return "Installed — continue", true
+	}
+	var install, revise []string
+	for _, item := range missing {
+		if equivalent := equivalentCommand(item); equivalent != "" {
+			revise = append(revise, fmt.Sprintf("%s to cmd:%s", item, equivalent))
+			continue
+		}
+		install = append(install, item)
+	}
+	if len(install) == 0 && len(revise) > 0 {
+		return "Change the plan (revise it) instead", true
+	}
+	answer := fmt.Sprintf("Install the missing capability %s, then choose “Installed — continue” after it is on PATH.", strings.Join(install, ", "))
+	if len(install) > 1 {
+		answer = fmt.Sprintf("Install the missing capabilities %s, then choose “Installed — continue” after they are on PATH.", strings.Join(install, ", "))
+	}
+	if len(revise) > 0 {
+		answer += " The plan also needs revision from " + strings.Join(revise, ", ") + "."
+	}
+	return answer, false
+}
+
+func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, answer, advisor string, autoAnswer bool) {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	// The person can answer while advice is being prepared. Publish under the
+	// same lock used by run snapshots and resume so an old answer cannot attach
+	// itself to the next attempt (B-411).
+	rs.wmu.Lock()
+	questionID, _ := rs.run.PendingData["question_id"].(string)
+	_, answered := rs.givenAnswers[q.ID]
+	if answered || rs.run.Status != "paused" || rs.run.PendingKind != "question" || (questionID != "" && questionID != q.ID) {
+		rs.wmu.Unlock()
+		return
+	}
+	if rs.run.PendingData == nil {
+		rs.run.PendingData = map[string]interface{}{}
+	}
+	rs.run.PendingData["advice"] = answer
+	rs.run.PendingData["advisor"] = advisor
+	autonomy := rs.run.Autonomy
+	runID := rs.run.ID
+	w.AppendEvent("advice", map[string]interface{}{
+		"question_id": q.ID, "advisor": advisor, "answer": answer,
+	})
+	_ = w.WriteState()
+	rs.wmu.Unlock()
+
+	// Under yolo the draft IS the answer. Submit through the same RunAnswer a
+	// person would use, with the decider on the record.
+	if autonomy == "yolo" && autoAnswer {
+		w.AppendEvent("advice_taken", map[string]interface{}{
+			"question_id": q.ID, "advisor": advisor,
+		})
+		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
+			w.AppendEvent("warning", map[string]interface{}{
+				"detail": "advisor auto-answer failed: " + err.Error(),
+			})
+		}
+	}
 }
 
 // advise picks the advisor, assembles the context, and asks once — a one-shot

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -871,6 +872,67 @@ func TestAbortingThePausedHolderWakesTheQueue(t *testing.T) {
 	case <-started:
 	case <-time.After(3 * time.Second):
 		t.Fatal("the holder was aborted and the queued run never started")
+	}
+}
+
+func TestPlanRevisionTerminationCleansWorktreeAndWakesQueue(t *testing.T) {
+	s := newTestService(t)
+	project, err := s.ProjectInit(context.Background(), InitRequest{Path: t.TempDir(), Name: "proj", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := project.ID
+	entry, _ := s.registry.Get(projectID)
+	hold := &runlog.Run{
+		ID: "r-plan-revision", ProjectID: projectID, Stage: "build", TaskID: "T-001",
+		Status: "paused", PendingKind: "question", StartedAt: "2026-10-02T00:00:00Z",
+	}
+	wh, err := runlog.NewWriter(entry.Path, hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { wh.Close() })
+	rsHold := &runState{run: hold, writer: wh, runDir: wh.RunDir(), projectPath: entry.Path}
+	s.runsMu.Lock()
+	s.runs[hold.ID] = rsHold
+	s.runsMu.Unlock()
+
+	started := make(chan struct{})
+	wait := &runlog.Run{
+		ID: "r-after-revision", ProjectID: projectID, Stage: "document", TaskID: "T-002",
+		Status: "running", StartedAt: "2026-10-02T00:01:00Z",
+	}
+	ww, err := runlog.NewWriter(entry.Path, wait)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ww.Close() })
+	rsWait := &runState{run: wait, writer: ww, runDir: ww.RunDir(), projectPath: entry.Path}
+	s.runsMu.Lock()
+	s.runs[wait.ID] = rsWait
+	s.runsMu.Unlock()
+	s.queue.submit(s, &queued{rs: rsWait, ctx: context.Background(), exec: func(context.Context) { close(started) }})
+	if wait.Status != "queued" {
+		t.Fatalf("waiting run = %s, want queued behind toolchain question", wait.Status)
+	}
+	if err := s.createRunWorktree(hold, entry.Path); err != nil {
+		t.Fatal(err)
+	}
+	worktree := hold.WorktreePath
+
+	if err := s.finishUnacceptedRun(rsHold, wh, "done", "", "plan_revision"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("plan-revision worktree still exists at %s: %v", worktree, err)
+	}
+	if hold.Status != "done" || hold.Resolution != "plan_revision" || hold.Accepted || hold.Verdict != "" {
+		t.Fatalf("plan-revision terminal state = %+v", hold)
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("plan revision released the worktree but did not wake queued work")
 	}
 }
 
