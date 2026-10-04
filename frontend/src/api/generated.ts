@@ -254,6 +254,7 @@ export interface EngineapiacceptRequest {
 }
 
 export interface EngineapianswerRequest {
+  actor?: string;
   answer?: string;
   question_id?: string;
 }

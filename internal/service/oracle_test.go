@@ -221,3 +221,60 @@ func TestTheTestFirstPromptDemandsCheckedDerivations(t *testing.T) {
 		}
 	}
 }
+
+// Review of #147: an oracle dispute is a person's decision at the answer
+// boundary itself — an MCP operator (or any non-human actor) is refused, a
+// person is not, and an operator's ordinary answer is attributed to it.
+func TestOnlyAPersonAnswersAnOracleDispute(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	paused := func(id, qid string) *runlog.Run {
+		dir := t.TempDir()
+		run := &runlog.Run{ID: id, ProjectID: "p", TaskID: "T-014", Stage: "build", Status: "paused", PendingKind: "question",
+			PendingData: map[string]interface{}{"question_id": qid, "question": "Is the test wrong?"}}
+		w, err := runlog.NewWriter(dir, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { w.Close() })
+		s.runsMu.Lock()
+		s.runs[id] = &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+		s.runsMu.Unlock()
+		return run
+	}
+	oracleQ := tools.OracleQuestionPrefix + "tests/parser.test.mjs:abc"
+
+	run := paused("r-oracle-mcp", oracleQ)
+	err := s.RunAnswerAs(context.Background(), run.ID, "", tools.OracleCorrectAnswer, "mcp:elena")
+	if err == nil || !strings.Contains(err.Error(), "a person must answer it") {
+		t.Fatalf("an operator answered an oracle dispute: %v", err)
+	}
+	if run.PendingKind != "question" {
+		t.Fatalf("the refused answer changed the run: pending %q", run.PendingKind)
+	}
+	s.runsMu.RLock()
+	given := s.runs[run.ID].answers()
+	s.runsMu.RUnlock()
+	if _, ok := given[oracleQ]; ok {
+		t.Fatal("the refused answer was stored and would unlock the oracle on replay")
+	}
+
+	ordinary := paused("r-ordinary-mcp", "q-ordinary")
+	if err := s.RunAnswerAs(context.Background(), ordinary.ID, "", "yes", "mcp:elena"); err != nil && !strings.Contains(err.Error(), "resume") {
+		t.Logf("ordinary answer: %v", err)
+	}
+	events, _ := runlog.ReadEvents(s.runs[ordinary.ID].runDir)
+	attributed := false
+	for _, e := range events {
+		if e.Type == "human" && e.Data["actor"] == "mcp:elena" {
+			attributed = true
+		}
+	}
+	if !attributed {
+		t.Error("an operator's answer was recorded without its actor")
+	}
+
+	person := paused("r-oracle-person", oracleQ)
+	if err := s.RunAnswer(context.Background(), person.ID, "", tools.OracleCorrectAnswer); err != nil && strings.Contains(err.Error(), "a person must answer it") {
+		t.Fatalf("a person's answer to an oracle dispute was refused: %v", err)
+	}
+}

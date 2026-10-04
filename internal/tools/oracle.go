@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -26,28 +27,53 @@ const (
 )
 
 // OracleQuestionPrefix marks an oracle dispute's question id. Its answer is a
-// person's call, never an advisor's auto-answer.
+// person's call, never an advisor's or an operator's.
 const OracleQuestionPrefix = "oracle-"
 
-// OracleCorrectionAllowed reports whether the person allowed correcting the
-// oracle in this run.
-func OracleCorrectionAllowed(ectx *ExecContext) bool {
+// oracleQuestionID names the disputed test in the id, so an approval unlocks
+// that test and no other (review of #147: one approval unlocked every oracle
+// test of the run).
+func oracleQuestionID(oracle, assertion string) string {
+	return OracleQuestionPrefix + oracle + ":" + QuestionID(assertion)
+}
+
+// OracleCorrectionAllowed reports whether the person allowed correcting this
+// oracle test in this run.
+func OracleCorrectionAllowed(ectx *ExecContext, oracle string) bool {
+	prefix := OracleQuestionPrefix + oracle + ":"
 	for id, answer := range ectx.Answers {
-		if strings.HasPrefix(id, OracleQuestionPrefix) && strings.TrimSpace(answer) == OracleCorrectAnswer {
+		if strings.HasPrefix(id, prefix) && strings.TrimSpace(answer) == OracleCorrectAnswer {
 			return true
 		}
 	}
 	return false
 }
 
-func isOracleTest(ectx *ExecContext, path string) bool {
-	clean := filepath.ToSlash(filepath.Clean(path))
+// oracleFor is the oracle test a jailed path designates, by file identity,
+// not spelling: a symlink or hard link to the test is the test (review of
+// #147: "oracle-link.mjs -> tests/parser.test.mjs" overwrote the oracle), and
+// a directory that holds the test cannot be deleted around it.
+func oracleFor(ectx *ExecContext, absPath string) (string, bool) {
+	target, targetErr := os.Stat(absPath)
 	for _, oracle := range ectx.OracleTests {
-		if clean == filepath.ToSlash(filepath.Clean(oracle)) {
-			return true
+		oracleAbs, err := PathJail(ectx.ProjectRoot, oracle)
+		if err != nil {
+			continue
+		}
+		if filepath.Clean(oracleAbs) == filepath.Clean(absPath) {
+			return oracle, true
+		}
+		if targetErr != nil {
+			continue
+		}
+		if info, err := os.Stat(oracleAbs); err == nil && os.SameFile(target, info) {
+			return oracle, true
+		}
+		if target.IsDir() && strings.HasPrefix(filepath.Clean(oracleAbs), filepath.Clean(absPath)+string(filepath.Separator)) {
+			return oracle, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // OracleDispute pauses the build for the person when the implementer finds
@@ -89,13 +115,18 @@ func (t *OracleDispute) Execute(ctx context.Context, ectx *ExecContext, args jso
 		return ErrorResult("name the assertion and why it is wrong: the slice it contradicts and the arithmetic"), nil
 	}
 	test := strings.TrimSpace(a.Test)
-	if !isOracleTest(ectx, test) {
+	oracle := ""
+	if abs, err := PathJail(ectx.ProjectRoot, test); err == nil {
+		oracle, _ = oracleFor(ectx, abs)
+	}
+	if oracle == "" {
 		return ErrorResult("%s is not one of this task's test-first tests (%s); a test you wrote yourself is yours to fix", test, strings.Join(ectx.OracleTests, ", ")), nil
 	}
-	if OracleCorrectionAllowed(ectx) {
-		return SuccessResult("The person already allowed correcting the oracle: edit %s, and say in your report what you changed and why.", test), nil
+	test = oracle
+	if OracleCorrectionAllowed(ectx, oracle) {
+		return SuccessResult("The person already allowed correcting %s: edit it, and say in your report what you changed and why.", test), nil
 	}
-	id := OracleQuestionPrefix + QuestionID(test+"\n"+a.Assertion)
+	id := oracleQuestionID(oracle, a.Assertion)
 	if ans, ok := ectx.Answers[id]; ok {
 		if strings.TrimSpace(ans) == OracleKeepAnswer {
 			return SuccessResult("The person keeps the test: implement to it as written."), nil

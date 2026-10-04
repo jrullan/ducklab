@@ -41,7 +41,7 @@ type Engine interface {
 	RunAbort(id string) error
 	RunResume(id string) (map[string]interface{}, error)
 	RunBudgetLift(id, kind, actor string) (map[string]interface{}, error)
-	RunAnswer(id, questionID, answer string) error
+	RunAnswerAs(id, questionID, answer, actor string) error
 	RunFileFindings(id string) ([]map[string]interface{}, error)
 	RunStart(projectID string, req map[string]interface{}) (map[string]interface{}, error)
 	StageStart(projectID, stage string, req map[string]interface{}) (map[string]interface{}, error)

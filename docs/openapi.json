@@ -910,6 +910,9 @@
       },
       "EngineapianswerRequest": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "answer": {
             "type": "string"
           },

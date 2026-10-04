@@ -898,12 +898,18 @@ func (c *Client) RunFileFindings(id string) ([]map[string]interface{}, error) {
 	return result.Items, err
 }
 
-// RunAnswer answers a run's pending question.
+// RunAnswer answers a run's pending question as a person.
 func (c *Client) RunAnswer(id, questionID, answer string) error {
-	return c.post("/v1/runs/"+id+"/answer", map[string]string{
-		"question_id": questionID,
-		"answer":      answer,
-	}, nil)
+	return c.RunAnswerAs(id, questionID, answer, "")
+}
+
+// RunAnswerAs answers on behalf of a named non-human decider ("mcp:<client>").
+func (c *Client) RunAnswerAs(id, questionID, answer, actor string) error {
+	body := map[string]string{"question_id": questionID, "answer": answer}
+	if actor != "" {
+		body["actor"] = actor
+	}
+	return c.post("/v1/runs/"+id+"/answer", body, nil)
 }
 
 // StreamRunEvents follows a run's event stream, calling fn for each event.

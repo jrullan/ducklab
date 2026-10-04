@@ -147,7 +147,7 @@ func (s *Service) publishQuestionAdvice(rs *runState, q *tools.PendingQuestion, 
 		w.AppendEvent("advice_taken", map[string]interface{}{
 			"question_id": q.ID, "advisor": advisor,
 		})
-		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)"); err != nil {
+		if err := s.runAnswer(context.Background(), runID, q.ID, answer, "advisor:"+advisor+" (yolo)", ""); err != nil {
 			w.AppendEvent("warning", map[string]interface{}{
 				"detail": "advisor auto-answer failed: " + err.Error(),
 			})

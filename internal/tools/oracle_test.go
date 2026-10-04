@@ -57,7 +57,7 @@ func TestTheOracleIsGuardedUntilThePersonAllowsACorrection(t *testing.T) {
 	if res, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"logic.mjs","content":"export const x = 2\n"}`)); res.IsError {
 		t.Errorf("an implementation write was refused: %s", res.Content)
 	}
-	ectx.Answers = map[string]string{OracleQuestionPrefix + "abc": OracleCorrectAnswer}
+	ectx.Answers = map[string]string{oracleQuestionID("tests/parser.test.mjs", "2^-3^2 = 0.015625"): OracleCorrectAnswer}
 	if res, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"tests/parser.test.mjs","content":"assert 0.001953125\n"}`)); res.IsError {
 		t.Errorf("the oracle stayed locked after the person allowed a correction: %s", res.Content)
 	}
@@ -107,5 +107,62 @@ func TestOracleDisputeRefusesWhatIsNotADispute(t *testing.T) {
 	}
 	if res, _ := reg.Execute(context.Background(), none, "oracle_dispute", json.RawMessage(`{"test":"tests/parser.test.mjs","assertion":"a","why":"b"}`)); !res.IsError {
 		t.Error("a build without an oracle accepted a dispute")
+	}
+}
+
+// Review of #147: approving the dispute of one oracle test must not unlock
+// another — the question named one test and one assertion.
+func TestApprovingOneOracleDisputeLeavesTheOthersLocked(t *testing.T) {
+	reg, ectx, root := oracleProject(t)
+	if err := os.WriteFile(filepath.Join(root, "tests", "other.test.mjs"), []byte("assert other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx.OracleTests = append(ectx.OracleTests, "tests/other.test.mjs")
+	_, err := reg.Execute(context.Background(), ectx, "oracle_dispute", json.RawMessage(`{"test":"/tests/parser.test.mjs","assertion":"2^-3^2 = 0.015625","why":"2^-9 = 0.001953125"}`))
+	if !errors.Is(err, ErrHumanNeeded) || ectx.Pending == nil {
+		t.Fatalf("dispute did not pause: %v", err)
+	}
+	ectx.Answers = map[string]string{ectx.Pending.ID: OracleCorrectAnswer}
+	ectx.Pending = nil
+	if res, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"tests/parser.test.mjs","content":"fixed\n"}`)); res.IsError {
+		t.Errorf("the disputed test stayed locked after approval: %s", res.Content)
+	}
+	for _, call := range []struct{ tool, args string }{
+		{"fs_write", `{"path":"tests/other.test.mjs","content":"x\n"}`},
+		{"fs_delete", `{"path":"tests/other.test.mjs"}`},
+	} {
+		if res, _ := reg.Execute(context.Background(), ectx, call.tool, json.RawMessage(call.args)); !res.IsError || !strings.Contains(res.Content, "oracle") {
+			t.Errorf("%s on the undisputed oracle was allowed: %+v", call.tool, res)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "tests", "other.test.mjs")); string(data) != "assert other\n" {
+		t.Errorf("the undisputed oracle changed: %q", data)
+	}
+}
+
+// Review of #147: the oracle is a file, not a spelling. A symlink, a hard
+// link, or the directory that holds it cannot be used to change it.
+func TestTheOracleCannotBeReachedThroughAnAlias(t *testing.T) {
+	reg, ectx, root := oracleProject(t)
+	if err := os.Symlink(filepath.Join(root, "tests", "parser.test.mjs"), filepath.Join(root, "oracle-link.mjs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(root, "tests", "parser.test.mjs"), filepath.Join(root, "oracle-hard.mjs")); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []struct{ tool, args string }{
+		{"fs_write", `{"path":"oracle-link.mjs","content":"overwritten\n"}`},
+		{"fs_patch", `{"path":"oracle-link.mjs","edits":[{"search":"0.015625","replace":"0.001953125"}]}`},
+		{"fs_delete", `{"path":"oracle-link.mjs"}`},
+		{"fs_write", `{"path":"oracle-hard.mjs","content":"overwritten\n"}`},
+		{"fs_delete", `{"path":"tests","recursive":true}`},
+	} {
+		res, _ := reg.Execute(context.Background(), ectx, call.tool, json.RawMessage(call.args))
+		if !res.IsError || !strings.Contains(res.Content, "oracle") {
+			t.Errorf("%s %s reached the oracle: %+v", call.tool, call.args, res)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "tests", "parser.test.mjs")); err != nil || string(data) != "assert 0.015625\n" {
+		t.Fatalf("the oracle changed through an alias: %q, %v", data, err)
 	}
 }

@@ -964,10 +964,12 @@ func PathGuard(ectx *ExecContext, path string) (string, *Result) {
 	// 2b. The test-first oracle is not the implementer's to rewrite. A wrong
 	// assertion goes to the person, with the reason; a changed oracle that a
 	// reviewer approves measures nothing (B-490).
-	if ectx.Role == config.RoleImplementer && isOracleTest(ectx, path) && !OracleCorrectionAllowed(ectx) {
-		return absPath, ErrorResult("%s is this task's oracle: its test-first run wrote it to decide whether the task is done. "+
-			"Do not edit it. If an assertion contradicts the task, call oracle_dispute with the test, the assertion and why "+
-			"(the slice it contradicts and the arithmetic); the person decides.", path)
+	if ectx.Role == config.RoleImplementer {
+		if oracle, ok := oracleFor(ectx, absPath); ok && !OracleCorrectionAllowed(ectx, oracle) {
+			return absPath, ErrorResult("%s is this task's oracle (%s): its test-first run wrote it to decide whether the task is done. "+
+				"Do not edit it. If an assertion contradicts the task, call oracle_dispute with the test, the assertion and why "+
+				"(the slice it contradicts and the arithmetic); the person decides.", path, oracle)
+		}
 	}
 
 	// 3. A run may not alter project governance through filesystem tools.

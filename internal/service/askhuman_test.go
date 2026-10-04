@@ -212,7 +212,7 @@ func TestRunAnswerRecordsAdvisorAuthorOnlyForAutoAnswers(t *testing.T) {
 	pauseQuestion("r-advisor-author")
 	pauseQuestion("r-human-author")
 
-	if err := s.runAnswer(context.Background(), "r-advisor-author", "q", "the advisor answer", "advisor:k3 (yolo)"); err == nil {
+	if err := s.runAnswer(context.Background(), "r-advisor-author", "q", "the advisor answer", "advisor:k3 (yolo)", ""); err == nil {
 		t.Fatal("expected resume to reject the test-only stage")
 	}
 	if err := s.RunAnswer(context.Background(), "r-human-author", "q", "human answer"); err == nil {
