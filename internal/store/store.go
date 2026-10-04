@@ -493,6 +493,21 @@ func (d *DB) UpdateBug(b *Bug) error {
 	return err
 }
 
+// RestoreBug writes a bug row back exactly as GetBug or ListBugs read it,
+// timestamps included. UpdateBug stamps updated_at with now, so undoing a
+// refused operation through it left the bug looking freshly changed by an
+// operation that never happened (review of #153).
+func (d *DB) RestoreBug(b *Bug) error {
+	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
+		duplicate_of = ?, task_id = ?, source = ?, reporter = ?, created_at = ?, updated_at = ?,
+		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?, test_strategy = ?, test_reason = ?, deliverables = ?, proposal = ?
+		WHERE id = ?`,
+		b.Title, b.Body, b.Severity, b.Status,
+		nullable(b.DuplicateOf), nullable(b.TaskID), b.Source, b.Reporter, b.CreatedAt, b.UpdatedAt,
+		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.TestStrategy, b.TestReason, b.Deliverables, b.Proposal, b.ID)
+	return err
+}
+
 // AddTrace records an edge in the traceability graph.
 //
 // Idempotent: the primary key is the whole edge, so recording the same link

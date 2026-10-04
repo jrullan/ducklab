@@ -41,7 +41,7 @@ type removalState struct {
 	plan, head, staged string
 	task               *store.Task
 	edges              []store.Edge
-	bugStatus, bugTask string
+	bug                *store.Bug
 }
 
 func captureRemovalState(t *testing.T, s *Service, id, dir, taskID string) removalState {
@@ -61,12 +61,22 @@ func captureRemovalState(t *testing.T, s *Service, id, dir, taskID string) remov
 	if st.edges, err = db.TaskEdges(taskID); err != nil {
 		t.Fatal(err)
 	}
-	rec, err := db.GetBug("B-001")
-	if err != nil {
+	if st.bug, err = db.GetBug("B-001"); err != nil {
 		t.Fatal(err)
 	}
-	st.bugStatus, st.bugTask = rec.Status, rec.TaskID
 	return st
+}
+
+// pinPast moves the task's and the bug's timestamps to another day, so an undo
+// that re-creates or rewrites a row with "now" instead of restoring it cannot
+// pass by luck (review of #153: UpdateBug stamped updated_at on the undo).
+func pinPast(t *testing.T, dir, taskID string) {
+	t.Helper()
+	stmts := []string{"UPDATE bug SET created_at = '2020-01-01T00:00:00Z', updated_at = '2020-01-02T03:04:06Z' WHERE id = 'B-001'"}
+	if taskID != "" {
+		stmts = append(stmts, "UPDATE task SET created_at = '2020-01-02T03:04:05Z', updated_at = '2020-01-02T03:04:06Z' WHERE id = '"+taskID+"'")
+	}
+	execDB(t, dir, stmts...)
 }
 
 // Review of #153: TaskRemove committed the plan and then ran its database half
@@ -114,9 +124,7 @@ func TestTaskRemoveFailureLeavesNoPartialState(t *testing.T) {
 				t.Fatal(err)
 			}
 			taskID := out["task"].(string)
-			// Timestamps from another day, so an undo that re-creates the row
-			// with "now" instead of restoring it cannot pass by luck.
-			execDB(t, dir, "UPDATE task SET created_at = '2020-01-02T03:04:05Z', updated_at = '2020-01-02T03:04:06Z' WHERE id = '"+taskID+"'")
+			pinPast(t, dir, taskID)
 			before := captureRemovalState(t, s, id, dir, taskID)
 			if before.task == nil || len(before.edges) == 0 {
 				t.Fatalf("fixture lacks the row or edges it is meant to protect: %+v", before)
@@ -174,6 +182,8 @@ func TestBugPromotionDatabaseFailureLeavesNoPartialState(t *testing.T) {
 		{"task row insert refused", refuseSQL("task", "INSERT"), "forced insert failure on task"},
 		{"trace edge insert refused", refuseSQL("traceability", "INSERT"), "forced insert failure on traceability"},
 		{"bug move refused", refuseSQL("bug", "UPDATE"), "forced update failure on bug"},
+		// After the bug has moved: it must come back verbatim, updated_at too.
+		{"commit refused", "", "refused by policy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,10 +191,23 @@ func TestBugPromotionDatabaseFailureLeavesNoPartialState(t *testing.T) {
 			id, dir := gitPromotionProject(t, s)
 			planBefore, _ := os.ReadFile(artifact.Path(dir, artifact.KindPlan))
 			head := strings.TrimSpace(gitOut(t, dir, "rev-parse", "HEAD"))
-			execDB(t, dir, tc.trigger)
+			pinPast(t, dir, "")
+			bugBefore := captureBug(t, s, id)
+			if tc.trigger != "" {
+				execDB(t, dir, tc.trigger)
+			} else {
+				refuseCommits(t, dir)
+			}
 
-			if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			_, err := s.BugPromote(context.Background(), id, "B-001", "human")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			// Every step here can be undone cleanly. A bug the promotion never
+			// moved is not written at all, so a refused bug update cannot also
+			// surface as a failed undo of a change that never happened.
+			if strings.Contains(err.Error(), "could not undo") {
+				t.Errorf("the undo touched state it never changed: %v", err)
 			}
 			planAfter, _ := os.ReadFile(artifact.Path(dir, artifact.KindPlan))
 			if string(planAfter) != string(planBefore) || strings.TrimSpace(gitOut(t, dir, "rev-parse", "HEAD")) != head {
@@ -201,10 +224,24 @@ func TestBugPromotionDatabaseFailureLeavesNoPartialState(t *testing.T) {
 			if edges, _ := db.TaskEdges("T-003"); len(edges) != 0 {
 				t.Errorf("trace edges survived: %v", edges)
 			}
-			if rec, _ := db.GetBug("B-001"); rec.Status != "triaged" || rec.TaskID != "" {
-				t.Errorf("the bug moved: %+v", rec)
+			if rec, _ := db.GetBug("B-001"); !reflect.DeepEqual(rec, bugBefore) {
+				t.Errorf("the bug record changed on a refused promotion:\nbefore %+v\nafter  %+v", bugBefore, rec)
 			}
 			assertPersonsWorkUntouched(t, dir)
 		})
 	}
+}
+
+func captureBug(t *testing.T, s *Service, id string) *store.Bug {
+	t.Helper()
+	db, err := s.openProjectDB(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rec, err := db.GetBug("B-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
 }

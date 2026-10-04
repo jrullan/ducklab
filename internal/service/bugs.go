@@ -658,6 +658,7 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	// database error could fail to write, with no clean way back.
 	original := *rec
 	var created []string
+	bugMoved := false
 	rollback := func(cause error) error {
 		var undo []string
 		for _, id := range created {
@@ -665,9 +666,15 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 				undo = append(undo, fmt.Sprintf("task %s row: %v", id, err))
 			}
 		}
-		restored := original
-		if err := db.UpdateBug(&restored); err != nil {
-			undo = append(undo, fmt.Sprintf("bug %s: %v", original.ID, err))
+		// Only a bug that was moved is put back, and verbatim: UpdateBug stamps
+		// updated_at with now, so restoring through it (or "restoring" a bug
+		// that never changed) left a refused promotion looking like a fresh
+		// edit of the report (review of #153).
+		if bugMoved {
+			restored := original
+			if err := db.RestoreBug(&restored); err != nil {
+				undo = append(undo, fmt.Sprintf("bug %s: %v", original.ID, err))
+			}
 		}
 		if len(undo) > 0 {
 			return fmt.Errorf("%w (and could not undo: %s)", cause, strings.Join(undo, "; "))
@@ -694,6 +701,7 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, rollback(err)
 	}
+	bugMoved = true
 
 	planPath := artifact.Path(entry.Path, artifact.KindPlan)
 	snap := snapshotDocs(entry.Path, planPath)
@@ -1792,8 +1800,9 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	rollback := func(cause error) error {
 		var undo []string
 		for i := range resetBugs {
+			// Verbatim, updated_at included: see RestoreBug.
 			restored := resetBugs[i]
-			if err := db.UpdateBug(&restored); err != nil {
+			if err := db.RestoreBug(&restored); err != nil {
 				undo = append(undo, fmt.Sprintf("bug %s: %v", restored.ID, err))
 			}
 		}
