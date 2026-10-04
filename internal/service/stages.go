@@ -1586,20 +1586,31 @@ func (s *Service) artifactPromote(ctx context.Context, projectID, kind, approved
 	// Every document an acceptance can write, taken before the first write so
 	// a refused commit puts all of them back and the proposal stays at its gate.
 	snap := snapshotDocs(entry.Path, acceptedDocPaths(entry.Path, artifact.Kind(kind))...)
+	// Any refusal before the commit puts every document back. The acceptance
+	// writes in steps — link the proposal, promote it, resolve the intent —
+	// and returning from the middle left the earlier steps on disk: a stale
+	// requirements proposal was refused after its links had been written into
+	// it (review of #153: no error path may leave a partial state behind).
+	abort := func(err error) error {
+		if restoreErr := snap.restore(); restoreErr != nil {
+			return fmt.Errorf("%w (also failed to restore the documents: %v)", err, restoreErr)
+		}
+		return err
+	}
 	var intentRequirements []string
 	if artifact.Kind(kind) == artifact.KindRequirements && runID != "" {
 		if _, linked, linkErr := artifact.LinkRequirementsProposal(entry.Path, runID); linkErr != nil {
-			return nil, linkErr
+			return nil, abort(linkErr)
 		} else {
 			intentRequirements = linked
 		}
 	}
 	if _, err := artifact.Promote(entry.Path, artifact.Kind(kind), approvedBy); err != nil {
-		return nil, err
+		return nil, abort(err)
 	}
 	if artifact.Kind(kind) == artifact.KindRequirements && runID != "" {
 		if err := artifact.ResolveIntent(entry.Path, runID, "accepted", intentRequirements); err != nil {
-			return nil, err
+			return nil, abort(err)
 		}
 	}
 	// The settle's other half: Covers: fields in the accepted spec wire the

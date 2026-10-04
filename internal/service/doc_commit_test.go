@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -526,5 +527,47 @@ func TestSpecRunAcceptLandsThePlanWiringInItsCommit(t *testing.T) {
 	}
 	if status := gitOut(t, dir, "status", "--porcelain", "--", planRel); status != "" {
 		t.Errorf("the wired plan is still dirty: %q", status)
+	}
+}
+
+// Review of #153: any refusal before the commit puts every document back.
+// Accepting a requirements proposal links it to its intent first; a stale
+// proposal was then refused with those links already written into it.
+func TestArtifactPromoteRefusedMidwayRestoresTheDocuments(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Login\n\n**Priority:** must\n",
+	})
+	if _, err := artifact.AppendIntent(dir, "r-intake", time.Now().UTC().Format(time.RFC3339), "Let people log out."); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifact.WriteProposal(dir, artifact.KindRequirements, &artifact.Document{Sections: []artifact.Section{
+		{ID: "REQ-001", Title: "Login", Body: "**Priority:** must"},
+		{ID: "REQ-002", Title: "Logout", Body: "**Priority:** must"},
+	}}, "r-intake", nil); err != nil {
+		t.Fatal(err)
+	}
+	// The approved document moves while the proposal waits: promotion is
+	// refused as stale, after the linking step has run.
+	reqPath := artifact.Path(dir, artifact.KindRequirements)
+	if err := os.WriteFile(reqPath, []byte("## REQ-001 — Login\n\n**Priority:** should\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths := acceptedDocPaths(dir, artifact.KindRequirements)
+	before := map[string]string{}
+	for _, p := range paths {
+		data, _ := os.ReadFile(p)
+		before[p] = string(data)
+	}
+
+	_, err := s.ArtifactPromote(context.Background(), id, "requirements", "human")
+	if !errors.Is(err, artifact.ErrProposalStale) {
+		t.Fatalf("err = %v, want ErrProposalStale", err)
+	}
+	for _, p := range paths {
+		data, _ := os.ReadFile(p)
+		if string(data) != before[p] {
+			t.Errorf("%s changed on a refused acceptance:\n%s", filepath.Base(p), data)
+		}
 	}
 }

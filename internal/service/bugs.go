@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1698,23 +1700,99 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	}
 	defer db.Close()
 
-	snap := snapshotDocs(entry.Path, artifact.Path(entry.Path, artifact.KindPlan))
-	removed, unreferenced, err := removePlanTask(entry.Path, taskID)
+	plan, removed, unreferenced, err := planWithoutTask(entry.Path, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if !removed {
 		return nil, fmt.Errorf("no task %s in the plan", taskID)
 	}
-	// Committed before the database half, so a refused commit restores the
-	// plan and changes nothing. Left in the working tree, the removal was the
-	// mirror of B-489: history still carried a task the plan no longer did,
-	// and a worktree cut from the branch would offer it to a build.
+
+	// Everything the removal will change in the database, read before any of
+	// it changes, so a refused later step can put back exactly what was there.
+	// A plan-only task (no row) has nothing to restore.
+	savedTask, err := db.GetTask(taskID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("cannot remove %s: read its database row: %w", taskID, err)
+	}
+	savedEdges, err := db.TaskEdges(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot remove %s: read its trace edges: %w", taskID, err)
+	}
+	// The report goes back to where it was, or it would sit in in_progress
+	// forever pointing at a task nobody can find.
+	bugs, err := db.ListBugs()
+	if err != nil {
+		return nil, fmt.Errorf("cannot remove %s: read the bug that points at it: %w", taskID, err)
+	}
+	var linked []store.Bug
+	for _, rec := range bugs {
+		if rec.TaskID == taskID {
+			linked = append(linked, *rec)
+		}
+	}
+
+	// Database first, plan and commit last — the order promotion uses. The
+	// first version committed the plan and then ran the database half
+	// best-effort: a failed DeleteTask or bug reset returned success with a
+	// warning while HEAD no longer had the task, and a retry could not find
+	// the section to remove (review of #153). Every step here either completes
+	// or is undone, and any failure is an error.
+	var resetBugs []store.Bug
+	taskDeleted := false
+	rollback := func(cause error) error {
+		var undo []string
+		for i := range resetBugs {
+			restored := resetBugs[i]
+			if err := db.UpdateBug(&restored); err != nil {
+				undo = append(undo, fmt.Sprintf("bug %s: %v", restored.ID, err))
+			}
+		}
+		if taskDeleted && savedTask != nil {
+			if err := db.RestoreTask(savedTask, savedEdges); err != nil {
+				undo = append(undo, fmt.Sprintf("task %s row: %v", taskID, err))
+			}
+		}
+		if len(undo) > 0 {
+			return fmt.Errorf("remove %s: %w (and could not undo: %s)", taskID, cause, strings.Join(undo, "; "))
+		}
+		return fmt.Errorf("remove %s: %w", taskID, cause)
+	}
+	if err := db.DeleteTask(taskID); err != nil {
+		return nil, rollback(err)
+	}
+	taskDeleted = true
+	type bugMove struct{ id, from, to string }
+	var moves []bugMove
+	for _, original := range linked {
+		rec := original
+		rec.TaskID = ""
+		if next, mErr := bug.Move(bug.Status(rec.Status), bug.Triaged); mErr == nil {
+			rec.Status = string(next)
+		}
+		if err := db.UpdateBug(&rec); err != nil {
+			return nil, rollback(err)
+		}
+		resetBugs = append(resetBugs, original)
+		moves = append(moves, bugMove{rec.ID, original.Status, rec.Status})
+	}
+
+	// Left in the working tree, the removal was the mirror of B-489: history
+	// still carried a task the plan no longer did, and a worktree cut from
+	// the branch would offer it to a build.
+	planPath := artifact.Path(entry.Path, artifact.KindPlan)
+	snap := snapshotDocs(entry.Path, planPath)
+	if err := writePlan(entry.Path, plan); err != nil {
+		if restoreErr := snap.restore(); restoreErr != nil {
+			err = fmt.Errorf("%v (also failed to restore the plan: %v)", err, restoreErr)
+		}
+		return nil, rollback(err)
+	}
 	sha, skipped, err := commitOrRestoreDocs(snap, "plan task removal",
 		fmt.Sprintf("ducklab: remove %s from the plan", taskID),
 		map[string]string{"Ducklab-Task": taskID, "Ducklab-Action": "task_removed"})
 	if err != nil {
-		return nil, err
+		return nil, rollback(err)
 	}
 
 	out := map[string]interface{}{"removed": taskID}
@@ -1728,56 +1806,32 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 		// Said, so the person knows which tasks just changed under them.
 		out["dependencies_cleaned"] = unreferenced
 	}
-	if err := db.DeleteTask(taskID); err != nil {
-		// The plan edit is already on disk; said out loud rather than
-		// swallowed, so the person knows the halves disagree and which one.
-		out["warning"] = fmt.Sprintf("plan entry removed, but the database row remains: %v", err)
-	}
-
-	// The report goes back to where it was, or it would sit in in_progress
-	// forever pointing at a task nobody can find.
-	bugs, err := db.ListBugs()
-	if err != nil {
-		out["warning"] = fmt.Sprintf("plan entry removed, but its bug could not be reset: %v", err)
-		return out, nil
-	}
-	for _, rec := range bugs {
-		if rec.TaskID != taskID {
-			continue
+	for i, m := range moves {
+		if i == 0 {
+			out["bug"] = m.id
+			out["bug_status"] = m.to
 		}
-		rec.TaskID = ""
-		from := rec.Status
-		if next, mErr := bug.Move(bug.Status(rec.Status), bug.Triaged); mErr == nil {
-			rec.Status = string(next)
-		}
-		if err := db.UpdateBug(rec); err == nil {
-			out["bug"] = rec.ID
-			out["bug_status"] = rec.Status
-			appendBugAudit(entry.Path, bug.AuditEntry{
-				Bug: rec.ID, From: from, To: rec.Status, Actor: "engine",
-				Via: "task-removed", Note: taskID,
-			})
-		} else {
-			out["warning"] = fmt.Sprintf("plan entry removed, but %s could not be reset: %v", rec.ID, err)
-		}
-		break
+		appendBugAudit(entry.Path, bug.AuditEntry{
+			Bug: m.id, From: m.from, To: m.to, Actor: "engine",
+			Via: "task-removed", Note: taskID,
+		})
 	}
 	return out, nil
 }
 
-// removePlanTask takes a task out of plan.md, and the milestone with it if that
-// leaves it empty.
+// planWithoutTask takes a task out of the plan in memory, and the milestone
+// with it if that leaves it empty; the caller writes and commits it.
 //
 // The document is what allocates ids and what every reader parses, so a removal
 // that only touched the database would leave the task visible everywhere anyone
 // actually looks.
-func removePlanTask(projectRoot, taskID string) (removed bool, unreferenced []string, err error) {
-	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+func planWithoutTask(projectRoot, taskID string) (plan *artifact.Document, removed bool, unreferenced []string, err error) {
+	plan, err = artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
-		return false, nil, err
+		return nil, false, nil, err
 	}
 	if plan == nil {
-		return false, nil, nil
+		return nil, false, nil, nil
 	}
 	found := false
 	var milestones []artifact.Section
@@ -1799,7 +1853,7 @@ func removePlanTask(projectRoot, taskID string) (removed bool, unreferenced []st
 		milestones = append(milestones, m)
 	}
 	if !found {
-		return false, nil, nil
+		return nil, false, nil, nil
 	}
 	// The removed task's id must not survive in anyone's Depends line. It
 	// did once: T-022 was removed cleanly and T-023 kept depending on it —
@@ -1822,11 +1876,7 @@ func removePlanTask(projectRoot, taskID string) (removed bool, unreferenced []st
 	// it is not known here, so approved_by keeps its last attribution.
 	plan.Front.Version++
 	plan.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
-		[]byte(artifact.Render(plan)), 0o644); err != nil {
-		return false, nil, err
-	}
-	return true, unreferenced, nil
+	return plan, true, unreferenced, nil
 }
 
 // stripDependency removes one id from a body's **Depends on:** line, dropping
