@@ -1554,8 +1554,22 @@ func (s *Service) ArtifactGet(ctx context.Context, projectID, kind string) (map[
 	return out, nil
 }
 
-// ArtifactPromote accepts a pending proposal.
+// ArtifactPromote accepts a pending proposal and commits the documents the
+// acceptance wrote.
+//
+// This is the desktop's Accept on the Cycle page, the plan card, the
+// task-body amendment, and `ducklab <stage> accept`. It used to write the
+// accepted document and commit nothing, so the plan a build then ran against
+// existed only in the working tree — the B-489 shape, reached by the most
+// ordinary button in the product.
 func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approvedBy string) (map[string]interface{}, error) {
+	return s.artifactPromote(ctx, projectID, kind, approvedBy, true)
+}
+
+// artifactPromote is ArtifactPromote with the commit optional. RunAccept
+// promotes with commit=false: it commits the same documents itself, in the
+// run's own commit under its Ducklab-Run trailer (stageSharedCheckoutRun).
+func (s *Service) artifactPromote(ctx context.Context, projectID, kind, approvedBy string, commit bool) (map[string]interface{}, error) {
 	if !artifact.ValidKind(kind) {
 		return nil, fmt.Errorf("unknown artifact %q", kind)
 	}
@@ -1569,6 +1583,9 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	if proposed, _ := artifact.LoadProposed(entry.Path, artifact.Kind(kind)); proposed != nil {
 		runID = proposed.Front.RunID
 	}
+	// Every document an acceptance can write, taken before the first write so
+	// a refused commit puts all of them back and the proposal stays at its gate.
+	snap := snapshotDocs(entry.Path, acceptedDocPaths(entry.Path, artifact.Kind(kind))...)
 	var intentRequirements []string
 	if artifact.Kind(kind) == artifact.KindRequirements && runID != "" {
 		if _, linked, linkErr := artifact.LinkRequirementsProposal(entry.Path, runID); linkErr != nil {
@@ -1585,18 +1602,36 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 			return nil, err
 		}
 	}
+	// The settle's other half: Covers: fields in the accepted spec wire the
+	// named tasks' Implements in the plan, and the spec-debt markers come
+	// off because the coverage is now real and human-approved. Before the
+	// commit, so the plan edit lands with the spec that caused it.
+	var wired map[string][]string
+	if artifact.Kind(kind) == artifact.KindSpec {
+		wired = wireCoveredTasks(entry.Path)
+	}
+	sha, skipped := "", docCommitSkip("")
+	if commit {
+		trailers := map[string]string{"Ducklab-Action": "artifact_promoted", "Ducklab-Artifact": kind}
+		// The run's trailer only when that run is, or is about to be, an
+		// accepted document run: the release inventory refuses a Ducklab-Run
+		// it cannot resolve, and a rejected run's proposal (kept on disk by
+		// design) can still be promoted by hand.
+		if s.stageRunAcceptable(runID) {
+			trailers["Ducklab-Run"] = runID
+		}
+		var err error
+		sha, skipped, err = commitOrRestoreDocs(snap, "accepted "+kind,
+			fmt.Sprintf("ducklab: accept %s", kind), trailers)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Close the run that produced it. Promoting answered its gate, and a run
 	// left paused on a question already decided sits in the inbox forever:
 	// three of them had accumulated on the timesheet project, each still
 	// claiming to be waiting for an answer that had been given hours before.
 	s.resolveStageRun(runID, approvedBy)
-	// The settle's other half: Covers: fields in the accepted spec wire the
-	// named tasks' Implements in the plan, and the spec-debt markers come
-	// off because the coverage is now real and human-approved.
-	var wired map[string][]string
-	if artifact.Kind(kind) == artifact.KindSpec {
-		wired = wireCoveredTasks(entry.Path)
-	}
 	// The trace check runs on promotion, not on demand: an artifact accepted
 	// into a broken spine should say so immediately, while the person who
 	// accepted it is still looking.
@@ -1610,7 +1645,45 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	if len(wired) > 0 {
 		out["wired"] = wired
 	}
+	if sha != "" {
+		out["commit"] = sha
+	}
+	if skipped != "" {
+		out["warning"] = fmt.Sprintf("%s.md was accepted but not committed: %s", kind, skipped)
+	}
 	return out, nil
+}
+
+// acceptedDocPaths are the documents accepting a proposal of this kind can
+// write: the document, its consumed proposal, the intent record a requirements
+// acceptance resolves, and the plan an accepted spec wires (wireCoveredTasks).
+// RunAccept's shared-checkout staging names the same set, so both doors into
+// an acceptance commit the same files.
+func acceptedDocPaths(projectRoot string, kind artifact.Kind) []string {
+	paths := []string{artifact.Path(projectRoot, kind), artifact.ProposedPath(projectRoot, kind)}
+	switch kind {
+	case artifact.KindRequirements:
+		paths = append(paths, artifact.Path(projectRoot, artifact.KindIntent))
+	case artifact.KindSpec:
+		paths = append(paths, artifact.Path(projectRoot, artifact.KindPlan))
+	}
+	return paths
+}
+
+// stageRunAcceptable reports whether a document run is accepted, or paused at
+// the gate resolveStageRun is about to accept.
+func (s *Service) stageRunAcceptable(runID string) bool {
+	if runID == "" {
+		return false
+	}
+	s.runsMu.RLock()
+	rs, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	run := rs.snapshotRun()
+	return run.Accepted || run.Status == "paused"
 }
 
 // resolveStageRun marks the run behind an accepted artifact as finished.

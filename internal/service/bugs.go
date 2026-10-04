@@ -624,9 +624,44 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 		return nil, err
 	}
 	reopenContext := promotionReopenEvidence(db, rec, history, note)
-	taskIDs, err := appendPlanTasks(entry.Path, rec, promoted, reopenContext)
+	if actor == "" {
+		actor = "human"
+	}
+	plan, taskIDs, err := planWithPromotedTasks(entry.Path, rec, promoted, reopenContext)
 	if err != nil {
 		return nil, err
+	}
+	// The promotion is a new revision of the accepted plan, and its front
+	// matter says so. B-489's plan gained a milestone and still read version 2,
+	// approved_by human, as if nothing had happened since the plan run.
+	plan.Front.Version++
+	plan.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	plan.Front.ApprovedBy = actor
+
+	// Database first, plan last. The plan write and its commit are the steps
+	// that can be refused (a hook, a held index lock), and the database rows
+	// are the ones that can be taken back exactly: a refused commit deletes the
+	// rows and puts the bug back where it was, so a failed promotion leaves the
+	// bug promotable, the plan as HEAD knows it, and no task row nobody can
+	// see. The other order left committed tasks whose rows and bug link a
+	// database error could fail to write, with no clean way back.
+	original := *rec
+	var created []string
+	rollback := func(cause error) error {
+		var undo []string
+		for _, id := range created {
+			if err := db.DeleteTask(id); err != nil {
+				undo = append(undo, fmt.Sprintf("task %s row: %v", id, err))
+			}
+		}
+		restored := original
+		if err := db.UpdateBug(&restored); err != nil {
+			undo = append(undo, fmt.Sprintf("bug %s: %v", original.ID, err))
+		}
+		if len(undo) > 0 {
+			return fmt.Errorf("%w (and could not undo: %s)", cause, strings.Join(undo, "; "))
+		}
+		return cause
 	}
 	for i, taskID := range taskIDs {
 		title, body := promotedTaskTitle(rec), promotedTaskBody(rec, reopenContext)
@@ -634,10 +669,11 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 			title, body = promoted[i].Title, promotedPortionBody(rec, promoted[i], reopenContext)
 		}
 		if err := db.CreateTask(&store.Task{ID: taskID, Title: title, Body: body, Status: "todo"}); err != nil {
-			return nil, err
+			return nil, rollback(err)
 		}
+		created = append(created, taskID)
 		if err := db.AddTrace("bug", bugID, "task", taskID); err != nil {
-			return nil, err
+			return nil, rollback(err)
 		}
 	}
 
@@ -645,10 +681,24 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	rec.TaskID = taskIDs[0]
 	rec.Status = string(next)
 	if err := db.UpdateBug(rec); err != nil {
-		return nil, err
+		return nil, rollback(err)
 	}
-	if actor == "" {
-		actor = "human"
+
+	planPath := artifact.Path(entry.Path, artifact.KindPlan)
+	snap := snapshotDocs(entry.Path, planPath)
+	if err := writePlan(entry.Path, plan); err != nil {
+		if restoreErr := snap.restore(); restoreErr != nil {
+			err = fmt.Errorf("%v (also failed to restore the plan: %v)", err, restoreErr)
+		}
+		return nil, rollback(err)
+	}
+	// Only the plan is committed; anything else dirty in the checkout stays
+	// the person's (B-489: the TI-36X checkout had unrelated edits pending).
+	sha, skipped, err := commitOrRestoreDocs(snap, "promoted plan",
+		fmt.Sprintf("ducklab: promote %s to %s", rec.ID, strings.Join(taskIDs, ", ")),
+		map[string]string{"Ducklab-Bug": rec.ID, "Ducklab-Action": "bug_promoted"})
+	if err != nil {
+		return nil, rollback(err)
 	}
 	appendBugAudit(entry.Path, bug.AuditEntry{
 		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "promote", Note: taskIDs[0],
@@ -661,6 +711,12 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	out := map[string]interface{}{"bug": bugID, "task": taskIDs[0], "status": rec.Status}
 	if len(taskIDs) > 1 {
 		out["tasks"] = taskIDs
+	}
+	if sha != "" {
+		out["commit"] = sha
+	}
+	if skipped != "" {
+		out["warning"] = fmt.Sprintf("the plan was updated but not committed: %s", skipped)
 	}
 	return out, nil
 }
@@ -1123,12 +1179,13 @@ func promotionReopenEvidence(db *store.DB, rec *store.Bug, history []bug.AuditEn
 const bugsMilestoneTitle = "Reported bugs"
 const reopenEvidenceHeading = "## Reopen evidence (authoritative)"
 
-// appendPlanTasks adds one task per proposal portion, each with its own lane.
-// With no portions it preserves the legacy single-task promotion exactly.
-func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPortion, reopenContext string) ([]string, error) {
+// planWithPromotedTasks adds one task per proposal portion, each with its own
+// lane, to the plan in memory; the caller writes and commits it. With no
+// portions it preserves the legacy single-task promotion exactly.
+func planWithPromotedTasks(projectRoot string, rec *store.Bug, portions []promotionPortion, reopenContext string) (*artifact.Document, []string, error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if plan == nil {
 		plan = &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}}
@@ -1170,13 +1227,15 @@ func appendPlanTasks(projectRoot string, rec *store.Bug, portions []promotionPor
 		ids = append(ids, id)
 	}
 	plan.Front.Kind = artifact.KindPlan
+	return plan, ids, nil
+}
+
+// writePlan writes the accepted plan.
+func writePlan(projectRoot string, plan *artifact.Document) error {
 	if err := os.MkdirAll(artifact.DocsDir(projectRoot), 0o755); err != nil {
-		return nil, err
+		return err
 	}
-	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan), []byte(artifact.Render(plan)), 0o644); err != nil {
-		return nil, err
-	}
-	return ids, nil
+	return os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan), []byte(artifact.Render(plan)), 0o644)
 }
 
 // ApplyTriage writes an accepted triage onto the bugs it classified.
@@ -1639,6 +1698,7 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	}
 	defer db.Close()
 
+	snap := snapshotDocs(entry.Path, artifact.Path(entry.Path, artifact.KindPlan))
 	removed, unreferenced, err := removePlanTask(entry.Path, taskID)
 	if err != nil {
 		return nil, err
@@ -1646,8 +1706,24 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	if !removed {
 		return nil, fmt.Errorf("no task %s in the plan", taskID)
 	}
+	// Committed before the database half, so a refused commit restores the
+	// plan and changes nothing. Left in the working tree, the removal was the
+	// mirror of B-489: history still carried a task the plan no longer did,
+	// and a worktree cut from the branch would offer it to a build.
+	sha, skipped, err := commitOrRestoreDocs(snap, "plan task removal",
+		fmt.Sprintf("ducklab: remove %s from the plan", taskID),
+		map[string]string{"Ducklab-Task": taskID, "Ducklab-Action": "task_removed"})
+	if err != nil {
+		return nil, err
+	}
 
 	out := map[string]interface{}{"removed": taskID}
+	if sha != "" {
+		out["commit"] = sha
+	}
+	if skipped != "" {
+		out["warning"] = fmt.Sprintf("the plan was updated but not committed: %s", skipped)
+	}
 	if len(unreferenced) > 0 {
 		// Said, so the person knows which tasks just changed under them.
 		out["dependencies_cleaned"] = unreferenced
@@ -1742,6 +1818,10 @@ func removePlanTask(projectRoot, taskID string) (removed bool, unreferenced []st
 	}
 	plan.Sections = milestones
 	plan.Front.Kind = artifact.KindPlan
+	// A removal is a new revision of the accepted plan (B-489). Who approved
+	// it is not known here, so approved_by keeps its last attribution.
+	plan.Front.Version++
+	plan.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
 		[]byte(artifact.Render(plan)), 0o644); err != nil {
 		return false, nil, err
