@@ -18,7 +18,7 @@ func TestRequestChangesDispatchesReleaseToReleasePlan(t *testing.T) {
 	server.client = "claude"
 	note := "Correct the shipped-task inventory before publishing."
 
-	out, err := server.decide("r-release", "request_changes", note)
+	out, err := server.decide("r-release", "request_changes", note, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestRequestChangesRejectsAnAdvertisedStageWithoutADispatcher(t *testing.T) 
 		},
 	}}
 
-	_, err := NewServer(eng).decide("r-build", "request_changes", "try again")
+	_, err := NewServer(eng).decide("r-build", "request_changes", "try again", "")
 	if err == nil || !strings.Contains(err.Error(), `no revision dispatcher is registered`) {
 		t.Fatalf("error = %v, want explicit dispatcher error", err)
 	}

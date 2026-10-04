@@ -1186,10 +1186,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         }}
         onRequestChanges={stageToRevise || run.stage === "release" ? requestChanges : undefined}
         requestChangesDraft={requestChangesDraft}
-        onResume={() => {
+        onResume={(note) => {
           setActionError(null);
-          void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+          void client.runResume(runId, note).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
         }}
+        // B-493: the pauses whose cure is often something the person knows.
+        // Document stages take their instruction as a revision; the engine
+        // refuses a resume note there, so the field is not offered.
+        resumeNote={["error", "budget", "provider"].includes(run.pending_kind ?? "") && (run.stage === "build" || run.stage === "test")}
         revisionRun={revisionRun}
         redoNote={run.redo_note}
         onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}

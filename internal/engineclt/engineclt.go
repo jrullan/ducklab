@@ -680,14 +680,22 @@ func (c *Client) RunAcceptAs(id, message, actor string) (map[string]interface{},
 }
 
 func (c *Client) RunAccept(id, message string) (map[string]interface{}, error) {
-	return c.RunAcceptWithOptions(id, message, false)
+	return c.RunAcceptWithOptions(id, message, false, nil)
 }
 
-func (c *Client) RunAcceptWithOptions(id, message string, resolveAdditiveConflicts bool) (map[string]interface{}, error) {
+// RunAcceptWithOptions accepts as a person. laneWidening approves paths a
+// refused Accept offered in pending_data.lane_widening (#143); the engine
+// refuses any path it did not offer. It never carries an actor: widening a
+// lane amends the accepted plan, which only a person may approve (B-484).
+func (c *Client) RunAcceptWithOptions(id, message string, resolveAdditiveConflicts bool, laneWidening []string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/runs/"+id+"/accept", map[string]interface{}{
+	body := map[string]interface{}{
 		"message": message, "resolve_additive_conflicts": resolveAdditiveConflicts,
-	}, &result)
+	}
+	if len(laneWidening) > 0 {
+		body["lane_widening"] = laneWidening
+	}
+	err := c.post("/v1/runs/"+id+"/accept", body, &result)
 	return result, err
 }
 
@@ -875,10 +883,17 @@ type SSEEvent struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-// RunResume asks the engine to resume a paused run.
-func (c *Client) RunResume(id string) (map[string]interface{}, error) {
+// RunResume asks the engine to resume a paused run. A note rides the run's
+// next turns beside the one it was launched with (B-493); actor names an
+// operator speaker ("mcp:<client>"), empty for a person. Without a note the
+// request carries no body, exactly as before.
+func (c *Client) RunResume(id, note, actor string) (map[string]interface{}, error) {
+	var body interface{}
+	if strings.TrimSpace(note) != "" {
+		body = map[string]string{"note": note, "actor": actor}
+	}
 	var result map[string]interface{}
-	err := c.post("/v1/runs/"+id+"/resume", nil, &result)
+	err := c.post("/v1/runs/"+id+"/resume", body, &result)
 	return result, err
 }
 
@@ -901,6 +916,18 @@ func (c *Client) RunFileFindings(id string) ([]map[string]interface{}, error) {
 // RunAnswer answers a run's pending question as a person.
 func (c *Client) RunAnswer(id, questionID, answer string) error {
 	return c.RunAnswerAs(id, questionID, answer, "")
+}
+
+// RunAnswerWithLane answers as a person and approves the lane amendment the
+// pending question offered (pending_data.lane_widening). B-484: the CLI could
+// send only question_id and answer, so a person's "amend the lane" answer
+// resumed the run without the amendment and it died rejecting its own
+// approved edits. There is deliberately no actor variant: the engine refuses a
+// non-human lane widening, and the MCP operator must not be able to ask.
+func (c *Client) RunAnswerWithLane(id, questionID, answer string, widenLane []string) error {
+	return c.post("/v1/runs/"+id+"/answer", map[string]interface{}{
+		"question_id": questionID, "answer": answer, "widen_lane": widenLane,
+	}, nil)
 }
 
 // RunAnswerAs answers on behalf of a named non-human decider ("mcp:<client>").

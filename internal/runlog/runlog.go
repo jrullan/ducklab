@@ -83,6 +83,11 @@ type Run struct {
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
 	Note string `json:"note,omitempty"`
+	// ResumeNotes are what the person added when resuming a paused run, in
+	// order. Kept apart from Note so the record shows what the run was
+	// launched with and what it was told later (B-493: TI-36X T-014 paused
+	// on an error whose fix the person knew, and resume had no way to say it).
+	ResumeNotes []ResumeNote `json:"resume_notes,omitempty"`
 	// PriorAcceptedSHA identifies the accepted test commit this redo is reopening.
 	// The acceptance remains in the ledger; this provenance belongs to the fresh run.
 	PriorAcceptedSHA string `json:"prior_accepted_sha,omitempty"`
@@ -185,8 +190,8 @@ type Run struct {
 	// rather than only in the event stream, because a run listed a week later
 	// should still be able to say why it died.
 	Failure string `json:"failure,omitempty"`
-	// RedoNote is an advisor-authored, editable retry instruction. It is a
-	// recommendation only; accepting or discarding it remains a human/operator
+	// RedoNote is an editable retry instruction; its Origin says who wrote
+	// it. It is a recommendation only; accepting or discarding it remains a human/operator
 	// decision (except for the explicit yolo autopilot path).
 	RedoNote *RedoNote `json:"redo_note,omitempty"`
 	// TreeSnapshot is the working tree as it stood when the run started, as a
@@ -385,12 +390,42 @@ type GateReproduction struct {
 	Green    bool    `json:"green"`
 }
 
+// ResumeNote is one instruction a person gave a paused run as it resumed.
+type ResumeNote struct {
+	Note string `json:"note"`
+	// Actor is who said it: empty or "human" for a person, "mcp:<client>"
+	// for an operator — the record never says a person said what a model did.
+	Actor string `json:"actor,omitempty"`
+	// PendingKind is the pause the note answered: error, budget, provider...
+	PendingKind string `json:"pending_kind,omitempty"`
+	At          string `json:"at"`
+}
+
 // RedoNote is the bounded retry recommendation attached to a failed run.
 type RedoNote struct {
-	Draft    string `json:"draft"`
-	Advisor  string `json:"advisor"`
+	Draft string `json:"draft"`
+	// Origin says who wrote Draft: RedoOriginDucklab when the engine
+	// assembled it from the run record, RedoOriginAdvisor when an advisor
+	// seat authored it. B-485: the desktop labelled an assembled note
+	// "advisor-drafted by qwen38-max" although no advisor was consulted —
+	// the card can only tell the truth if the engine records it.
+	Origin string `json:"origin"`
+	// Advisor names the seat that authored Draft. Empty unless Origin is
+	// RedoOriginAdvisor: naming a seat that wrote nothing is the B-485 lie.
+	Advisor string `json:"advisor,omitempty"`
+	// Reason is why the run failed — the verdict's detail and the reviewer's
+	// blocking findings — kept apart from the editable Draft so the person
+	// still sees it after rewriting the note (B-485: the T-003 test-first
+	// note never said "no test file was written", the one fact a retry needs).
+	Reason   string `json:"reason,omitempty"`
 	Editable bool   `json:"editable"`
 }
+
+// Redo-note origins.
+const (
+	RedoOriginDucklab = "ducklab"
+	RedoOriginAdvisor = "advisor"
+)
 
 // DucklingSpend is one model's share of a run.
 type DucklingSpend struct {

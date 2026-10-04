@@ -19,7 +19,7 @@ func TestRequestChangesReplaysAnAmendmentStageRequest(t *testing.T) {
 	server := NewServer(eng)
 	server.client = "claude"
 	note := "add Depends on: T-060 to T-061 and T-062"
-	if _, err := server.decide("r-amendment", "request_changes", note); err != nil {
+	if _, err := server.decide("r-amendment", "request_changes", note, ""); err != nil {
 		t.Fatal(err)
 	}
 

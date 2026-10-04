@@ -893,8 +893,23 @@ func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// resumeRequest is the optional resume body. No body resumes as it always
+// did; a note rides the run's next turns beside its launch note (B-493).
+type resumeRequest struct {
+	Note string `json:"note,omitempty"`
+	// Actor names the speaker when it is not a person: "mcp:<client>".
+	Actor string `json:"actor,omitempty"`
+}
+
 func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
-	run, err := s.svc.RunResume(r.Context(), r.PathValue("id"))
+	var req resumeRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	run, err := s.svc.RunResumeWithNote(r.Context(), r.PathValue("id"), req.Note, req.Actor)
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return

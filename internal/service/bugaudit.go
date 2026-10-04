@@ -87,6 +87,23 @@ func bugNeedsRetriage(history []bug.AuditEntry) bool {
 	return pending
 }
 
+// reopenedSinceFix is true when the latest reopen has not been followed by a
+// promotion. latestReopen alone answers "was it ever reopened", which stays
+// true for the rest of the report's life; Now asks whether the person's
+// "still broken" is still unanswered by new work.
+func reopenedSinceFix(history []bug.AuditEntry) bool {
+	pending := false
+	for _, entry := range history {
+		switch entry.Via {
+		case "reopen":
+			pending = true
+		case "promote":
+			pending = false
+		}
+	}
+	return pending
+}
+
 func latestReopen(history []bug.AuditEntry) (bug.AuditEntry, bool) {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Via == "reopen" {

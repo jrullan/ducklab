@@ -41,11 +41,13 @@ export interface BugBug {
   needs_triage?: boolean;
   next?: string[];
   proposal?: BugPortion[];
+  reopened?: boolean;
   reporter?: string;
   severity?: string;
   source?: string;
   status?: string;
   task_id?: string;
+  tasks?: BugTask[];
   title?: string;
   updated_at?: string;
 }
@@ -54,6 +56,12 @@ export interface BugPortion {
   acceptance?: string[];
   owns?: string[];
   title?: string;
+}
+
+export interface BugTask {
+  current?: boolean;
+  id?: string;
+  status?: string;
 }
 
 export interface ConfigBudget {
@@ -354,6 +362,11 @@ export interface EngineapirestartRequest {
   requester?: string;
 }
 
+export interface EngineapiresumeRequest {
+  actor?: string;
+  note?: string;
+}
+
 export interface EngineapirosterSetRequest {
   duckling?: string;
   ducklings?: string[];
@@ -548,6 +561,15 @@ export interface RunlogRedoNote {
   advisor?: string;
   draft?: string;
   editable?: boolean;
+  origin?: string;
+  reason?: string;
+}
+
+export interface RunlogResumeNote {
+  actor?: string;
+  at?: string;
+  note?: string;
+  pending_kind?: string;
 }
 
 export interface RunlogReviewEvidence {
@@ -614,6 +636,7 @@ export interface RunlogRun {
   redo_note?: RunlogRedoNote;
   remote_receipts?: Record<string, unknown>[];
   resolution?: string;
+  resume_notes?: RunlogResumeNote[];
   revert_sha?: string;
   review_evidence?: RunlogReviewEvidence;
   roster?: Record<string, string>;

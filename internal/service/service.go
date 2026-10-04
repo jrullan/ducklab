@@ -1489,6 +1489,19 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		run.Autonomy = "guarded"
 	}
 
+	// A build of a task whose chain broke must start where the chain would
+	// have started it: on the accepted red test, not on the default branch
+	// that never received it (B-493).
+	var rejoined *brokenChain
+	if req.chainBase == "" && req.TaskID != "" {
+		chain, err := s.brokenChainFor(entry.Path, projectID, req.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if chain != nil {
+			req.chainBase, rejoined = chain.sha, chain
+		}
+	}
 	if err := s.createRunWorktreeAt(run, entry.Path, req.chainBase); err != nil {
 		return nil, err
 	}
@@ -1527,6 +1540,13 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"mode": run.Mode, "mode_source": run.ModeSource, "task_id": run.TaskID, "bug_id": run.BugID,
 	})
+	if rejoined != nil {
+		writer.AppendEvent("tdd_chain_rejoined", map[string]interface{}{
+			"test_run": rejoined.testRun, "base": rejoined.sha,
+			"detail": fmt.Sprintf("relaunched build starts from %s's accepted red test %s (run %s), which never reached the default branch",
+				run.TaskID, short(rejoined.sha), rejoined.testRun),
+		})
+	}
 
 	// Dry-run is synchronous: render prompts, no model calls, exit immediately
 	if req.DryRun {
@@ -1542,6 +1562,72 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	})
 
 	return run, nil
+}
+
+// brokenChain is an accepted red test still waiting for its build.
+type brokenChain struct {
+	sha     string
+	testRun string
+}
+
+// brokenChainFor finds the red test a build of taskID must start from: the
+// task's latest accepted, unretired test-first commit, when no build of the
+// task was accepted after it and the commit is not on the default branch.
+// Nil means an ordinary build from the default branch.
+//
+// continueChain hands the build its base; a build launched any other way —
+// the person aborting a paused chained build and relaunching it with a note,
+// the board's Build button on a broken chain — branched from the default
+// branch and lost the test it was meant to make green (B-493: TI-36X T-014,
+// red test 2482177 on ducklab/T-014-qzkf). The commit is content-addressed
+// and was reproduced red at its acceptance, so it is the same base the chain
+// would have used. Only when the commit itself is gone — its run branch was
+// deleted at acceptance and gc may prune it — is the launch refused, naming
+// the commit and the two ways forward.
+func (s *Service) brokenChainFor(projectRoot, projectID, taskID string) (*brokenChain, error) {
+	var test *runlog.Run
+	s.runsMu.RLock()
+	for _, rs := range s.runs {
+		r := rs.run
+		if r.ProjectID == projectID && r.TaskID == taskID && r.Accepted &&
+			r.Stage == "test" && r.RevertSHA == "" && r.CommitSHA != "" {
+			if test == nil || r.StartedAt > test.StartedAt {
+				test = r
+			}
+		}
+	}
+	var chain *brokenChain
+	if test != nil {
+		chain = &brokenChain{sha: test.CommitSHA, testRun: test.ID}
+		for _, rs := range s.runs {
+			r := rs.run
+			if r.ProjectID == projectID && r.TaskID == taskID && r.Accepted &&
+				r.Stage == "build" && r.StartedAt > test.StartedAt {
+				chain = nil
+				break
+			}
+		}
+	}
+	s.runsMu.RUnlock()
+	if chain == nil {
+		return nil, nil
+	}
+	git := vcs.New(projectRoot)
+	if !git.CommitExists(chain.sha) {
+		return nil, fmt.Errorf("%s's accepted red test %s (run %s) never reached the default branch and its commit "+
+			"is no longer in this repository — a build from the default branch would not have the test it must make green. "+
+			"Retire the test, then run %s test-first again", taskID, short(chain.sha), chain.testRun, taskID)
+	}
+	head, err := git.DefaultBranchHead()
+	if err != nil {
+		return nil, fmt.Errorf("read default branch HEAD: %w", err)
+	}
+	if landed, err := git.IsAncestor(chain.sha, head); err != nil {
+		return nil, fmt.Errorf("check whether %s's red test %s is on the default branch: %w", taskID, short(chain.sha), err)
+	} else if landed {
+		return nil, nil
+	}
+	return chain, nil
 }
 
 // projectHeld reports whether the project belongs to work the queue is no
@@ -3874,6 +3960,20 @@ func (s *Service) logResolution(rs *runState, action, actor string) error {
 // the strategy from its checkpoint. A run paused at a human gate is left where
 // it is: the gate is answered with RunAccept/RunReject, not by resuming.
 func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error) {
+	return s.RunResumeWithNote(ctx, id, "", "")
+}
+
+// RunResumeWithNote resumes a paused run and tells it something on the way
+// back in. The note rides the prompt beside the one the run was launched
+// with — both, never one replacing the other — and lands on the record with
+// who said it.
+//
+// B-493: TI-36X T-014's chained build paused on an error whose fix the person
+// knew exactly (a wrong expected value, a path without its leading slash).
+// Resume took no words and the start-time note existed only at launch, so the
+// only way to say it was abort-and-relaunch — which lost the chain's red test.
+func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string) (*runlog.Run, error) {
+	note = strings.TrimSpace(note)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -3896,7 +3996,17 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// A human gate is not a resume point — it is answered with accept/reject,
 	// not continued.
 	if current.PendingKind == "gate" {
+		if note != "" {
+			// Returning the gate untouched would drop the words in silence.
+			return nil, fmt.Errorf("run %q waits at its gate, which a note cannot resume — accept, reject, or request changes with the note", id)
+		}
 		return current, nil
+	}
+	// Document stages re-enter through their persisted request, which has no
+	// channel for a note: their instruction travels as a revision. Refused
+	// rather than resumed without the words the person typed.
+	if note != "" && current.Stage != "build" && current.Stage != "test" {
+		return nil, fmt.Errorf("a %s run takes no note on resume — resume it without one, or request changes once its draft is at the gate", current.Stage)
 	}
 	entry, err := s.entryFor(rs)
 	if err != nil {
@@ -3922,7 +4032,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		startActiveWallclock(rs.run, time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", resumeCheckpointData(current, entry.Path))
+		w.AppendEvent("checkpoint", resumeCheckpointData(current, entry.Path, "", ""))
 		w.WriteState()
 		rs.wmu.Unlock()
 		go s.executeStage(runCtx, rs, entry.Path, sreq)
@@ -3938,7 +4048,13 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		if cfgErr != nil {
 			return nil, cfgErr
 		}
-		treq := TestFirstRequest{TaskID: current.TaskID, Mode: current.Mode}
+		if note != "" {
+			current = rs.recordResumeNote(current, note, actor)
+		}
+		// The note and the calls cap ride the record, as resumeRequest keeps
+		// them for a build: a resumed test run used to drop both.
+		treq := TestFirstRequest{TaskID: current.TaskID, Mode: current.Mode,
+			Note: runNote(current), AgentTurns: current.AgentTurns}
 		if imp := current.Roster["implementer"]; imp != "" {
 			treq.Ducklings = []string{imp}
 			if rev := current.Roster["reviewer"]; rev != "" && current.Mode == "pair" {
@@ -3964,7 +4080,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", resumeCheckpointData(current, root))
+		w.AppendEvent("checkpoint", resumeCheckpointData(current, root, note, actor))
 		w.WriteState()
 		rs.wmu.Unlock()
 		s.queue.submit(s, &queued{
@@ -3974,6 +4090,9 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		return rs.snapshotRun(), nil
 	}
 
+	if note != "" {
+		current = rs.recordResumeNote(current, note, actor)
+	}
 	req := resumeRequest(current)
 	root := runRoot(current, entry.Path)
 
@@ -3991,7 +4110,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// resuming answers it. Left in place, a resumed, working run went on
 	// wearing "Why it failed" over a live conversation.
 	rs.run.Failure = ""
-	w.AppendEvent("checkpoint", resumeCheckpointData(current, root))
+	w.AppendEvent("checkpoint", resumeCheckpointData(current, root, note, actor))
 	w.WriteState()
 	rs.wmu.Unlock()
 
@@ -4009,14 +4128,68 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 // resumeCheckpointData makes the checkout chosen at re-entry part of the
 // durable record. Status alone cannot distinguish a correct worktree resume
 // from a stale-tree binary re-entering through the registered checkout.
-func resumeCheckpointData(run *runlog.Run, root string) map[string]interface{} {
-	return map[string]interface{}{
+//
+// The note a person resumed with rides the same event, so the record shows
+// what they said at the moment they said it, and by whom.
+func resumeCheckpointData(run *runlog.Run, root, note, actor string) map[string]interface{} {
+	data := map[string]interface{}{
 		"reason":         "resume",
 		"status":         "running",
 		"execution_root": root,
 		"worktree_path":  run.WorktreePath,
 		"gate_root":      run.GateRoot,
 	}
+	if note != "" {
+		data["note"] = note
+		data["actor"] = resumeActor(actor)
+	}
+	return data
+}
+
+func resumeActor(actor string) string {
+	if actor = strings.TrimSpace(actor); actor == "" {
+		return "human"
+	}
+	return actor
+}
+
+// recordResumeNote puts a resume note on the live record and returns the
+// caller's snapshot with it, so the request rebuilt from that snapshot
+// carries it. The pause kind is captured before the resume clears it.
+func (rs *runState) recordResumeNote(current *runlog.Run, note, actor string) *runlog.Run {
+	rn := runlog.ResumeNote{
+		Note: note, Actor: resumeActor(actor), PendingKind: current.PendingKind,
+		At: time.Now().UTC().Format(time.RFC3339),
+	}
+	rs.wmu.Lock()
+	rs.run.ResumeNotes = append(rs.run.ResumeNotes, rn)
+	rs.wmu.Unlock()
+	current.ResumeNotes = append(slices.Clone(current.ResumeNotes), rn)
+	return current
+}
+
+// runNote is everything the person told a run, for its prompt: the note it
+// was launched with, then each note added on resume, oldest first. A resume
+// note never replaces the launch note — the launch note is often the
+// reviewer's outstanding findings, and the resume note is what the person
+// learned since.
+func runNote(run *runlog.Run) string {
+	var parts []string
+	if n := strings.TrimSpace(run.Note); n != "" {
+		parts = append(parts, n)
+	}
+	for _, rn := range run.ResumeNotes {
+		n := strings.TrimSpace(rn.Note)
+		if n == "" {
+			continue
+		}
+		label := "Added when the run was resumed"
+		if rn.PendingKind != "" {
+			label += " after it paused (" + rn.PendingKind + ")"
+		}
+		parts = append(parts, label+":\n\n"+n)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // resumeRequest rebuilds a paused run's request from its record: a resumed
@@ -4029,7 +4202,7 @@ func resumeRequest(run *runlog.Run) RunRequest {
 		TaskID:       run.TaskID,
 		Mode:         run.Mode,
 		Autonomy:     run.Autonomy,
-		Note:         run.Note,
+		Note:         runNote(run),
 		AgentTurns:   run.AgentTurns,
 		NoStream:     !run.Stream,
 		UnsafeWrites: run.UnsafeWrites,
@@ -4290,6 +4463,7 @@ func (rs *runState) snapshotRun() *runlog.Run {
 	clone.PendingData = cloneAnyMap(rs.run.PendingData)
 	clone.StageRequest = cloneAnyMap(rs.run.StageRequest)
 	clone.ChainBuild = cloneAnyMap(rs.run.ChainBuild)
+	clone.ResumeNotes = slices.Clone(rs.run.ResumeNotes)
 	if rs.run.Spend != nil {
 		clone.Spend = make(map[string]runlog.DucklingSpend, len(rs.run.Spend))
 		for k, v := range rs.run.Spend {
@@ -4368,9 +4542,11 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	}
 	// Failed runs carry a bounded, editable retry recommendation. Generation is
 	// deterministic and uses only the run record and captured artefacts; it
-	// never decides or relaunches anything.
+	// never decides or relaunches anything. It reads this copy — whose
+	// Failure was just recovered from events — and the events in hand, where
+	// the verdict's detail and the reviewer's findings live (B-485).
 	if run.RedoNote == nil && redoNoteEligible(run) {
-		if note := s.draftRedoNote(ctx, rs); note != nil {
+		if note := s.draftRedoNote(ctx, rs, run, events); note != nil {
 			run.RedoNote = note
 		}
 	}

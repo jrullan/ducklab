@@ -198,7 +198,13 @@ export const useRuns = create<RunsState>((set) => ({
           // state on it would invent a transition the engine never made.
           runs = { ...runs, [runId]: { ...run, status: "running" } };
         } else if (e.type === "human_needed") {
-          runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
+          // B-495: the pause changes what is legal, and the event does not say
+          // what. Keeping the running record's next=[abort] showed a gate
+          // that had PASSED with only Abort on Now, while the engine already
+          // offered accept/reject. Dropping the previous state's offers and
+          // pending payload is what makes App hydrate the run from the engine.
+          const { next: _next, pending_data: _pendingData, pending_since: _pendingSince, ...waiting } = run;
+          runs = { ...runs, [runId]: { ...waiting, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
         } else if (e.type === "human" && run.status === "paused" && String(e.data?.resolution ?? "") !== "plan_revision") {
           // Answering a human gate resumes the run. A plan-revision answer is
           // terminal routing, not a resume; its following run_end owns status.
@@ -221,9 +227,13 @@ export const useRuns = create<RunsState>((set) => ({
           // "response truncated" and the person watched a frozen lane, found
           // "running" in Now, and learned the truth minutes later from a
           // refetch. The failure notification keys on this transition too.
+          // A failed run offers nothing (the task's own list owns relaunch);
+          // a running run's [abort] or a paused one's decision must not
+          // outlive the failure (B-495's class).
+          const { next: _next, pending_kind: _pk, pending_since: _ps, pending_data: _pd, ...failed } = run;
           runs = {
             ...runs,
-            [runId]: { ...run, status: "failed", failure: String(e.data?.error ?? run.failure ?? "") },
+            [runId]: { ...failed, status: "failed", failure: String(e.data?.error ?? run.failure ?? "") },
           };
         } else if (e.type === "run_end") {
           // done and failed are different ends: a tournament with no winner

@@ -282,6 +282,18 @@ export interface VisualGate {
   results: VisualCompare[];
 }
 
+/** The retry note the engine offers on a failed run. B-485: `origin` is who
+ * wrote `draft` — "ducklab" when the engine assembled it from the run record,
+ * "advisor" when an advisor seat did (then `advisor` names it). `reason` is
+ * why the run failed, shown beside the editable draft. */
+export interface RedoNote {
+  draft: string;
+  origin?: string;
+  advisor?: string;
+  reason?: string;
+  editable: boolean;
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -346,8 +358,11 @@ export interface Run {
   /** Why the run failed, in the engine's words. Some of these are written to be
    * acted on — split names the file two subtasks both claimed. */
   failure?: string;
-  /** Advisor-authored, editable retry recommendation for failed runs. */
-  redo_note?: { draft: string; advisor: string; editable: boolean };
+  /** Editable retry recommendation for failed runs; `origin` says who wrote it. */
+  redo_note?: RedoNote;
+  /** What the person added when resuming a paused run, oldest first; it rides
+   * the run's prompt beside the launch note (B-493). */
+  resume_notes?: { note: string; actor?: string; pending_kind?: string; at: string }[];
   /** The actions a person may legally take on this run, in the order to offer
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
@@ -740,6 +755,22 @@ export interface Bug {
    * task each. A triager recommends one; the person writes, corrects or
    * discards it through bugEdit until promote consumes it. */
   proposal?: BugPortion[];
+  /** Every task the report was promoted into, with the status the runs give
+   * each. task_id names only the first task of the current promotion; a split
+   * report (TI-36X B-003: T-014 + T-015) is waiting on all of them. */
+  tasks?: BugTask[];
+  /** Sent back after its last fix, with nothing promoted since. A reopen
+   * returns the bug to triaged; in_progress alone never means this. */
+  reopened?: boolean;
+}
+
+/** One task a report was promoted into. `current` marks the latest
+ * promotion; earlier tasks were consumed by a reopen and are provenance. */
+export interface BugTask {
+  id: string;
+  /** todo | blocked | in_progress | review | accepted, as the board shows it. */
+  status: string;
+  current?: boolean;
 }
 
 /** One lane of a split proposal: a task title, the 1-2 acceptance criteria it
@@ -1543,8 +1574,11 @@ export class EngineClient {
   runReseat(id: string, from: string, to: string) {
     return this.request<Run>("POST", `/v1/runs/${id}/reseat`, { from, to });
   }
-  runResume(id: string) {
-    return this.request<Run>("POST", `/v1/runs/${id}/resume`);
+  /** A note, when given, rides the resumed run's next turns beside its
+   * launch note (B-493); without one the request carries no body. */
+  runResume(id: string, note?: string) {
+    const text = note?.trim();
+    return this.request<Run>("POST", `/v1/runs/${id}/resume`, text ? { note: text } : undefined);
   }
   runDiff(id: string) {
     return this.request<{ diff: string; tests?: string }>("GET", `/v1/runs/${id}/diff`).then((r) => ({

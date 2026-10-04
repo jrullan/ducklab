@@ -130,6 +130,9 @@
             },
             "type": "array"
           },
+          "reopened": {
+            "type": "boolean"
+          },
           "reporter": {
             "type": "string"
           },
@@ -144,6 +147,12 @@
           },
           "task_id": {
             "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/BugTask"
+            },
+            "type": "array"
           },
           "title": {
             "type": "string"
@@ -186,6 +195,24 @@
           "acceptance",
           "owns",
           "title"
+        ],
+        "type": "object"
+      },
+      "BugTask": {
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
         ],
         "type": "object"
       },
@@ -1227,6 +1254,17 @@
         ],
         "type": "object"
       },
+      "EngineapiresumeRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "EngineapirosterSetRequest": {
         "properties": {
           "duckling": {
@@ -1883,12 +1921,39 @@
           },
           "editable": {
             "type": "boolean"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [
-          "advisor",
           "draft",
-          "editable"
+          "editable",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "RunlogResumeNote": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "pending_kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "note"
         ],
         "type": "object"
       },
@@ -2106,6 +2171,12 @@
           },
           "resolution": {
             "type": "string"
+          },
+          "resume_notes": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogResumeNote"
+            },
+            "type": "array"
           },
           "revert_sha": {
             "type": "string"
@@ -6363,7 +6434,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -7661,7 +7732,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "204": {
@@ -7708,7 +7779,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -8640,7 +8711,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -9110,7 +9181,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -9184,6 +9255,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiresumeRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -9204,7 +9285,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Resume a paused run"
+        "summary": "Resume a paused run; an optional note rides its next turns beside the launch note"
       }
     },
     "/v1/runs/{id}/transcript": {

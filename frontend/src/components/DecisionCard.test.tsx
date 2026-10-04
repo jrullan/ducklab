@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { DecisionCard, documentDissentNote } from "./DecisionCard";
+import type { RedoNote } from "../api/client";
 
 describe("DecisionCard document gates", () => {
   it("makes request changes primary and names discard as the destructive exit", () => {
@@ -169,5 +170,65 @@ describe("DecisionCard — a document draft the reviewer sent back", () => {
     // Every field of the finding contract rides along; invariant included.
     expect(documentDissentNote([{ severity: "minor", file: "SPEC-003", issue: "x", invariant: "no capture leaves the overlay mapped", fix: "y" }]))
       .toBe("- [minor] x (SPEC-003) Invariant: no capture leaves the overlay mapped Fix: y");
+  });
+});
+
+// B-485, from TI-36X r-20261002-190108-fxji (T-003, test-first, FAILED).
+describe("DecisionCard retry note", () => {
+  const reason =
+    "Why it failed: no test file was written, so nothing was specified\n\n" +
+    "Reviewer's blocking findings:\n- [critical] No test file was written; the diff is empty (tests/parser.test.mjs)";
+  const t003: RedoNote = {
+    draft: `Retry the task after addressing the failure.\n\n${reason}\n\nTask: T-003 — parser tests`,
+    origin: "ducklab",
+    reason,
+    editable: true,
+  };
+  const card = (redoNote?: RedoNote) => (
+    <DecisionCard
+      next={["reject"]}
+      title="Run failed"
+      consequence="nothing lands"
+      onAccept={() => {}}
+      onReject={() => {}}
+      redoNote={redoNote}
+      onRetry={() => {}}
+    />
+  );
+
+  it("fills the editor when the note arrives after mount, and never overwrites a human edit", () => {
+    // RunView renders the streamed run first (no redo_note); RunGet adds it.
+    const { rerender } = render(card(undefined));
+    rerender(card(t003));
+    expect(screen.getByLabelText("retry note")).toHaveValue(t003.draft);
+    expect(screen.getByRole("button", { name: "Retry with this note" })).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("retry note"), { target: { value: "write tests/parser.test.mjs first" } });
+    rerender(card({ ...t003, draft: "a later redraft" }));
+    expect(screen.getByLabelText("retry note")).toHaveValue("write tests/parser.test.mjs first");
+  });
+
+  it("says Ducklab assembled the note unless the engine records an advisor wrote it", () => {
+    const { rerender } = render(card(t003));
+    expect(screen.getByTestId("redo-note-origin")).toHaveTextContent("assembled by Ducklab");
+    expect(screen.getByTestId("redo-note")).not.toHaveTextContent(/advisor/i);
+
+    // The pre-fix payload named the run's advisor seat and no origin; no
+    // advisor wrote that note either.
+    rerender(card({ ...t003, origin: undefined, advisor: "qwen38-max" }));
+    expect(screen.getByTestId("redo-note-origin")).not.toHaveTextContent("qwen38-max");
+
+    rerender(card({ ...t003, origin: "advisor", advisor: "qwen38-max" }));
+    expect(screen.getByTestId("redo-note-origin")).toHaveTextContent("drafted by the advisor, qwen38-max");
+  });
+
+  it("shows why the run failed beside the draft, and keeps it after the draft is rewritten", () => {
+    render(card(t003));
+    const shown = screen.getByTestId("redo-note-reason");
+    expect(shown).toHaveTextContent("no test file was written, so nothing was specified");
+    expect(shown).toHaveTextContent("[critical] No test file was written");
+
+    fireEvent.change(screen.getByLabelText("retry note"), { target: { value: "" } });
+    expect(screen.getByTestId("redo-note-reason")).toHaveTextContent("no test file was written");
   });
 });
