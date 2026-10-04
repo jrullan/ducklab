@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/skill"
 )
 
@@ -845,17 +844,12 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
-	if err != nil {
-		return ErrorResult("jail: %v", err), nil
-	}
-	// Deleting the governance file is a write to it. fs_delete calls no
-	// WriteGuard (there is no content to guard), so the rule lives here too.
-	if ectx.Role == config.RoleImplementer && isProjectGovernancePath(ectx.ProjectRoot, absPath) {
-		if ectx.OnDistress != nil {
-			ectx.OnDistress("governance_write_refused", map[string]interface{}{"path": a.Path})
-		}
-		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", a.Path), nil
+	// A delete is a write to the path: the lane, governance, test-only runs,
+	// the denylist (.git) and protected globs all apply. It used to check
+	// governance alone.
+	absPath, guard := PathGuard(ectx, a.Path)
+	if guard != nil {
+		return guard, nil
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {

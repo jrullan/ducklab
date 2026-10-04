@@ -921,11 +921,16 @@ func PathJail(root, path string) (string, error) {
 
 // WriteGuard checks all write guard rules before a mutating filesystem call.
 // Returns nil if the write is allowed, or an error result naming the rule.
-func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *Result {
+// PathGuard applies every rule about WHERE a run may change the tree: the
+// jail, the task lane, governance, test-only runs, the denylist and protected
+// globs. Writes and deletes both go through it; a delete used to check
+// governance alone, so a model could remove .git, a file outside its lane, a
+// protected path, or a source file in a test-only run.
+func PathGuard(ectx *ExecContext, path string) (string, *Result) {
 	// 1. Jail check
 	absPath, err := PathJail(ectx.ProjectRoot, path)
 	if err != nil {
-		return ErrorResult("jail: %v", err)
+		return "", ErrorResult("jail: %v", err)
 	}
 
 	// 2. A build task may mutate only its accepted plan lane. Refuse at the
@@ -942,7 +947,7 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 				"dirs": append([]string(nil), ectx.TaskWritableDirs...),
 			})
 		}
-		return ErrorResult("lane: edit to %s is outside this task's declared write lane; this task may write: %s. Revert the attempt or request an approved plan amendment if the fix needs more.",
+		return absPath, ErrorResult("lane: edit to %s is outside this task's declared write lane; this task may write: %s. Revert the attempt or request an approved plan amendment if the fix needs more.",
 			path, writeLaneDescription(ectx))
 	}
 
@@ -953,12 +958,12 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		if ectx.OnDistress != nil {
 			ectx.OnDistress("governance_write_refused", map[string]interface{}{"path": path})
 		}
-		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", path)
+		return absPath, ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", path)
 	}
 
 	// 4. Test-first runs write tests and nothing else.
 	if ectx.TestPathsOnly && !verify.IsTestPath(path, ectx.Verify.TestGlobs) {
-		return ErrorResult("this run writes tests only, and %s is not one. "+
+		return absPath, ErrorResult("this run writes tests only, and %s is not one. "+
 			"Write the failing test; the implementation is the next run's job.", path)
 	}
 
@@ -978,14 +983,23 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		// (T-068), and the error blamed a directory the write never touched.
 		deniedAbs := filepath.Join(ectx.ProjectRoot, denied)
 		if absPath == deniedAbs || strings.HasPrefix(absPath, deniedAbs+string(filepath.Separator)) {
-			return ErrorResult("denylist: write to %s is refused", denied)
+			return absPath, ErrorResult("denylist: write to %s is refused", denied)
 		}
 	}
 	// User protected paths
 	for _, protected := range ectx.ShellPolicy.Deny {
 		if matched, _ := filepath.Match(protected, path); matched {
-			return ErrorResult("denylist: write to %s is refused (protected path)", path)
+			return absPath, ErrorResult("denylist: write to %s is refused (protected path)", path)
 		}
+	}
+	return absPath, nil
+}
+
+// WriteGuard applies PathGuard, then the rules about WHAT a write may contain.
+func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *Result {
+	absPath, guard := PathGuard(ectx, path)
+	if guard != nil {
+		return guard
 	}
 
 	// 6. Marker guard (can be disabled with --unsafe-writes)
