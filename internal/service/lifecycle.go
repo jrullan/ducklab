@@ -664,7 +664,7 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	}
 	if entry, err := s.registry.Get(rs.run.ProjectID); err == nil && rs.run.TaskID != "" {
 		text := q.Question + "\n" + strings.Join(q.Options, "\n")
-		if paths := advisorLaneConflicts(entry.Path, rs.run.TaskID, text); len(paths) > 0 {
+		if paths := advisorLaneConflicts(entry.Path, rs.run.TaskID, text, runRoot(rs.run, entry.Path)); len(paths) > 0 {
 			rs.run.PendingData["lane_widening"] = paths
 		}
 	}

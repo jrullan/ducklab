@@ -157,7 +157,7 @@ func TestBugPromotionUsesTheRealB003TestFirstEvidence(t *testing.T) {
 		SuspectedFiles: "tests/parser.test.mjs\ntests/index.js",
 	}
 	for _, want := range []string{"tests/parser.test.mjs", "tests/index.js"} {
-		if !slices.Contains(promotionNamedTestPaths(rec, cfg.Verify.TestGlobs), want) {
+		if !slices.Contains(promotionNamedTestPaths(root, rec, cfg.Verify.TestGlobs), want) {
 			t.Errorf("named test paths omitted suspected file %q", want)
 		}
 	}
