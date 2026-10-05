@@ -4257,7 +4257,10 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 			w.AppendEvent("warning", map[string]interface{}{"detail": warning})
 		}
 		w.AppendEvent("budget_lifted", data)
-		if err := w.WriteState(); err != nil {
+		rs.wmu.Lock()
+		err := w.WriteState()
+		rs.wmu.Unlock()
+		if err != nil {
 			return nil, err
 		}
 		out := rs.snapshotRun()
@@ -4290,11 +4293,15 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 	case "wallclock":
 		rs.run.Budget.Limit.WallclockS = 0
 	}
-	rs.wmu.Unlock()
 	w.AppendEvent("budget_lifted", map[string]interface{}{
 		"kind": kind, "was": was, "by": "human",
 	})
-	if err := w.WriteState(); err != nil {
+	// Marshalled under the run's lock: a lift lands while a paused question's
+	// advisor is still writing its advice into PendingData (found by the
+	// race detector on B-500's answer-then-gate test).
+	err = w.WriteState()
+	rs.wmu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	// The meters everywhere update now, not at the next model call.
