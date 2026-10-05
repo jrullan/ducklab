@@ -5346,7 +5346,7 @@ func (s *Service) approveOfferedLaneWidening(rs *runState, current *runlog.Run, 
 	if err != nil {
 		return nil, fmt.Errorf("read accepted plan before lane widening: %w", err)
 	}
-	added, err := widenTaskLane(entry.Path, current.TaskID, requested)
+	added, err := widenTaskLane(entry.Path, current.TaskID, requested, current.WorktreePath)
 	if err != nil {
 		return nil, err
 	}

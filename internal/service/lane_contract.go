@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -115,17 +116,25 @@ func taskDeclaredLanePaths(projectRoot, taskID string) []string {
 }
 
 // advisorLaneConflicts extracts concrete repository paths from an advisor
-// note, then subjects them to the same lane invariant as an actual diff. It is
-// intentionally conservative: slash-shaped paths are unambiguous, while a
-// bare token is considered a path only when it names a file that exists in
-// the project. URLs and prose are never treated as lane claims.
-func advisorLaneConflicts(projectRoot, taskID, note string) []string {
+// note or a pending question, then subjects them to the same lane invariant as
+// an actual diff. It is intentionally conservative: a slash-shaped token is a
+// candidate only, and it becomes a lane claim only when plausibleLanePath finds
+// it in the project (or it is a new file under an existing directory). A bare
+// token is considered a path only when it names a file that exists. URLs and
+// prose are never treated as lane claims: TI-36X T-005 (B-503) asked about
+// "exposed angle/2nd/menu indicators" and the engine offered `angle/2nd/menu`
+// as a lane widening that would have been written into the accepted plan.
+//
+// projectRoot is where the accepted plan is read; evidenceRoots are further
+// trees (the main checkout or the run's worktree) whose contents make a path real.
+func advisorLaneConflicts(projectRoot, taskID, note string, evidenceRoots ...string) []string {
+	roots := append([]string{projectRoot}, evidenceRoots...)
 	seen := map[string]bool{}
 	var mentioned []string
 	add := func(raw string) {
 		raw = strings.Trim(strings.TrimSpace(raw), "`'\".,;:()[]{}")
 		path := cleanLanePath(raw)
-		if path == "" || seen[path] || strings.Contains(path, "://") {
+		if path == "" || seen[path] || strings.Contains(path, "://") || !plausibleLanePath(path, roots...) {
 			return
 		}
 		seen[path] = true
@@ -150,8 +159,7 @@ func advisorLaneConflicts(projectRoot, taskID, note string) []string {
 		if path == "" {
 			continue
 		}
-		info, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(path)))
-		if err == nil && !info.IsDir() {
+		if laneFileExists(path, roots...) {
 			add(path)
 		}
 	}
@@ -161,6 +169,64 @@ func advisorLaneConflicts(projectRoot, taskID, note string) []string {
 		conflicts = append(conflicts, finding.File)
 	}
 	return conflicts
+}
+
+// laneFileExtension is the "file-like name" test for a lane path that does not
+// exist yet: a dot followed by an alphanumeric suffix containing a letter, so
+// `capture.c` and `parser.test.mjs` qualify while a version (`v1/2.0`) does not.
+var laneFileExtension = regexp.MustCompile(`^\.[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*$`)
+
+// plausibleLanePath reports whether a lane path derived from text names
+// something an accepted plan can own: it exists in one of roots (file or
+// directory), or it is a new file whose parent directory exists there and
+// whose name has a file extension. Slash-separated prose ("angle/2nd/menu",
+// "and/or", "read/write", "DEG/RAD/GRAD", "1/2", "km/h"), URLs, dates and
+// versions fail both tests (B-503). The offer and the approval both apply it,
+// so a stale or hand-crafted offer cannot write junk into the plan either.
+func plausibleLanePath(raw string, roots ...string) bool {
+	if strings.Contains(raw, "://") {
+		return false
+	}
+	path := cleanLanePath(raw)
+	if path == "" {
+		return false
+	}
+	parent, base := pathpkg.Split(path)
+	parent = strings.TrimSuffix(parent, "/")
+	fileLike := base != "" && laneFileExtension.MatchString(pathpkg.Ext(base))
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err == nil {
+			return true
+		}
+		if !fileLike {
+			continue
+		}
+		dir := root
+		if parent != "" {
+			dir = filepath.Join(root, filepath.FromSlash(parent))
+		}
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// laneFileExists is the bare-token test: a word without a slash is a path
+// only when it names an existing file in one of roots.
+func laneFileExists(path string, roots ...string) bool {
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 // taskWritableLane resolves the exact same accepted lane shape used by the
@@ -358,8 +424,11 @@ var ownsFieldLine = regexp.MustCompile(`(?m)^\*\*Owns:\*\*\s*.*$`)
 // widenTaskLane applies a human-approved lane amendment directly to the
 // accepted plan. The approval is the button click itself; routing it through a
 // second plan proposal would recreate the abort/edit/relaunch dead end this
-// operation exists to remove.
-func widenTaskLane(projectRoot, taskID string, requested []string) ([]string, error) {
+// operation exists to remove. Every requested path must pass
+// plausibleLanePath against the project and evidenceRoots (the run's
+// worktree, where the run's own new files live): a spelling check alone would
+// have written the prose `angle/2nd/menu` into T-005's Owns (B-503).
+func widenTaskLane(projectRoot, taskID string, requested []string, evidenceRoots ...string) ([]string, error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
 		return nil, err
@@ -386,6 +455,9 @@ func widenTaskLane(projectRoot, taskID string, requested []string) ([]string, er
 		path := cleanLanePath(raw)
 		if path == "" {
 			return nil, fmt.Errorf("invalid lane path %q", raw)
+		}
+		if !plausibleLanePath(raw, append([]string{projectRoot}, evidenceRoots...)...) {
+			return nil, fmt.Errorf("lane path %q names nothing in the project and is not a new file under an existing directory; refusing to write it into the accepted plan", raw)
 		}
 		if !seen[path] {
 			seen[path] = true

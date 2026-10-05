@@ -254,6 +254,11 @@ func TestAcceptedLaneWideningSurvivesALaterAcceptRefusal(t *testing.T) {
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: plan})
 	gitProject(t, dir)
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-lane-then-refuse")
+	// The approved path must be real or a new file under an existing
+	// directory (B-503); the fixture's test directory makes it plausible.
+	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	s.runsMu.RLock()
 	rs := s.runs[run.ID]
 	s.runsMu.RUnlock()

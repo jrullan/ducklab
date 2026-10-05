@@ -416,6 +416,10 @@ func TestHumanApprovedLaneAmendmentUpdatesTheAcceptedTask(t *testing.T) {
 	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
 		artifact.KindPlan: "## M-01 — Core\n\n### T-012 — Backend\n\n**Owns:** src/backend\n",
 	})
+	// A new file under an existing directory is a plausible lane (B-503).
+	if err := os.MkdirAll(filepath.Join(dir, "src", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	added, err := widenTaskLane(dir, "T-012", []string{"src/core/capture_core.c"})
 	if err != nil {
 		t.Fatal(err)
@@ -448,6 +452,9 @@ func TestAnswerWithLaneRefreshesLiveGuardAndCommitsTheAmendment(t *testing.T) {
 	}
 	plan := "## M-01 — Core\n\n### T-012 — Backend\n\n**Owns:** src/backend\n"
 	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	git := vcs.New(dir)
