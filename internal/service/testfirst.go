@@ -587,12 +587,45 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.writer.WriteVerify(after.Output)
 
 	verdict, detail := judgeTestFirstWithGate(before, after, diff, projCfg.Verify.TestGlobs, after.Command)
+	// B-501: the gate decides the verdict word, but a test with standing
+	// reviewer objections is not the same deliverable as an approved one.
+	// TI-36X T-005 ran out of its two rounds on request-changes (2 majors
+	// open) and the gate card read a bare PASSED. The verdict stays the
+	// gate's fact; the objections ride beside it on the detail, the record,
+	// the gate event and the pending decision.
+	var review openReview
+	var objected bool
+	if verdict != "FAILED" {
+		if events, rerr := runlog.ReadEvents(rs.runDir); rerr == nil {
+			review, objected = lastOpenReview(events)
+		}
+	}
+	if objected {
+		detail += "; " + openReviewCaveat(review)
+	}
 	rs.wmu.Lock()
 	rs.run.Verdict = verdict
 	autonomy := rs.run.Autonomy
 	projectID := rs.run.ProjectID
+	if objected {
+		implementer, reviewer := rs.run.Roster["implementer"], rs.run.Roster["reviewer"]
+		independence := "self"
+		if implementer != "" && reviewer != "" && implementer != reviewer {
+			independence = "independent"
+		}
+		rs.run.ReviewEvidence = &runlog.ReviewEvidence{
+			Status: "dissent", Independence: independence, Implementer: implementer,
+			Reviewer: reviewer, Verdict: review.Verdict, Findings: review.Total,
+		}
+	}
 	rs.wmu.Unlock()
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict, "detail": detail})
+	if objected {
+		rs.writer.AppendEvent("reviewer_dissent", map[string]interface{}{
+			"verdict": review.Verdict, "findings": review.Total,
+			"blocking": review.Blocking, "detail": openReviewCaveat(review),
+		})
+	}
 
 	// Under yolo with the autopilot driving, a FAILED verdict — green gate,
 	// no test written — is a retryable terminal failure, not an inbox item:
@@ -624,7 +657,21 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"kind": "test_first", "detail": detail,
 		"retain_worktree": rs.run.WorktreePath != "",
 	}
-	if req.ThenBuild && verdict == "PASSED" {
+	gateData := map[string]interface{}{
+		"kind": "gate", "verdict": verdict, "detail": detail,
+	}
+	if objected {
+		// The same keys the build's dissent pause uses, so every surface
+		// reading a gate reads one shape. Not review_verdict: that key
+		// withholds Accept for a document, and a person may still decide
+		// to lock this test in once they have read the objections.
+		for _, data := range []map[string]interface{}{rs.run.PendingData, gateData} {
+			data["dissent"] = review.Verdict
+			data["dissent_findings"] = review.Blocking
+			data["dissent_total"] = review.Total
+		}
+	}
+	if req.ThenBuild && verdict == "PASSED" && !objected {
 		// The chain: commit the red test, start the build. No pause — the
 		// person authorized this path when they clicked it.
 		rs.writer.WriteState()
@@ -632,9 +679,20 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		s.chainBuild(ctx, rs, req)
 		return
 	}
-	rs.writer.AppendEvent("human_needed", map[string]interface{}{
-		"kind": "gate", "verdict": verdict, "detail": detail,
-	})
+	if req.ThenBuild && verdict == "PASSED" {
+		// B-501: the click authorized committing a test the reviewer
+		// accepted, not one it still objects to. An accepted test becomes
+		// the build's oracle (B-490) and the autopilot launches every test
+		// chained, so an unattended accept here would lock the objections
+		// in with nobody having read them. The chain stays on the record;
+		// a person's accept continues it.
+		gateData["chain_held"] = true
+		rs.run.PendingData["chain_held"] = true
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": "tdd chain held: the reviewer still requests changes, so the red test was not committed automatically; accept it to continue the chain, or reject it",
+		})
+	}
+	rs.writer.AppendEvent("human_needed", gateData)
 	rs.writer.WriteState()
 	rs.wmu.Unlock()
 }
@@ -736,6 +794,83 @@ func judgeTestFirstWithGate(before, after *verify.Result, diff string, globs []s
 	}
 	return "PASSED", fmt.Sprintf("the gate was green and is now red: %s specifies work that does not exist yet",
 		strings.Join(touched.Files, ", "))
+}
+
+// openReview is a reviewer's last verdict that did not approve.
+type openReview struct {
+	Verdict string
+	// Blocking are the critical and major findings — the ones the verdict
+	// contract says block acceptance — compacted for the gate.
+	Blocking []map[string]interface{}
+	// Total counts every finding of that verdict, minor ones included.
+	Total int
+}
+
+// lastOpenReview reads the reviewer's last verdict from the record and
+// reports it when it did not approve. Same selection as finalDissent (the
+// last message carrying a verdict), with the findings kept rather than
+// counted: B-501's gate needed the objections themselves, not a number.
+func lastOpenReview(events []*runlog.Event) (openReview, bool) {
+	var last map[string]interface{}
+	for _, e := range events {
+		if e.Type != "message" {
+			continue
+		}
+		if v, ok := e.Data["verdict"].(string); ok && v != "" {
+			last = e.Data
+		}
+	}
+	if last == nil {
+		return openReview{}, false
+	}
+	verdict, _ := last["verdict"].(string)
+	norm := strings.ReplaceAll(strings.ToLower(verdict), "_", "-")
+	if norm == "approve" || norm == "approved" {
+		return openReview{}, false
+	}
+	review := openReview{Verdict: verdict, Blocking: []map[string]interface{}{}}
+	findings, _ := last["findings"].([]interface{})
+	for _, raw := range findings {
+		f, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		review.Total++
+		severity := strings.ToLower(str(f["severity"]))
+		if severity != "critical" && severity != "major" {
+			continue
+		}
+		compact := map[string]interface{}{"severity": severity, "issue": str(f["issue"])}
+		for _, key := range []string{"file", "fix", "invariant"} {
+			if v := str(f[key]); v != "" {
+				compact[key] = v
+			}
+		}
+		if line, ok := f["line"].(float64); ok && line > 0 {
+			compact["line"] = int(line)
+		}
+		review.Blocking = append(review.Blocking, compact)
+	}
+	return review, true
+}
+
+// openReviewCaveat words the standing objection for the verdict detail and
+// the gate: what the reviewer said, and what accepting would do with it.
+func openReviewCaveat(r openReview) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "but the reviewer still requests changes — its last verdict was %s with %d blocking finding(s)", r.Verdict, len(r.Blocking))
+	if r.Total > len(r.Blocking) {
+		fmt.Fprintf(&b, " (%d in all)", r.Total)
+	}
+	for i, f := range r.Blocking {
+		sep := ": "
+		if i > 0 {
+			sep = "; "
+		}
+		b.WriteString(sep + truncateRunes(str(f["issue"]), 200))
+	}
+	b.WriteString(". Accepting locks this test in as the build's oracle; decide the objections first")
+	return b.String()
 }
 
 // compileFailure reports the compiler/build diagnostics emitted by a test gate.

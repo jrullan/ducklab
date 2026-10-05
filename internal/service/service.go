@@ -3069,6 +3069,16 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 			}
 		}
 	}
+	// B-501: standing reviewer objections are a person's decision. A
+	// test-first test accepted here becomes the build's oracle (B-490), and
+	// the tdd chain (auto:tdd) and yolo (auto:yolo) accept with nobody
+	// reading; the executors already pause instead, and this is the floor
+	// under every unattended path that reaches acceptance some other way.
+	if strings.HasPrefix(actor, "auto:") && rs.run.PendingKind == "gate" &&
+		stringValueAny(rs.run.PendingData["dissent"]) != "" {
+		return fmt.Errorf("the reviewer still requests changes (%s); an unattended accept cannot decide that — a person must accept or reject this run",
+			stringValueAny(rs.run.PendingData["dissent"]))
+	}
 	if rs.run.PendingKind == "gate" && stringValueAny(rs.run.PendingData["review_verdict"]) != "" &&
 		stringValueAny(rs.run.PendingData["review_verdict"]) != "approve" {
 		return fmt.Errorf("final reviewer requested changes; revise or reject this proposal before accepting")

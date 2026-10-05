@@ -289,6 +289,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
             {waiting.map((r) => (
               <WaitingCard
                 key={r.id}
+                client={client}
                 run={r}
                 accepting={acceptState[r.id]?.kind === "pending"}
                 onAccept={() => {
