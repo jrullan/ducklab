@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 
@@ -144,6 +144,11 @@ describe("RunView origin panel", () => {
 
     render(<RunView runId="run-1" client={client as never} />);
 
+    const panel = await screen.findByTestId("run-origin-panel") as HTMLDetailsElement;
+    expect(panel.open).toBe(false);
+    expect(screen.getByTestId("run-origin-summary")).toHaveTextContent("REQ-1 → … → task-1");
+    fireEvent.click(screen.getByTestId("run-origin-summary").closest("summary")!);
+    expect(panel.open).toBe(true);
     expect(await screen.findByText("“People can see why a run exists.”")).toBeInTheDocument();
     const breadcrumb = await screen.findByTestId("run-origin-breadcrumb");
     expect(breadcrumb.querySelector('a[href="#/cycle/intake/REQ-1"]')).toHaveTextContent("Origin is visible");
@@ -177,6 +182,10 @@ describe("RunView origin panel", () => {
 
     render(<RunView runId="run-1" client={client as never} />);
 
+    const panel = await screen.findByTestId("run-origin-panel") as HTMLDetailsElement;
+    expect(panel.open).toBe(false);
+    expect(screen.getByTestId("run-origin-summary")).toHaveTextContent("no document spine");
+    fireEvent.click(screen.getByTestId("run-origin-summary").closest("summary")!);
     await waitFor(() => expect(screen.getByTestId("run-origin-none")).toHaveTextContent("this run has no document behind it — worth knowing"));
     expect(screen.queryByTestId("run-origin-requirement")).not.toBeInTheDocument();
   });

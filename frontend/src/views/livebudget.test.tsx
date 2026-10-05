@@ -57,12 +57,37 @@ describe("the run's budget while it is running", () => {
       spend: {}, events: {}, deltas: {}, reasoning: {},
     });
     render(<RunView runId="r-1" client={client} />);
-    const profile = await screen.findByTestId("run-harness-profile");
+    const profile = await screen.findByTestId("run-harness-profile") as HTMLDetailsElement;
+    expect(profile.open).toBe(false);
+    expect(screen.getByTestId("run-harness-summary")).toHaveTextContent("c-native · meson · build gate");
+    expect(screen.getByTestId("budget-header").compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByTestId("run-harness-summary").closest("summary")!);
+    expect(profile.open).toBe(true);
     expect(profile).toHaveTextContent("c-native");
     expect(profile).toHaveTextContent("meson.build");
     expect(screen.getByTestId("run-harness-gate")).toHaveTextContent("ninja -C build");
     expect(screen.getByTestId("run-harness-task-gate")).toHaveTextContent("cc -fsyntax-only src/capture.c");
     expect(profile).toHaveTextContent("diagnostic");
+  });
+
+  it("keeps harness setup warnings visible while its details are collapsed", async () => {
+    useRuns.setState({
+      runs: { "r-1": {
+        ...run,
+        harness_profile: {
+          capabilities: [{ id: "node", evidence: ["package.json"] }],
+          effective_gate: { kind: "tests", source: "project" },
+          detection_error: "configured test command could not be resolved",
+        },
+      } },
+      spend: {}, events: {}, deltas: {}, reasoning: {},
+    });
+
+    render(<RunView runId="r-1" client={client} />);
+
+    const profile = await screen.findByTestId("run-harness-profile") as HTMLDetailsElement;
+    expect(profile.open).toBe(false);
+    expect(screen.getByTestId("run-harness-warning")).toHaveTextContent("configured test command could not be resolved");
   });
 
   it("distinguishes green commands from semantic review evidence", async () => {
