@@ -268,6 +268,10 @@ export interface PendingHuman {
   question?: string;
   questionId?: string;
   verdict?: string;
+  /** The choices the question offered, in the asker's order. TI-36X T-005
+   * (B-502): the card never showed them, so the person typed "Use option 2"
+   * against a list only the CLI displayed. */
+  options?: string[];
   /** The advisor's drafted answer, when one has landed — the human's role
    * becomes choosing, not researching. */
   advice?: string;
@@ -915,6 +919,15 @@ export function chainedBuildId(events: readonly DucklabEvent[]): string {
   return "";
 }
 
+/** A question's offered options, untouched: the engine records the chosen
+ * option's exact text, and its position is what "option 2" means, so no
+ * trimming or de-duplicating here. */
+export function questionOptions(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const options = value.filter((item): item is string => typeof item === "string");
+  return options.length > 0 ? options : undefined;
+}
+
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;
@@ -959,6 +972,7 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
     question: d.question ? String(d.question) : undefined,
     questionId: d.question_id ? String(d.question_id) : undefined,
     verdict: d.verdict ? String(d.verdict) : undefined,
+    options: questionOptions(d.options),
     detail: failed && (a.cause || a.error) ? String(a.cause ?? a.error) : d.detail ? String(d.detail) : undefined,
     advice: adviceMatches && !failed && a.answer ? String(a.answer) : undefined,
     advisor: adviceMatches && a.advisor ? String(a.advisor) : d.advisor ? String(d.advisor) : undefined,

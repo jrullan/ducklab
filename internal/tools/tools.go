@@ -375,23 +375,32 @@ func (r *Registry) List() []string {
 
 // Execute executes a tool by name with the given arguments.
 func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, args json.RawMessage) (*Result, error) {
-	t, err := r.Get(name)
-	if err != nil {
-		return ErrorResult("unknown tool %q", name), nil
-	}
+	// Closed means closed, whatever the call names: an unknown tool after
+	// the close used to get "unknown tool" and no EndTurn.
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
+	}
+	// Every refusal below returns before the shared failure bookkeeping at
+	// the end, so each one goes through refuse: an identical refused call
+	// counts toward the same identical-failure brake as a failed one. Without
+	// it atom-local sent fs_read {} 22 times in a row in TI-36X T-005
+	// (r-20261004-212715-5xxh, round 2), each answered "needs a path", and
+	// spent the reply's whole call cap (B-499; B-492 was the same masking).
+	t, err := r.Get(name)
+	if err != nil {
+		return refuse(ectx, name, name+"\x00"+string(args), ErrorResult("unknown tool %q", name)), nil
 	}
 	// One spelling for every policy below and in the tool: the lane, the test
 	// globs, protected globs and the messages all compare the path as given,
 	// so "/tests/x" must arrive as "tests/x" (review of #145).
 	args = canonicalPathArgs(ectx, name, args)
+	sig := name + "\x00" + string(args)
 	// A file tool with no path used to resolve "" to the project root and
 	// answer "read: read <root>: is a directory" — which never says the
 	// argument is missing; atom-local repeated such calls seven times in
 	// TI-36X T-004 (B-497). Say it, before any boundary can hide it.
 	if pathRequired[name] && argPath(args) == "" {
-		return ErrorResult("%s needs a \"path\": the project-relative file to act on, e.g. {\"path\": \"logic.mjs\"}", name), nil
+		return refuse(ectx, name, sig, ErrorResult("%s needs a \"path\": the project-relative file to act on, e.g. {\"path\": \"logic.mjs\"}", name)), nil
 	}
 	explorationLimit := ectx.effectiveExplorationCallLimit()
 	if explorationTool[name] && (ectx.ReadToolsClosed || ectx.explorationCalls >= explorationLimit) {
@@ -403,7 +412,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		if root, ok := toolPathRoot(ectx, name, args); ok {
 			if path := argPath(args); path != "" {
 				if _, err := PathJail(root, path); err != nil {
-					return ErrorResult("jail: %v", err), nil
+					return refuse(ectx, name, sig, ErrorResult("jail: %v", err)), nil
 				}
 			}
 		}
@@ -415,9 +424,12 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 				"Answer now, in text: the exact edit you would make next (file, lines, the new text) and why — or the blocker that stops you. " +
 				"The next attempt starts from that answer, so make it concrete."}, nil
 		}
+		// Counted, but not escalated: identical boundary refusals reach
+		// ResearchRefusalLimit (5) before RepeatFailEndTurn (6), and the
+		// boundary's own wording must survive refusals 4 and 5 (B-492).
+		ectx.noteFailure(sig)
 		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker. Repeated read requests close every tool for this reply.", explorationLimit), nil
 	}
-	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
 			if ectx.fsPatchRefusalStreak == nil {
@@ -430,7 +442,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			if refusals >= FSPatchRefusalLimit {
 				message += "; end your reply so the next turn can use the rewrite remedy."
 			}
-			return &Result{IsError: true, Content: message}, nil
+			return refuse(ectx, name, sig, &Result{IsError: true, Content: message}), nil
 		}
 	}
 	// A document is read as an artifact, not as a file: artifact_read knows
@@ -439,8 +451,8 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	// requirements and spec twice each, once per tool — Neocapture).
 	if name == "fs_read" {
 		if kind := artifactKindOfPath(args); kind != "" {
-			return ErrorResult("%s is a project document — read it with artifact_read {\"kind\":%q} "+
-				"(it knows the sections and any pending proposal). If you already did, the text is above: use it.", fsReadPath(args), kind), nil
+			return refuse(ectx, name, sig, ErrorResult("%s is a project document — read it with artifact_read {\"kind\":%q} "+
+				"(it knows the sections and any pending proposal). If you already did, the text is above: use it.", fsReadPath(args), kind)), nil
 		}
 	}
 	// Reading the same thing twice in one turn changes nothing: the first
@@ -460,8 +472,8 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		case 0:
 		case 1:
 			ectx.turnReads[sig]++
-			return ErrorResult("REPEATED READ: you already called %s with these exact arguments in this turn, "+
-				"and its result is above in this conversation. Use it; do not read again.", name), nil
+			return refuse(ectx, name, sig, ErrorResult("REPEATED READ: you already called %s with these exact arguments in this turn, "+
+				"and its result is above in this conversation. Use it; do not read again.", name)), nil
 		case 2:
 			// Served once more, with a reminder (a seat that cannot act on
 			// "it is above" is not stranded).
@@ -473,22 +485,11 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			// a build implementer hit this brake, then had its complete repair
 			// rejected by fs_write and could not verify it (T-004, run 53).
 			ectx.ReadToolsClosed = true
-			return ErrorResult("REFUSED, and read-only tools are now CLOSED for this reply: %s with these arguments has been served twice already in this turn. You have everything; stop exploring. You may still write, patch, verify, or answer.", name), nil
+			return refuse(ectx, name, sig, ErrorResult("REFUSED, and read-only tools are now CLOSED for this reply: %s with these arguments has been served twice already in this turn. You have everything; stop exploring. You may still write, patch, verify, or answer.", name)), nil
 		}
 	}
-	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
-		ectx.lastFailCount++
-		if ectx.lastFailCount >= RepeatFailEndTurn {
-			ectx.ToolsClosed = true
-			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
-				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
-					"and you kept repeating it. Answer now with what you already have — your next message must be "+
-					"your final reply, not a tool call.", name, ectx.lastFailCount)}, nil
-		}
-		return &Result{IsError: true, Content: fmt.Sprintf(
-			"REFUSED: you have made this exact failing call %d times — %s with the same "+
-				"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
-				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
+	if brake := repeatFailBrake(ectx, name, sig); brake != nil {
+		return brake, nil
 	}
 	// A seat that keeps searching and keeps finding nothing is looking for
 	// something that is not there — 21 fs_search calls at 50 s each on an
@@ -496,9 +497,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	// identical-call brake, so misses are counted in a row.
 	if name == "fs_search" && ectx.searchMisses >= SearchMissLimit {
 		ectx.searchMisses = 0
-		return ErrorResult("STOP SEARCHING: %d searches in a row found nothing. What you are looking for is not in "+
+		return refuse(ectx, name, sig, ErrorResult("STOP SEARCHING: %d searches in a row found nothing. What you are looking for is not in "+
 			"the tree — either the project has no such code yet, or the id you search for is not a section "+
-			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit), nil
+			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit)), nil
 	}
 	res, err := t.Execute(ctx, ectx, args)
 	if explorationTool[name] {
@@ -544,11 +545,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		trackFSPatchFailure(ectx, args, res)
 	}
 	if res != nil && res.IsError {
-		if ectx.lastFailSig == sig {
-			ectx.lastFailCount++
-		} else {
-			ectx.lastFailSig, ectx.lastFailCount = sig, 1
-		}
+		ectx.noteFailure(sig)
 	} else {
 		ectx.lastFailSig, ectx.lastFailCount = "", 0
 		if readOnlyTool[name] && ectx.turnReads != nil {
@@ -569,6 +566,50 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+// noteFailure records one failed call with signature sig for the
+// identical-failure brake: the count runs while the same call keeps failing.
+func (e *ExecContext) noteFailure(sig string) {
+	if e.lastFailSig == sig {
+		e.lastFailCount++
+	} else {
+		e.lastFailSig, e.lastFailCount = sig, 1
+	}
+}
+
+// repeatFailBrake refuses a call that has already failed RepeatFailLimit
+// times with these exact arguments, and closes tool use for the reply at
+// RepeatFailEndTurn. It returns nil when the call may go ahead.
+func repeatFailBrake(ectx *ExecContext, name, sig string) *Result {
+	if ectx.lastFailCount < RepeatFailLimit || ectx.lastFailSig != sig {
+		return nil
+	}
+	ectx.lastFailCount++
+	if ectx.lastFailCount >= RepeatFailEndTurn {
+		ectx.ToolsClosed = true
+		return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
+			"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
+				"and you kept repeating it. Answer now with what you already have — your next message must be "+
+				"your final reply, not a tool call.", name, ectx.lastFailCount)}
+	}
+	return &Result{IsError: true, Content: fmt.Sprintf(
+		"REFUSED: you have made this exact failing call %d times — %s with the same "+
+			"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
+			"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}
+}
+
+// refuse sends an early refusal from Execute through the identical-failure
+// brake (B-499): a call refused before it ran is a failed call, so the same
+// refused call repeated is refused with orders to change it past
+// RepeatFailLimit and closes tool use at RepeatFailEndTurn, exactly as a
+// failure the tool itself reported would.
+func refuse(ectx *ExecContext, name, sig string, res *Result) *Result {
+	if brake := repeatFailBrake(ectx, name, sig); brake != nil {
+		return brake
+	}
+	ectx.noteFailure(sig)
+	return res
 }
 
 func (e *ExecContext) effectiveExplorationCallLimit() int {
