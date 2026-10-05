@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section, RosterEntry } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables, questionOptions } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -15,6 +15,7 @@ import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
+import { QuestionOptions } from "../components/QuestionOptions";
 import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
@@ -72,6 +73,9 @@ function evidencedVerdictLabel(run: Run): string {
   if (run.review_evidence.status === "not_seated") return "gates passed · no reviewer seated";
   if (run.review_evidence.status === "approved" && run.review_evidence.independence === "self") return "gates passed · self-reviewed";
   if (run.review_evidence.status === "approved" && run.review_evidence.independence === "independent") return "passed · independent review";
+  // B-501: a test-first passes on its gate alone; the record says when the
+  // reviewer still objected.
+  if (run.review_evidence.status === "dissent") return "passed · reviewer still requests changes";
   return base;
 }
 
@@ -697,7 +701,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   );
   // A green gate over an unconvinced reviewer must not be silent (T-028:
   // three straight request-changes verdicts under "tests passed").
-  const dissent = run.verdict === "PASSED" ? reviewerDissent(turns) : null;
+  // B-501: a test-first's verdict is the gate's red, and its UNVERIFIED (the
+  // suite was already red) still offers Accept — a standing objection is
+  // owed to the person deciding either, framed as the oracle it would lock in.
+  const testFirstRun = run.stage === "test";
+  const dissentFound = run.verdict === "PASSED" || (testFirstRun && run.verdict === "UNVERIFIED")
+    ? reviewerDissent(turns)
+    : null;
+  const dissent = dissentFound ? { ...dissentFound, testFirst: testFirstRun } : null;
   // Any final findings at all — an approval "with two minor findings" found
   // real work too; approval means "not worth blocking", not "not worth
   // remembering". Filing them as bugs puts them in the loop instead of in a
@@ -1703,13 +1714,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           data-testid="reviewer-dissent"
           className="m-2 rounded-card border border-serious p-3"
         >
-          <StatusChip role="serious" label="green gate, unconvinced reviewer" />
+          <StatusChip role="serious" label={dissent.testFirst ? "red test, reviewer still requests changes" : "green gate, unconvinced reviewer"} />
           <p className="mt-1 text-sm text-ink">
-            The tests pass, but the reviewer's last verdict was “{dissent.verdict}”
+            {dissent.testFirst ? "The test fails as a specification should, but" : "The tests pass, but"} the reviewer's last verdict was “{dissent.verdict}”
             {dissent.findings > 0 &&
               ` with ${dissent.findings} finding${dissent.findings === 1 ? "" : "s"}`}
-            {" "}and its rounds ran out. The gate decides the verdict; the reviewer only
-            advises:
+            {" "}and its rounds ran out. {dissent.testFirst
+              ? "An accepted test-first test is the build's oracle; these objections were not resolved:"
+              : "The gate decides the verdict; the reviewer only advises:"}
           </p>
           <ul className="mt-2 space-y-1 text-sm" data-testid="dissent-findings-list">
             {dissent.notes.map((n, i) => (
@@ -2168,6 +2180,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
+              <QuestionOptions
+                options={pending.options ?? questionOptions(run.pending_data?.options)}
+                onChoose={(option) => client.answer(runId, pending.questionId ?? "", option).catch(() => {})}
+                testId="question-option"
+              />
               {pending.advisorPending && (
                 <p className="mt-1 text-sm text-ink-muted" data-testid="advisor-pending"><span className="cog-turn" aria-hidden="true">⚙</span> {pending.advisorPending} is preparing a recommendation</p>
               )}

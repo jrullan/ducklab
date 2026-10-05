@@ -18,10 +18,28 @@ function waitingExplanation(run: Run): string {
   if (run.pending_kind === "dissent") {
     return "This task finished, but a reviewer disagreed — it is waiting for your decision.";
   }
+  if (run.stage === "test" && gateDissent(run)) {
+    return "The failing test is written, but its reviewer still requests changes — accepting locks it in as the build's oracle.";
+  }
   if (run.verdict === "UNVERIFIED") {
     return "This task finished without verified tests — it is waiting for your decision.";
   }
   return "This task finished and passed its tests — it is waiting for your decision.";
+}
+
+type GateFinding = { severity?: string; file?: string; line?: number; issue?: string };
+
+/** The engine's standing-objection record on a gate (B-501): the reviewer's
+ * last verdict did not approve, and these are its blocking findings. Read
+ * from pending_data, because this card has no transcript to derive it from —
+ * which is why TI-36X T-005 sat on Now as a bare "passed". */
+function gateDissent(run: Run): { verdict: string; findings: GateFinding[]; total: number } | null {
+  const data = run.pending_data;
+  const verdict = typeof data?.dissent === "string" ? data.dissent : "";
+  if (run.pending_kind !== "gate" || !verdict) return null;
+  const findings = Array.isArray(data?.dissent_findings) ? (data!.dissent_findings as GateFinding[]) : [];
+  const total = typeof data?.dissent_total === "number" ? data.dissent_total : findings.length;
+  return { verdict, findings, total };
 }
 
 /** A run waiting at its gate, decidable in place: buttons from the engine's
@@ -52,6 +70,12 @@ export function WaitingCard({
   const [changesOpen, setChangesOpen] = useState(false);
   const [changes, setChanges] = useState("");
   const [changesBusy, setChangesBusy] = useState(false);
+  // B-501: the objections are offered for filing where the decision is,
+  // through the same engine door the run view's decision card uses.
+  const dissent = gateDissent(run);
+  const [filed, setFiled] = useState<string[] | null>(null);
+  const [filing, setFiling] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
@@ -99,6 +123,57 @@ export function WaitingCard({
       <p className="mt-2 text-sm text-ink-secondary" data-testid="waiting-explanation">
         {waitingExplanation(run)}
       </p>
+      {dissent && (
+        <div className="mt-2 rounded border border-serious p-2" data-testid="waiting-dissent">
+          <span className="text-xs font-medium text-serious">
+            {run.verdict ? `${run.verdict.toLowerCase()} — ` : ""}reviewer still requests changes
+          </span>
+          <p className="mt-1 text-xs text-ink">
+            The reviewer's last verdict was “{dissent.verdict}”
+            {dissent.total > 0 && ` with ${dissent.total} finding${dissent.total === 1 ? "" : "s"}`}
+            {dissent.findings.length > 0 && `, ${dissent.findings.length} blocking`}.
+          </p>
+          {dissent.findings.length > 0 && (
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-ink-secondary" data-testid="waiting-dissent-findings">
+              {dissent.findings.map((f, i) => (
+                <li key={i}>
+                  {f.severity && <span className="text-serious">{f.severity}: </span>}
+                  {f.issue}
+                  {f.file && f.file !== "*" && <span className="font-mono text-ink-muted"> ({f.file}{f.line ? `:${f.line}` : ""})</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {client && dissent.total > 0 && (
+            <div className="mt-1 text-xs">
+              {filed ? (
+                <span data-testid="waiting-findings-filed">
+                  filed as {filed.join(", ")} — <a href={routeHref({ name: "board", tab: "bugs" })} className="underline">see the bugs board</a>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="waiting-file-findings"
+                  disabled={filing}
+                  onClick={() => {
+                    setFiling(true);
+                    setFileError(null);
+                    void client
+                      .runFileFindings(run.id)
+                      .then((r) => setFiled(r.items.map((b) => b.id)))
+                      .catch((e) => setFileError(e instanceof Error ? e.message : String(e)))
+                      .finally(() => setFiling(false));
+                  }}
+                  className="rounded border border-hairline px-2 py-1 disabled:opacity-40"
+                >
+                  {filing ? "Filing…" : `File ${dissent.total} finding${dissent.total === 1 ? "" : "s"} as bugs`}
+                </button>
+              )}
+              {fileError && <p className="mt-1 text-critical" data-testid="waiting-file-findings-error">{fileError}</p>}
+            </div>
+          )}
+        </div>
+      )}
       {landedAs && (
         <p className="mt-1 rounded border border-warning px-2 py-1 text-xs text-ink" data-testid="landed-notice">
           This task already landed as <span className="font-mono">{landedAs.slice(0, 7)}</span> — accepting this re-run lands a second change on top of it. Only accept a deliberate redo.

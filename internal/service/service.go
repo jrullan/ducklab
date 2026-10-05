@@ -3060,6 +3060,16 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 			}
 		}
 	}
+	// B-501: standing reviewer objections are a person's decision. A
+	// test-first test accepted here becomes the build's oracle (B-490), and
+	// the tdd chain (auto:tdd) and yolo (auto:yolo) accept with nobody
+	// reading; the executors already pause instead, and this is the floor
+	// under every unattended path that reaches acceptance some other way.
+	if strings.HasPrefix(actor, "auto:") && rs.run.PendingKind == "gate" &&
+		stringValueAny(rs.run.PendingData["dissent"]) != "" {
+		return fmt.Errorf("the reviewer still requests changes (%s); an unattended accept cannot decide that — a person must accept or reject this run",
+			stringValueAny(rs.run.PendingData["dissent"]))
+	}
 	if rs.run.PendingKind == "gate" && stringValueAny(rs.run.PendingData["review_verdict"]) != "" &&
 		stringValueAny(rs.run.PendingData["review_verdict"]) != "approve" {
 		return fmt.Errorf("final reviewer requested changes; revise or reject this proposal before accepting")
@@ -5335,7 +5345,7 @@ func (s *Service) approveOfferedLaneWidening(rs *runState, current *runlog.Run, 
 	if err != nil {
 		return nil, fmt.Errorf("read accepted plan before lane widening: %w", err)
 	}
-	added, err := widenTaskLane(entry.Path, current.TaskID, requested)
+	added, err := widenTaskLane(entry.Path, current.TaskID, requested, current.WorktreePath)
 	if err != nil {
 		return nil, err
 	}
@@ -5454,13 +5464,14 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author,
 	// The question's text travels with the answer: the id survives only an
 	// exact re-ask, and the replayed prompt needs the words.
 	questionText, _ := rs.run.PendingData["question"].(string)
-	if rs.givenAnswers == nil {
-		rs.givenAnswers = map[string]string{}
-	}
-	rs.givenAnswers[questionID] = answer
-	if questionText != "" {
-		rs.qa = append(rs.qa, qaPair{q: questionText, a: answer})
-	}
+	// TI-36X T-005 (B-498): "Use option 2" was recorded as typed and the
+	// replay could not know what option 2 said. Every answer path — desktop,
+	// CLI, MCP, the advisor's yolo draft — lands here, so the choice is
+	// expanded once, before anything stores or compares it.
+	options := stringSliceValue(rs.run.PendingData["options"])
+	typed := answer
+	answer, chosen := resolveOptionAnswer(typed, options)
+	rs.recordAnswerLocked(questionID, questionText, options, answer)
 	rs.wmu.Unlock()
 
 	w, err := s.ensureWriter(rs)
@@ -5472,6 +5483,12 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author,
 		"question_id": questionID,
 		"question":    questionText,
 		"answer":      answer,
+	}
+	if chosen > 0 && answer != typed {
+		// The record stays honest: what the person typed, beside the option
+		// it selected.
+		event["answer_raw"] = typed
+		event["option"] = chosen
 	}
 	if author != "" {
 		event["author"] = author

@@ -824,7 +824,7 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		return nil, fmt.Errorf("load project config for promotion lane: %w", err)
 	}
 	if len(out) == 1 && strings.EqualFold(strings.TrimSpace(rec.TestStrategy), "test-first") {
-		for _, path := range promotionNamedTestPaths(rec, cfg.Verify.TestGlobs) {
+		for _, path := range promotionNamedTestPaths(projectRoot, rec, cfg.Verify.TestGlobs) {
 			add(0, path, "test-first suite named by triage")
 		}
 	}
@@ -897,19 +897,21 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 	return out, nil
 }
 
-func promotionNamedTestPaths(rec *store.Bug, globs []string) []string {
+func promotionNamedTestPaths(projectRoot string, rec *store.Bug, globs []string) []string {
 	if rec == nil {
 		return nil
 	}
 	// SuspectedFiles is where the triage contract puts concrete paths. The
 	// behavioural test reason often names no file at all (TI-36X B-003), so
 	// ignoring this field silently dropped the exact suite test-first needed.
+	// Text becomes Owns here, so it must name a real or plausible new file
+	// (B-503: prose like `angle/2nd/menu` was offered as a lane).
 	text := rec.TestReason + "\n" + rec.Deliverables + "\n" + rec.SuspectedFiles
 	seen := map[string]bool{}
 	var paths []string
 	for _, loc := range advisorPathPattern.FindAllStringIndex(text, -1) {
 		path := cleanLanePath(text[loc[0]:loc[1]])
-		if path == "" || seen[path] || !verify.ClaimsTestLane(path, globs) {
+		if path == "" || seen[path] || !verify.ClaimsTestLane(path, globs) || !plausibleLanePath(path, projectRoot) {
 			continue
 		}
 		seen[path] = true

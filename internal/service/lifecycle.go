@@ -587,6 +587,10 @@ func closedChan() chan struct{} {
 // asks the person the same thing again, in new words, forever.
 type qaPair struct {
 	q, a string
+	// options are the choices the question offered. TI-36X T-005 (B-498):
+	// without them beside the answer, a reference the resolver could not
+	// expand ("option 2, but skip the source field") means nothing on replay.
+	options []string
 }
 
 // answeredDecisions renders every answer this run has received, for
@@ -603,7 +607,14 @@ func (rs *runState) answeredDecisions() string {
 	b.WriteString("\n\n## Decisions the human already made for this run\n\n")
 	b.WriteString("A prior attempt asked; the person answered. These are binding — do not ask about them again, in any wording:\n\n")
 	for _, p := range rs.qa {
-		fmt.Fprintf(&b, "Q: %s\nA: %s\n\n", p.q, p.a)
+		fmt.Fprintf(&b, "Q: %s\n", p.q)
+		if len(p.options) > 0 {
+			b.WriteString("Options offered:\n")
+			for i, option := range p.options {
+				fmt.Fprintf(&b, "%d. %s\n", i+1, option)
+			}
+		}
+		fmt.Fprintf(&b, "A: %s\n\n", p.a)
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
@@ -639,12 +650,17 @@ func (rs *runState) answers() map[string]string {
 func (rs *runState) recordAnswer(id, question, answer string) {
 	rs.wmu.Lock()
 	defer rs.wmu.Unlock()
+	rs.recordAnswerLocked(id, question, nil, answer)
+}
+
+// recordAnswerLocked is recordAnswer for a caller already holding wmu.
+func (rs *runState) recordAnswerLocked(id, question string, options []string, answer string) {
 	if rs.givenAnswers == nil {
 		rs.givenAnswers = map[string]string{}
 	}
 	rs.givenAnswers[id] = answer
 	if question != "" {
-		rs.qa = append(rs.qa, qaPair{q: question, a: answer})
+		rs.qa = append(rs.qa, qaPair{q: question, a: answer, options: options})
 	}
 }
 
@@ -669,7 +685,7 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	}
 	if entry, err := s.registry.Get(rs.run.ProjectID); err == nil && rs.run.TaskID != "" {
 		text := q.Question + "\n" + strings.Join(q.Options, "\n")
-		if paths := advisorLaneConflicts(entry.Path, rs.run.TaskID, text); len(paths) > 0 {
+		if paths := advisorLaneConflicts(entry.Path, rs.run.TaskID, text, runRoot(rs.run, entry.Path)); len(paths) > 0 {
 			rs.run.PendingData["lane_widening"] = paths
 		}
 	}
