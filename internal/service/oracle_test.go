@@ -185,28 +185,30 @@ func TestAChainedBuildIsBriefedOnItsOracle(t *testing.T) {
 	if !slices.Equal(build.OracleTests, []string{"tests/thing.test.mjs"}) {
 		t.Errorf("build oracle tests = %v", build.OracleTests)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	// Wait for the briefed request itself, not the first request: other calls
+	// (capability probes) can reach the provider before the implementer's
+	// turn, and under load they did — the check then ran on 4 unrelated
+	// requests and failed.
+	briefed := func() (bool, int) {
 		rec.mu.Lock()
-		n := len(rec.requests)
-		rec.mu.Unlock()
-		if n > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	briefed := false
-	for _, req := range rec.requests {
-		for _, m := range req.Messages {
-			if strings.Contains(m.Content, "## The tests that decide this task") && strings.Contains(m.Content, "`tests/thing.test.mjs`") {
-				briefed = true
+		defer rec.mu.Unlock()
+		for _, req := range rec.requests {
+			for _, m := range req.Messages {
+				if strings.Contains(m.Content, "## The tests that decide this task") && strings.Contains(m.Content, "`tests/thing.test.mjs`") {
+					return true, len(rec.requests)
+				}
 			}
 		}
+		return false, len(rec.requests)
 	}
-	if !briefed {
-		t.Errorf("the chained build's implementer was not briefed on its oracle (%d requests)", len(rec.requests))
+	deadline := time.Now().Add(15 * time.Second)
+	ok, n := briefed()
+	for !ok && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		ok, n = briefed()
+	}
+	if !ok {
+		t.Errorf("the chained build's implementer was not briefed on its oracle (%d requests)", n)
 	}
 }
 
