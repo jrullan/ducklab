@@ -181,6 +181,41 @@ type FailedAttempt struct {
 	Mode    string
 	Summary string
 	Gate    string
+	// Visual is that run's visual check result. It measured that run's code,
+	// and is rendered labelled as such (B-508).
+	Visual string
+}
+
+// carriedVisualMarker begins the line that carries another run's visual
+// result, so a run that has rendered its own tree can supersede it.
+const carriedVisualMarker = "  - Visual result carried from run "
+
+// carriedVisualLine labels another run's visual figure. TI-36X T-008
+// r-20261005-012549-uvns: "44.5% of pixels (allowed 2.0%)" rode the build
+// prompt unlabelled from r-20261005-004552-4tpn, and luna reported "the
+// earlier render comparison reported a 44.5% difference before the gutter
+// adjustment" — a figure for code it never rendered, cited as its own.
+func carriedVisualLine(runID, summary string) string {
+	return fmt.Sprintf("%s%s — it measured that run's code, not this run's tree: %s\n", carriedVisualMarker, runID, strings.TrimSpace(summary))
+}
+
+// SupersedeCarriedVisual replaces each carried visual result with a pointer
+// to the run's own measurement, once the run has one: two figures for two
+// trees side by side are how the wrong one gets cited.
+func SupersedeCarriedVisual(prompt string) string {
+	if !strings.Contains(prompt, carriedVisualMarker) {
+		return prompt
+	}
+	lines := strings.Split(prompt, "\n")
+	for i, line := range lines {
+		rest, ok := strings.CutPrefix(line, carriedVisualMarker)
+		if !ok {
+			continue
+		}
+		id, _, _ := strings.Cut(rest, " ")
+		lines[i] = carriedVisualMarker + id + " — superseded: this run has rendered its own tree, and its own measurement is given below."
+	}
+	return strings.Join(lines, "\n")
 }
 
 // RenderFailedAttempts formats prior failures for an implementer prompt.
@@ -200,6 +235,9 @@ func RenderFailedAttempts(attempts []FailedAttempt) string {
 			fmt.Fprintf(&b, "; gate: %s", strings.TrimSpace(a.Gate))
 		}
 		b.WriteString("\n")
+		if strings.TrimSpace(a.Visual) != "" {
+			b.WriteString(carriedVisualLine(a.RunID, a.Visual))
+		}
 	}
 	return b.String()
 }

@@ -152,7 +152,18 @@ func incompleteDeliverables(r *DeliverablesReport, n int, ignored ...map[int]boo
 }
 
 func reportWithoutManualItems(r *DeliverablesReport, n int, manual map[int]bool) *DeliverablesReport {
-	if r == nil || len(manual) == 0 {
+	return reportWithoutItems(r, n, manual, "awaits human verification")
+}
+
+// harnessMeasuredNote marks a slice the visual check measures (B-506).
+const harnessMeasuredNote = "measured by the harness's visual check"
+
+// reportWithoutItems takes slices someone other than the implementer settles
+// out of its report: the person (manual) or the harness's visual check. They
+// read as done with the note saying who settles them, so no consumer of the
+// report — distress, stuck items, the approval gap — counts them against it.
+func reportWithoutItems(r *DeliverablesReport, n int, ids map[int]bool, note string) *DeliverablesReport {
+	if r == nil || len(ids) == 0 {
 		return r
 	}
 	out := &DeliverablesReport{Unreported: r.Unreported}
@@ -160,16 +171,17 @@ func reportWithoutManualItems(r *DeliverablesReport, n int, manual map[int]bool)
 	seen := map[int]bool{}
 	for i := range out.Items {
 		seen[out.Items[i].ID] = true
-		if manual[out.Items[i].ID] {
+		if ids[out.Items[i].ID] {
 			out.Items[i].Status = "done"
-			out.Items[i].Note = "awaits human verification"
+			out.Items[i].Note = note
 		}
 	}
 	for id := 1; id <= n; id++ {
-		if manual[id] && !seen[id] {
-			out.Items = append(out.Items, DeliverableStatus{ID: id, Status: "done", Note: "awaits human verification"})
+		if ids[id] && !seen[id] {
+			out.Items = append(out.Items, DeliverableStatus{ID: id, Status: "done", Note: note})
 		}
 	}
+	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].ID < out.Items[j].ID })
 	return out
 }
 
@@ -272,7 +284,11 @@ func deliverablesContract(items []string) string {
 // deliverablesForReviewer renders the statuses as data — ids and states,
 // none of the implementer's notes (I7: the reviewer must not read the
 // author's rationalisation).
-func deliverablesForReviewer(items []string, rep *DeliverablesReport) string {
+//
+// A slice in measured is the visual check's (B-506): its status reads
+// "measured_by_harness", and the measurement itself follows in its own
+// section — the implementer's word on it is evidence of nothing.
+func deliverablesForReviewer(items []string, rep *DeliverablesReport, measured map[int]bool) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -289,7 +305,11 @@ func deliverablesForReviewer(items []string, rep *DeliverablesReport) string {
 	}
 	var lines []line
 	for _, it := range rep.Items {
-		lines = append(lines, line{it.ID, it.Status})
+		status := it.Status
+		if measured[it.ID] {
+			status = "measured_by_harness"
+		}
+		lines = append(lines, line{it.ID, status})
 	}
 	data, _ := json.Marshal(map[string]interface{}{"reported": lines, "not_reported": rep.Missing(len(items))})
 	b.WriteString("\n```json\n" + string(data) + "\n```\n\n")

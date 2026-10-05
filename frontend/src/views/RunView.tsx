@@ -2291,6 +2291,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   reasoning={t.messageOnly || !t.streamKey ? t.reasoning : (reasoning[t.streamKey] ?? t.reasoning)}
                   collapsed={isCollapsed}
                   deliverableTexts={deliverables?.lines.map((l) => l.text)}
+                  deliverableMeasured={deliverables?.measured}
                   onToggle={
                     foldable
                       ? () => setTurnChoice((c) => ({ ...c, [turnKey]: isCollapsed }))

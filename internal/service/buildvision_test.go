@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -108,11 +109,21 @@ func visionPairBuild(t *testing.T, mode string, reviewerSees, render bool) ([]pr
 		t.Fatal(err)
 	}
 	fake := s.providers["fake"].(*provider.Fake)
+	// Every implementer turn changes the tree (B-505 renders only a changed
+	// tree), then reports.
+	edits := 0
 	fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+		toolResult := false
 		for _, m := range req.Messages {
 			if m.Role == "system" && strings.Contains(m.Content, "You are the reviewer") {
 				return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: `{"verdict":"approve","findings":[]}`}, FinishReason: provider.FinishStop}}}
 			}
+			toolResult = toolResult || m.Role == "tool" || (m.Role == "user" && strings.HasPrefix(m.Content, "Tool result for "))
+		}
+		if !toolResult {
+			edits++
+			return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant",
+				ToolCalls: []provider.ToolCall{fakeToolCall("fs_write", fmt.Sprintf(`{"path":"index.html","content":"<p>calc %d</p>"}`, edits))}}, FinishReason: provider.FinishToolCalls}}}
 		}
 		return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: `Built it. {"deliverables":[{"id":1,"status":"done"}]}`}, FinishReason: provider.FinishStop}}}
 	}
@@ -135,6 +146,12 @@ func visionPairBuild(t *testing.T, mode string, reviewerSees, render bool) ([]pr
 		t.Fatal(err)
 	}
 	return fake.Requests(), events, ref
+}
+
+func fakeToolCall(name, args string) provider.ToolCall {
+	call := provider.ToolCall{ID: "call-" + name, Type: "function"}
+	call.Function.Name, call.Function.Arguments = name, args
+	return call
 }
 
 // requestOf returns the first user message of the first request of a role.
@@ -202,6 +219,10 @@ func TestB504APairBuildShowsTheCitedReferenceToSeeingSeats(t *testing.T) {
 // judges a render of the candidate it reviews — capture and diff beside the
 // photo — where r-20261005-004552-4tpn's reviewer approved a 44.5% mismatch
 // it never saw. The final gate still renders under the run's own names.
+//
+// Since B-505 the run's first implementer turn is rendered too (the starting
+// tree: until then the only figure a seat could read was another run's), and
+// the review is rendered because the implementer changed the tree.
 func TestB504ASeeingReviewerJudgesARenderOfTheCandidate(t *testing.T) {
 	reqs, events, ref := visionPairBuild(t, "pair", true, true)
 	rev := requestOf(reqs, true)
@@ -215,8 +236,8 @@ func TestB504ASeeingReviewerJudgesARenderOfTheCandidate(t *testing.T) {
 		t.Errorf("reviewer prompt lacks the mismatch figure:\n%s", rev.Content)
 	}
 	fb := eventsOf(events, "visual_feedback")
-	if len(fb) != 1 || fb[0].Data["ok"] != true || fb[0].Data["phase"] != "before review" {
-		t.Errorf("visual_feedback = %v, want one render before the review", fb)
+	if len(fb) != 2 || fb[0].Data["phase"] != "before implementer turn" || fb[1].Data["ok"] != true || fb[1].Data["phase"] != "before review" {
+		t.Errorf("visual_feedback = %v, want the starting tree and then a render before the review", fb)
 	}
 	var final bool
 	for _, e := range eventsOf(events, "visual_compare") {
@@ -233,18 +254,24 @@ func TestB504ASeeingReviewerJudgesARenderOfTheCandidate(t *testing.T) {
 
 // Solo has no reviewer to render before: each round gate renders the tree
 // the implementer just changed, and the next round's implementer starts from
-// it. (This fixture's solo runs three rounds: its gate never goes green.)
+// it — its own measurement finds the tree unchanged and renders nothing. The
+// first render is the starting tree, before round 1's implementer (B-505).
+// (This fixture's solo runs three rounds: its gate never goes green.)
 func TestB504ASoloBuildRendersAtTheRoundGate(t *testing.T) {
 	reqs, events, ref := visionPairBuild(t, "solo", true, true)
 	rounds := len(eventsOf(events, "round_gate"))
 	fb := eventsOf(events, "visual_feedback")
-	if rounds < 2 || len(fb) != rounds {
-		t.Fatalf("visual_feedback = %d over %d rounds, want one render per round gate", len(fb), rounds)
+	if rounds < 2 || len(fb) != rounds+1 {
+		t.Fatalf("visual_feedback = %d over %d rounds, want the starting tree and one render per round gate", len(fb), rounds)
 	}
-	for _, e := range fb {
+	for i, e := range fb {
 		shown, _ := e.Data["shown"].([]interface{})
-		if e.Data["ok"] != true || e.Data["phase"] != "after round gate" || len(shown) != 2 {
-			t.Errorf("visual_feedback = %v, want the capture and its diff after the round gate", e.Data)
+		phase := "after round gate"
+		if i == 0 {
+			phase = "before implementer turn"
+		}
+		if e.Data["ok"] != true || e.Data["phase"] != phase || len(shown) != 2 {
+			t.Errorf("visual_feedback %d = %v, want the capture and its diff %s", i, e.Data, phase)
 		}
 	}
 	var withFeedback int
@@ -448,7 +475,7 @@ func TestB504ATaskCitingNoReferenceIsUntouched(t *testing.T) {
 		[]config.Role{config.RoleImplementer}, func(string, map[string]interface{}) { events++ })
 	// Even in a project with a visual check: a logic task is not rendered
 	// for between rounds.
-	v = v.withFeedback(t.TempDir(), func(context.Context) (*runlog.VisualGate, []string, error) {
+	v = v.withFeedback(t.TempDir(), nil, func(context.Context) (*runlog.VisualGate, []string, error) {
 		t.Fatal("rendered for a task citing nothing")
 		return nil, nil, nil
 	})
@@ -529,6 +556,13 @@ func TestB504ATurnsImagesAreBoundedInTotal(t *testing.T) {
 // After a round whose gate rendered the candidate, the next round's seeing
 // implementer gets the capture and its diff with the mismatch figure; the
 // seeing reviewer after it gets a fresh render of the tree it judges.
+//
+// B-505 rewrote the counts: a render follows the tree, not the seats. The
+// first implementer turn is shown the starting tree (#163 showed it the
+// reference only, and TI-36X's luna then cited another run's 44.5% as its
+// own — B-508); each reviewer is rendered because the implementer changed the
+// tree; round 2's implementer finds the tree the reviewer was shown and
+// renders nothing.
 func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 	_, v, dir, events := visionFixture(t, true, true)
 	writer, err := runlog.NewWriter(dir, &runlog.Run{ID: "r-b504-feedback", ProjectID: "p", Stage: "build"})
@@ -537,8 +571,8 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 	}
 	t.Cleanup(func() { writer.Close() })
 	contract := config.RenderContract{Compare: []config.RenderCompare{{Capture: "calculator.png", Reference: visionRefID}}}
-	renders := 0
-	v.withFeedback(writer.RunDir(), func(context.Context) (*runlog.VisualGate, []string, error) {
+	renders, tree := 0, 0
+	v.withFeedback(writer.RunDir(), func() (string, error) { return fmt.Sprint("tree ", tree), nil }, func(context.Context) (*runlog.VisualGate, []string, error) {
 		renders++
 		// A capture that is half right: the mismatch is a real figure.
 		capture := image.NewRGBA(image.Rect(0, 0, 8, 16))
@@ -571,6 +605,7 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 				}
 				return approve()
 			}
+			tree++
 			return &agent.Outcome{Text: "Built."}
 		}), roster),
 		Diff: func() (string, error) { return "diff", nil },
@@ -582,14 +617,11 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 	if len(seen) != 4 {
 		t.Fatalf("turns = %d, want two rounds of implementer and reviewer", len(seen))
 	}
-	// Round 1's implementer has nothing rendered yet: the reference only.
-	if len(seen[0].images) != 1 || strings.Contains(seen[0].prompt, "## Visual check") {
-		t.Errorf("round 1 implementer: %d images", len(seen[0].images))
-	}
-	// Every reviewer judges a fresh render, and round 2's implementer starts
+	// Every turn is shown a render of the tree it starts from: reference,
+	// capture, diff — and the figure in words. Round 2's implementer starts
 	// from the render taken before round 1's review (the reviewer changed
-	// nothing): reference, capture, diff — and the figure in words.
-	for i := 1; i < 4; i++ {
+	// nothing).
+	for i := 0; i < 4; i++ {
 		turn := seen[i]
 		if len(turn.images) != 3 {
 			t.Errorf("turn %d (%s, round %d): %d images, want reference, capture and diff", i, turn.role, turn.round, len(turn.images))
@@ -602,9 +634,10 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 			t.Errorf("turn %d (%s) was shown a stale render", i, turn.role)
 		}
 	}
-	// One render per reviewer turn; the round gates had nothing new to show.
-	if renders != 2 {
-		t.Errorf("renders = %d, want one before each review", renders)
+	// The starting tree, then one render per reviewer turn; the round gates
+	// and round 2's implementer had nothing new to show.
+	if renders != 3 {
+		t.Errorf("renders = %d, want the starting tree and one before each review", renders)
 	}
 	var feedback int
 	for _, e := range *events {
@@ -612,7 +645,7 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 			feedback++
 		}
 	}
-	if feedback != 2 {
+	if feedback != 3 {
 		t.Errorf("visual_feedback events = %d", feedback)
 	}
 	// The run's own capture names stay the final gate's: feedback evidence
@@ -620,14 +653,20 @@ func TestB504TheNextRoundSeesTheCaptureAndItsDiff(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(writer.RunDir(), "captures", "calculator.png")); !os.IsNotExist(err) {
 		t.Errorf("feedback left the final gate's capture name in place: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(writer.RunDir(), "captures", "feedback-02-visual-01-diff-calculator.png")); err != nil {
-		t.Errorf("the second render's diff is not kept: %v", err)
+	if _, err := os.Stat(filepath.Join(writer.RunDir(), "captures", "feedback-03-visual-01-diff-calculator.png")); err != nil {
+		t.Errorf("the third render's diff is not kept: %v", err)
 	}
 }
 
 // Solo has no reviewer to render before: the round gate renders after the
 // implementer changed the tree, so the next round's implementer sees it. A
 // blind seat in the same run gets the figure in words and no images.
+//
+// #163 skipped the render for a blind reviewer ("not worth a render") and
+// told it its figure predated the latest turn. Since B-505/B-506 the figure
+// is what a measured slice is judged by and what a blind seat reads, so the
+// blind reviewer is rendered like any seat; a figure is called outdated only
+// when the render after a change failed.
 func TestB504TheRoundGateRendersForTheNextImplementer(t *testing.T) {
 	_, v, dir, _ := visionFixture(t, true, false)
 	writer, err := runlog.NewWriter(dir, &runlog.Run{ID: "r-b504-solo", ProjectID: "p", Stage: "build"})
@@ -638,7 +677,12 @@ func TestB504TheRoundGateRendersForTheNextImplementer(t *testing.T) {
 	// On the run's record, as the build wires it: the resume reads it back.
 	v.emit = func(kind string, data map[string]interface{}) { writer.AppendEvent(kind, data) }
 	contract := config.RenderContract{Compare: []config.RenderCompare{{Capture: "calculator.png", Reference: visionRefID}}}
-	v.withFeedback(writer.RunDir(), func(context.Context) (*runlog.VisualGate, []string, error) {
+	tree, renders, broken := 0, 0, false
+	v.withFeedback(writer.RunDir(), func() (string, error) { return fmt.Sprint("tree ", tree), nil }, func(context.Context) (*runlog.VisualGate, []string, error) {
+		renders++
+		if broken {
+			return nil, nil, fmt.Errorf("the capture command timed out")
+		}
 		if err := writer.WriteCapture("calculator.png", solidPNG(t, 8, 16, color.White)); err != nil {
 			return nil, nil, err
 		}
@@ -646,7 +690,12 @@ func TestB504TheRoundGateRendersForTheNextImplementer(t *testing.T) {
 	})
 	gate := v.wrapGate(func(context.Context) (string, string, error) { return "red", "", nil })
 	var seen []seenTurn
-	run := v.wrap(recordingRunner(&seen, func(*strategy.Turn, int) *agent.Outcome { return &agent.Outcome{Text: "Built."} }), nil)
+	run := v.wrap(recordingRunner(&seen, func(t *strategy.Turn, _ int) *agent.Outcome {
+		if t.Role == config.RoleImplementer {
+			tree++
+		}
+		return &agent.Outcome{Text: "Built."}
+	}), nil)
 	impl := &strategy.Turn{Role: config.RoleImplementer}
 	if _, err := run(context.Background(), impl, "luna", "Implement T-001", nil, strategy.TurnContext{Round: 1}); err != nil {
 		t.Fatal(err)
@@ -667,16 +716,55 @@ func TestB504TheRoundGateRendersForTheNextImplementer(t *testing.T) {
 	if len(blind.images) != 0 || !strings.Contains(blind.prompt, "100.0% of pixels differ") || !strings.Contains(blind.prompt, "cannot see images") {
 		t.Errorf("blind reviewer: %d images, prompt:\n%s", len(blind.images), blind.prompt)
 	}
-	// The blind reviewer was not worth a render, and its stale render says so.
-	if !strings.Contains(blind.prompt, "predates the implementer's latest turn") {
-		t.Errorf("the blind reviewer was not told the render predates the latest turn")
+	// Starting tree, round 1's gate, and the blind reviewer's tree (round 2's
+	// implementer changed it); round 2's implementer had nothing new.
+	if renders != 3 || strings.Contains(blind.prompt, "predates the tree as it is now") {
+		t.Errorf("renders = %d, want 3 with the blind reviewer shown a current figure", renders)
 	}
+	// A capture command that breaks after a change: the old figure is marked
+	// outdated, and the same tree is not retried on every turn.
+	broken = true
+	if _, err := run(context.Background(), impl, "luna", "Implement T-001", nil, strategy.TurnContext{Round: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(context.Background(), &strategy.Turn{Role: config.RoleReviewer}, "glm52", "Review T-001", nil, strategy.TurnContext{Round: 3, Index: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(seen[4].prompt, "predates the tree as it is now") {
+		t.Errorf("a figure for an earlier tree was not marked outdated:\n%s", seen[4].prompt)
+	}
+	if _, _, err := gate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if renders != 4 {
+		t.Errorf("renders = %d, want one failed attempt for the changed tree, not one per turn", renders)
+	}
+	broken = false
 
 	// A resumed run restores the latest feedback from the record.
-	again := (&taskVision{svc: v.svc, roles: v.roles, cited: v.cited, refs: v.refs}).withFeedback(writer.RunDir(),
+	again := (&taskVision{svc: v.svc, roles: v.roles, cited: v.cited, refs: v.refs}).withFeedback(writer.RunDir(), nil,
 		func(context.Context) (*runlog.VisualGate, []string, error) { return nil, nil, nil })
 	urls, section, _, _ := again.forTurn(config.RoleImplementer, true)
 	if len(urls) != 3 || !strings.Contains(section, "100.0% of pixels differ") {
 		t.Errorf("resumed feedback: %d images, section:\n%s", len(urls), section)
+	}
+	// B-505: the restored feedback remembers the tree it showed. A resume on
+	// that same tree renders nothing; a resume after the tree moved does.
+	resumedRenders := 0
+	resumed := (&taskVision{svc: v.svc, roles: v.roles, cited: v.cited, refs: v.refs}).withFeedback(writer.RunDir(),
+		func() (string, error) { return fmt.Sprint("tree ", tree), nil },
+		func(context.Context) (*runlog.VisualGate, []string, error) {
+			resumedRenders++
+			return nil, nil, fmt.Errorf("no render in this test")
+		})
+	tree = 2 // the tree the last successful render showed (before round 3's turn)
+	resumed.measure(context.Background(), "before implementer turn", 3)
+	if resumedRenders != 0 {
+		t.Errorf("a resume on the rendered tree rendered it again")
+	}
+	tree = 9
+	resumed.measure(context.Background(), "before implementer turn", 3)
+	if resumedRenders != 1 {
+		t.Errorf("a resume on a changed tree was not rendered")
 	}
 }

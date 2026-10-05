@@ -137,6 +137,28 @@ func TestRenderFailedAttempts(t *testing.T) {
 	}
 }
 
+// B-508 (TI-36X T-008 r-20261005-012549-uvns): another run's visual figure
+// names that run and says it measured other code; once the run renders its
+// own tree, the line points to that instead and the figure is gone. A prompt
+// with no carried line is untouched.
+func TestACarriedVisualResultIsLabelledAndSupersedable(t *testing.T) {
+	got := RenderFailedAttempts([]FailedAttempt{{RunID: "r-20261005-004552-4tpn", Mode: "pair", Summary: "the gate stayed red",
+		Visual: "visual check failed: calculator.png differs from REF-IMG-6c63e390 in 44.5% of pixels (allowed 2.0%)"}})
+	want := "  - Visual result carried from run r-20261005-004552-4tpn — it measured that run's code, not this run's tree: visual check failed: calculator.png differs"
+	if !strings.Contains(got, want) {
+		t.Fatalf("carried figure not labelled:\n%s", got)
+	}
+	prompt := "## Your task\n\n" + got + "\n## Deliverables"
+	superseded := SupersedeCarriedVisual(prompt)
+	if strings.Contains(superseded, "44.5%") || !strings.Contains(superseded, "r-20261005-004552-4tpn — superseded: this run has rendered its own tree") ||
+		!strings.HasSuffix(superseded, "\n## Deliverables") {
+		t.Errorf("superseded:\n%s", superseded)
+	}
+	if plain := "## Your task\n\n- 44.5% is a number in the task body\n"; SupersedeCarriedVisual(plain) != plain {
+		t.Errorf("a prompt with no carried line was changed")
+	}
+}
+
 func TestNoFailedAttemptsRendersNothing(t *testing.T) {
 	if got := RenderFailedAttempts(nil); got != "" {
 		t.Errorf("rendered %q for no attempts", got)

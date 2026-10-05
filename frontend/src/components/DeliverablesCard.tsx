@@ -21,9 +21,13 @@ const MARK: Record<DeliverableLine["status"], { glyph: string; title: string; ro
 export function DeliverablesInline({
   items,
   texts,
+  measured,
 }: {
   items: { id: number; status: string; note?: string }[];
   texts?: string[];
+  /** Slices the harness's visual check measures (B-506): the mark is the
+   * implementer's word, and the row says who actually decides it. */
+  measured?: number[];
 }) {
   const done = items.filter((i) => i.status === "done").length;
   return (
@@ -45,6 +49,11 @@ export function DeliverablesInline({
                 <span className="text-ink-muted tabular-nums">{it.id}.</span>{" "}
                 {text ? <span className={it.status === "done" ? "text-ink-secondary" : "text-ink"}>{text}</span> : <span className="text-ink-muted">{m.title}</span>}
                 {it.note ? <div className="text-xs text-ink-muted break-words">— {it.note}</div> : null}
+                {measured?.includes(it.id) ? (
+                  <div className="text-xs text-ink-muted" data-testid="deliverable-measured">
+                    measured by the visual check, not by this report
+                  </div>
+                ) : null}
               </span>
             </li>
           );

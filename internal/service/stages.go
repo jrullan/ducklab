@@ -2513,13 +2513,34 @@ func (s *Service) failedAttempts(ctx context.Context, projectID, taskID string) 
 
 	out := make([]artifact.FailedAttempt, 0, len(failed))
 	for _, r := range failed {
+		gate, visual := splitVisualSummary(s.gateSummary(r))
+		if r.Visual != nil {
+			visual = visualGateSummary(r.Visual)
+		}
 		out = append(out, artifact.FailedAttempt{
 			RunID: r.ID, Mode: r.Mode,
 			Summary: s.runSummary(r),
-			Gate:    s.gateSummary(r),
+			Gate:    gate,
+			Visual:  visual,
 		})
 	}
 	return out
+}
+
+// splitVisualSummary takes the visual check's line out of a failed run's
+// gate tail: it is carried on its own, labelled with the run that measured
+// it (B-508), never inside the gate text where it reads as a figure for the
+// current tree.
+func splitVisualSummary(gate string) (string, string) {
+	var kept, visual []string
+	for _, line := range strings.Split(gate, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "visual check ") {
+			visual = append(visual, strings.TrimSpace(line))
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n")), strings.Join(visual, "; ")
 }
 
 // runSummary is derived from the run's own record, never by asking a model to

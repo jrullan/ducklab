@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -38,15 +40,25 @@ import (
 // is shown the cited images when its seat can see, and is told it cannot
 // when it cannot — never silently dropped. In solo and pair builds with a
 // visual check configured, a seeing seat also gets the latest capture and its
-// diff: rendered just before a seeing reviewer judges, and at a round gate
-// after the implementer changed the tree, so the next round's implementer
-// sees what its work looks like. Every such turn records what it saw
-// (turn_images).
+// diff. Every such turn records what it saw (turn_images).
 //
-// The advisor is deliberately left out: it answers the implementer's
-// distress about the conversation, not the appearance of the product, and a
-// consult that carried every image would double the visual context per round
-// for the role with the smallest budget.
+// B-505 (TI-36X T-008, r-20261005-012549-uvns): #163 rendered only before a
+// seeing reviewer and at a round gate, so luna's two advisor retries inside
+// round 1 never saw their own work and the run had no visual_feedback at all.
+// The render now precedes every implementer, advisor and reviewer turn whose
+// tree differs from the last render's — retries, resumes and round gates
+// alike — and never repeats for an unchanged tree (the tree is fingerprinted
+// by the candidate diff). It no longer waits for a seeing seat: the figure is
+// what the strategy judges a harness-measured slice by (B-506) and what a
+// blind seat reads in words.
+//
+// B-507: the advisor is no longer left out. #163 reasoned it answers the
+// implementer's distress about the conversation, not the product's
+// appearance; in the incident the distress WAS the appearance, and the blind
+// advisor, told nothing, went looking for images it could not read. A seeing
+// advisor is shown the reference and the latest capture and diff within the
+// same per-turn bounds; a blind one is told it cannot see them and must not
+// look for them.
 
 // The bounds of one turn. Six images and 6 MB are the consultant chat's own
 // bounds (maxChatImages, maxChatImageTotal); references take at most four
@@ -88,8 +100,10 @@ type visualFeedback struct {
 	Phase   string
 	Summary string
 	Results []runlog.VisualCompare
-	images  []turnImage
-	notes   []string
+	// Tree is the digest of the tree this render showed.
+	Tree   string
+	images []turnImage
+	notes  []string
 }
 
 // taskVision is one run's image context. A nil *taskVision is valid and does
@@ -106,18 +120,26 @@ type taskVision struct {
 	// render captures the candidate and compares it with its references; nil
 	// when the run has no visual check or renders nothing between rounds.
 	render func(ctx context.Context) (*runlog.VisualGate, []string, error)
+	// tree returns the candidate as the reviewer reads it (the run's diff);
+	// its digest says whether the tree changed since a render. nil, or an
+	// error, falls back to "an implementer turn ran since".
+	tree func() (string, error)
 	// runDir is where render evidence lives.
 	runDir string
-	// anySeatSees gates the between-round render: nobody would look at it.
-	anySeatSees bool
 
 	mu       sync.Mutex
 	feedback *visualFeedback
-	// stale says an implementer turn ran after the latest feedback (or none
-	// was rendered yet): the tree may no longer look like it.
-	stale     bool
-	lastRound int
-	renders   int
+	// stale says the latest feedback does not show the tree as it is: it
+	// changed since, and the render after the change failed or has not run.
+	stale bool
+	// dirty says an implementer turn ran since the latest render; it decides
+	// only when the tree cannot be fingerprinted.
+	dirty bool
+	// failedTree is the digest a render last failed on: a broken capture
+	// command is tried once per tree, not once per turn.
+	failedTree string
+	lastRound  int
+	renders    int
 }
 
 // seatCanSee reads the duckling's declared vision capability, the same
@@ -228,9 +250,7 @@ func (s *Service) newTaskVision(ctx context.Context, projectID, taskID string, r
 	seats := map[string]interface{}{}
 	for _, r := range roles {
 		if id := roster[r]; id != "" {
-			see := s.seatCanSee(id)
-			v.anySeatSees = v.anySeatSees || see
-			seats[string(r)] = map[string]interface{}{"duckling": string(id), "can_see": see}
+			seats[string(r)] = map[string]interface{}{"duckling": string(id), "can_see": s.seatCanSee(id)}
 		}
 	}
 	if len(v.cited) > 0 && emit != nil {
@@ -243,22 +263,24 @@ func (s *Service) newTaskVision(ctx context.Context, projectID, taskID string, r
 }
 
 // withFeedback arms the visual feedback for a solo or pair build. It restores
-// the latest recorded feedback, so a resumed run's next seat still sees it.
-func (v *taskVision) withFeedback(runDir string, render func(ctx context.Context) (*runlog.VisualGate, []string, error)) *taskVision {
+// the latest recorded feedback, so a resumed run's next seat still sees it,
+// and is not re-rendered when the tree is still the one it showed.
+func (v *taskVision) withFeedback(runDir string, tree func() (string, error), render func(ctx context.Context) (*runlog.VisualGate, []string, error)) *taskVision {
 	// Only a task that cites a reference is shown renders: a logic task in
 	// the same project would pay a render per review for images it has no
 	// use for.
 	if v == nil || render == nil || len(v.cited) == 0 {
 		return v
 	}
-	v.render, v.runDir = render, runDir
+	v.render, v.runDir, v.tree = render, runDir, tree
 	events, _ := runlog.ReadEvents(runDir)
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
 		if e.Type != "visual_feedback" || e.Data["ok"] != true {
 			continue
 		}
-		fb := &visualFeedback{Round: intValue(e.Data["round"]), Phase: stringValueAny(e.Data["phase"]), Summary: stringValueAny(e.Data["summary"])}
+		fb := &visualFeedback{Round: intValue(e.Data["round"]), Phase: stringValueAny(e.Data["phase"]),
+			Summary: stringValueAny(e.Data["summary"]), Tree: stringValueAny(e.Data["tree"])}
 		if raw, ok := e.Data["shown"].([]interface{}); ok {
 			for _, item := range raw {
 				m, _ := item.(map[string]interface{})
@@ -279,9 +301,10 @@ func (v *taskVision) withFeedback(runDir string, render func(ctx context.Context
 				m, _ := item.(map[string]interface{})
 				mismatch, _ := m["mismatch"].(float64)
 				tolerance, _ := m["tolerance"].(float64)
+				passed, _ := m["passed"].(bool)
 				fb.Results = append(fb.Results, runlog.VisualCompare{
 					Capture: stringValueAny(m["capture"]), Reference: stringValueAny(m["reference"]),
-					Mismatch: mismatch, Tolerance: tolerance, Error: stringValueAny(m["error"]),
+					Mismatch: mismatch, Tolerance: tolerance, Error: stringValueAny(m["error"]), Passed: passed,
 				})
 			}
 		}
@@ -290,6 +313,113 @@ func (v *taskVision) withFeedback(runDir string, render func(ctx context.Context
 		break
 	}
 	return v
+}
+
+// visualCheck is the strategy's view of this run's comparison (B-506): the
+// slices that cite a compared reference, the contract, and the measurement.
+// nil when nothing renders between turns.
+func (v *taskVision) visualCheck(deliverables []string, contract config.RenderContract) *strategy.VisualCheck {
+	if v == nil || v.render == nil {
+		return nil
+	}
+	var compares []strategy.VisualCompare
+	for _, c := range contract.Compare {
+		compares = append(compares, strategy.VisualCompare{
+			Capture: c.Capture, Reference: c.Reference,
+			Tolerance: c.EffectiveTolerance(), Threshold: c.EffectiveThreshold(),
+		})
+	}
+	return &strategy.VisualCheck{
+		Slices:   strategy.VisualSlices(deliverables, compares),
+		Compares: compares,
+		Required: contract.Enforcement == "required",
+		Measure: func(ctx context.Context, round int, phase string) *strategy.VisualMeasurement {
+			v.measure(ctx, phase, round)
+			return v.measurement()
+		},
+	}
+}
+
+// measurement is the latest feedback as the strategy reads it.
+func (v *taskVision) measurement() *strategy.VisualMeasurement {
+	v.mu.Lock()
+	fb, stale := v.feedback, v.stale
+	v.mu.Unlock()
+	if fb == nil {
+		return nil
+	}
+	m := &strategy.VisualMeasurement{Round: fb.Round, Phase: fb.Phase, Current: !stale}
+	for _, r := range fb.Results {
+		m.Results = append(m.Results, strategy.VisualResult{
+			Capture: r.Capture, Reference: r.Reference, Mismatch: r.Mismatch, Tolerance: r.Tolerance,
+			Passed: r.Error == "" && r.Mismatch <= r.Tolerance, Error: r.Error,
+		})
+	}
+	return m
+}
+
+// treeDigest fingerprints the candidate; "" when it cannot.
+func (v *taskVision) treeDigest() string {
+	if v.tree == nil {
+		return ""
+	}
+	diff, err := v.tree()
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(diff))
+	return hex.EncodeToString(sum[:8])
+}
+
+// measure renders when the tree is not the one the latest feedback shows
+// (B-505). The first measurement of a run renders too: until then the only
+// figure a seat could read was another run's (B-508). A render that already
+// failed on this exact tree is not retried.
+func (v *taskVision) measure(ctx context.Context, phase string, round int) {
+	if v == nil || v.render == nil {
+		return
+	}
+	tree := v.treeDigest()
+	v.mu.Lock()
+	fb, dirty, failed := v.feedback, v.dirty, v.failedTree
+	need := false
+	switch {
+	case tree == "":
+		need = fb == nil || dirty
+	case fb != nil && fb.Tree == tree:
+		v.stale = false
+	case failed == tree:
+		v.stale = fb != nil
+	default:
+		need = true
+	}
+	v.mu.Unlock()
+	if need {
+		v.refresh(ctx, phase, round, tree)
+	}
+}
+
+// hasOwnFeedback says this run has rendered its own tree.
+func (v *taskVision) hasOwnFeedback() bool {
+	if v == nil {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.feedback != nil
+}
+
+// phaseBefore names a render taken before a role's turn.
+func phaseBefore(role config.Role) string {
+	switch role {
+	case config.RoleImplementer:
+		return "before implementer turn"
+	case config.RoleReviewer:
+		return "before review"
+	case config.RoleAdvisor:
+		return "before advisor consult"
+	}
+	return "before " + string(role) + " turn"
 }
 
 func (v *taskVision) empty() bool {
@@ -315,12 +445,14 @@ func (v *taskVision) wrap(inner strategy.TurnRunner, roster map[config.Role]conf
 		sees := v.svc.seatCanSee(seat)
 		v.mu.Lock()
 		v.lastRound = tc.Round
-		needRender := sees && t.Role == config.RoleReviewer && v.render != nil && v.stale
 		v.mu.Unlock()
-		if needRender {
-			// The reviewer judges the tree as it is now: a capture from before
-			// the implementer's latest turn would show it the wrong candidate.
-			v.refresh(ctx, "before review", tc.Round)
+		// Every seat reads the tree as it is now. The strategy usually measured
+		// already, building this turn's prompt; then this finds the tree
+		// unchanged and renders nothing. It is here so that no turn through the
+		// runner can miss it (B-505).
+		v.measure(ctx, phaseBefore(t.Role), tc.Round)
+		if v.hasOwnFeedback() {
+			prompt = artifact.SupersedeCarriedVisual(prompt)
 		}
 		images, section, record, notes := v.forTurn(t.Role, sees)
 		if section == "" {
@@ -343,16 +475,16 @@ func (v *taskVision) wrap(inner strategy.TurnRunner, roster map[config.Role]conf
 		out, err := inner(ctx, &turn, d, prompt+section, belt, tc)
 		if t.Role == config.RoleImplementer {
 			v.mu.Lock()
-			v.stale = true
+			v.dirty = true
 			v.mu.Unlock()
 		}
 		return out, err
 	}
 }
 
-// wrapGate renders between rounds: after the round's gate, when an
-// implementer changed the tree since the last render and some seat can see,
-// so the next round's implementer starts from what its work looks like.
+// wrapGate renders between rounds: after the round's gate, when the tree
+// changed since the last render, so the next round starts from what the work
+// looks like.
 func (v *taskVision) wrapGate(gate strategy.GateRunner) strategy.GateRunner {
 	if v == nil || gate == nil || v.render == nil {
 		return gate
@@ -363,12 +495,9 @@ func (v *taskVision) wrapGate(gate strategy.GateRunner) strategy.GateRunner {
 			return word, log, err
 		}
 		v.mu.Lock()
-		need := v.stale && v.anySeatSees
 		round := v.lastRound
 		v.mu.Unlock()
-		if need {
-			v.refresh(ctx, "after round gate", round)
-		}
+		v.measure(ctx, "after round gate", round)
 		return word, log, err
 	}
 }
@@ -377,15 +506,20 @@ func (v *taskVision) wrapGate(gate strategy.GateRunner) strategy.GateRunner {
 // records it. A render that fails is recorded and leaves the previous
 // feedback in place, marked stale: feedback is evidence for the seats, never
 // a verdict, and the final gate still renders and judges on its own.
-func (v *taskVision) refresh(ctx context.Context, phase string, round int) {
+func (v *taskVision) refresh(ctx context.Context, phase string, round int, tree string) {
 	vg, captures, err := v.render(ctx)
 	if err != nil || vg == nil {
 		reason := "render produced no comparison"
 		if err != nil {
 			reason = err.Error()
 		}
+		v.mu.Lock()
+		v.failedTree = tree
+		v.stale = v.feedback != nil
+		v.dirty = false
+		v.mu.Unlock()
 		if v.emit != nil {
-			v.emit("visual_feedback", map[string]interface{}{"round": round, "phase": phase, "ok": false, "reason": reason})
+			v.emit("visual_feedback", map[string]interface{}{"round": round, "phase": phase, "ok": false, "reason": reason, "tree": tree})
 		}
 		return
 	}
@@ -403,7 +537,7 @@ func (v *taskVision) refresh(ctx context.Context, phase string, round int) {
 			renamed[c] = to
 		}
 	}
-	fb := &visualFeedback{Round: round, Phase: phase, Summary: visualGateSummary(vg)}
+	fb := &visualFeedback{Round: round, Phase: phase, Summary: visualGateSummary(vg), Tree: tree}
 	var shown []turnImage
 	for _, r := range vg.Results {
 		if r.ReferenceCapture != "" {
@@ -451,11 +585,12 @@ func (v *taskVision) refresh(ctx context.Context, phase string, round int) {
 	v.mu.Lock()
 	v.feedback = fb
 	v.stale = false
+	v.dirty = false
 	v.mu.Unlock()
 	if v.emit != nil {
 		v.emit("visual_feedback", map[string]interface{}{
 			"round": round, "phase": phase, "ok": true, "passed": vg.Passed,
-			"summary": fb.Summary, "results": fb.Results, "shown": fb.images,
+			"summary": fb.Summary, "results": fb.Results, "shown": fb.images, "tree": tree,
 		})
 	}
 }
@@ -509,6 +644,15 @@ func (v *taskVision) forTurn(role config.Role, sees bool) ([]string, string, []t
 	if len(v.cited) > 0 {
 		b.WriteString("\n\n## Reference images\n\n")
 		switch {
+		case sees && role == config.RoleAdvisor:
+			b.WriteString("This task cites these reference images, and they are attached to this message, with the latest capture of " +
+				"the candidate and its difference image when one was rendered. Advise toward what the reference shows, never toward " +
+				"a percentage.\n\n")
+		case role == config.RoleAdvisor:
+			b.WriteString("This task cites these reference images, but this seat cannot see images: neither the references nor the " +
+				"harness's captures are attached. Do not search for them, read them or guess where they are — fs_read shows an " +
+				"image's bytes, not the picture. Advise from the measured figure and the implementer's report, and say what you " +
+				"could not check.\n\n")
 		case sees && role == config.RoleImplementer:
 			b.WriteString("This task cites these reference images, and they are attached to this message. They are the visual " +
 				"authority for appearance: layout, proportions, positions, colours, labels. Build what they show, " +
@@ -551,7 +695,7 @@ func (v *taskVision) forTurn(role config.Role, sees bool) ([]string, string, []t
 	if fb != nil {
 		fmt.Fprintf(&b, "\n\n## Visual check of the candidate (rendered %s, round %d)\n\n", fb.Phase, fb.Round)
 		if stale {
-			b.WriteString("This render predates the implementer's latest turn; the tree may have changed since.\n\n")
+			b.WriteString("This render predates the tree as it is now: the tree changed after it, and the render after the change failed.\n\n")
 		}
 		for _, r := range fb.Results {
 			switch {

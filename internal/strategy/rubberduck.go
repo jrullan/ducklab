@@ -224,7 +224,10 @@ func consultAdvisor(ctx context.Context, params *ExecuteParams, runner TurnRunne
 	if err != nil {
 		return "", nil, err
 	}
-	prompt := rubberDuckPrompt(params, implementer, outcome, signals)
+	// The duck reads the tree the implementer just left: a measurement of it
+	// (rendered now when the turn changed it) rides its prompt (B-507).
+	visual := params.Visual.measure(ctx, round, "before advisor consult")
+	prompt := rubberDuckPrompt(params, implementer, outcome, signals, visual)
 	emit(params, "turn_start", map[string]interface{}{
 		"round": round, "turn": index, "role": string(config.RoleAdvisor), "duckling": string(advisor),
 	})
@@ -271,7 +274,13 @@ func consultAdvisor(ctx context.Context, params *ExecuteParams, runner TurnRunne
 // rubberDuckPrompt lays the implementer's whole turn in front of the duck:
 // its final words, its reasoning, and the trace of what it tried — the story
 // the reviewer is forbidden to hear.
-func rubberDuckPrompt(params *ExecuteParams, implementer config.DucklingID, outcome *agent.Outcome, signals distressSignals) string {
+//
+// When the run has a visual check the duck is told its contract and its
+// latest figure (B-507, TI-36X T-008 r-20261005-012549-uvns): told nothing,
+// glm53flash searched for *.png, fs_read captures that did not exist, called
+// verify_run "your pixel oracle" and advised a 1px gutter to move the
+// percentage.
+func rubberDuckPrompt(params *ExecuteParams, implementer config.DucklingID, outcome *agent.Outcome, signals distressSignals, visual *VisualMeasurement) string {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 	b.WriteString("\n\n## Rubber-duck consult\n\n")
@@ -293,13 +302,21 @@ func rubberDuckPrompt(params *ExecuteParams, implementer config.DucklingID, outc
 	if data, err := json.Marshal(signals); err == nil {
 		b.WriteString("### What the harness measured\n\n```json\n" + string(data) + "\n```\n\n")
 	}
+	b.WriteString(params.Visual.forAdvisor(visual))
 	if len(params.Deliverables) > 0 {
 		b.WriteString("### The deliverables and what the implementer reports\n\n" + renderDeliverables(params.Deliverables))
 		if rep := ParseDeliverablesReport(outcomeText(outcome), len(params.Deliverables)); rep != nil && !rep.Unreported {
 			if data, err := json.Marshal(rep.Items); err == nil {
 				b.WriteString("\nReported: " + string(data) + "\n")
 			}
-			if gap := rep.Undelivered(); len(gap) > 0 {
+			measured := params.Visual.ids()
+			var gap []int
+			for _, id := range rep.Undelivered() {
+				if !measured[id] {
+					gap = append(gap, id)
+				}
+			}
+			if len(gap) > 0 {
 				fmt.Fprintf(&b, "\nThe implementer itself reports %v undelivered — ask why, and what would unblock it.\n", gap)
 			}
 		} else {
