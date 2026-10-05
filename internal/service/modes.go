@@ -781,6 +781,33 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		},
 	}
 
+	// B-504 (TI-36X T-008): a task citing a REF-IMG is built and reviewed by
+	// seats that are shown it — every implementer, reviewer and judge turn,
+	// retries and resumes included, through the runner. Solo and pair also
+	// render the candidate for the seeing seats between rounds; tournament
+	// and split contestants work in their own worktrees, which the render
+	// command does not know about, so they get the references only.
+	vision := s.newTaskVision(ctx, mc.rs.run.ProjectID, mc.req.TaskID, []string{mc.entry.Path, root}, mc.roster,
+		[]config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleJudge},
+		func(kind string, data map[string]interface{}) { mc.rs.writer.AppendEvent(kind, data) })
+	if m := mc.rs.run.Mode; m == "" || m == "solo" || m == "pair" {
+		contract := effectiveRenderContract(mc.projCfg)
+		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 {
+			vision = vision.withFeedback(mc.rs.runDir, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
+				rendered, err := captureRender(ctx, root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
+				if len(rendered.Captures) == 0 {
+					if err == nil {
+						err = fmt.Errorf("the render produced no captures")
+					}
+					return nil, nil, err
+				}
+				return runVisualGate(mc.entry.Path, contract, mc.rs.writer, rendered.Captures, root), rendered.Captures, nil
+			})
+		}
+	}
+	base.Runner = vision.wrap(base.Runner, mc.roster)
+	base.Gate = vision.wrapGate(base.Gate)
+
 	switch mc.rs.run.Mode {
 	case "", "solo":
 		res, err := strategy.ExecuteScript(ctx, strategy.SoloScript(), &base)

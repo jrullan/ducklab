@@ -165,6 +165,19 @@ export function ConversationTurn({
             {block.subject}
           </span>
         )}
+        {/* B-504: which images this seat was shown, or that it is blind to
+            the reference its task cites. */}
+        {block.images && (
+          <span
+            className="text-ink-muted"
+            data-testid="turn-images"
+            title={block.images.notes.join("\n") || undefined}
+          >
+            {block.images.canSee
+              ? `saw ${block.images.shown.length ? block.images.shown.join(", ") : "no images"}`
+              : "cannot see images"}
+          </span>
+        )}
         {/* Lanes are stacked, so without this concurrency reads as sequence —
             and "two models worked at once" is a different claim from "one
             model worked twice". */}

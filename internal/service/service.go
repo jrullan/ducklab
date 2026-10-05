@@ -2278,15 +2278,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 	}
 	// Rendering is optional evidence and a failure is only a caveat.
-	render := projCfg.Render
-	if projCfg.RenderConfigured {
-		if render.Command == "" {
-			render.Command = projCfg.Run.Command
-		}
-		if render.Ready == "" {
-			render.Ready = projCfg.Run.Health
-		}
-	}
+	render := effectiveRenderContract(projCfg)
 	if projCfg.RenderConfigured && render.Command != "" {
 		rendered, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
 		if len(rendered.Captures) > 0 {

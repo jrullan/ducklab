@@ -545,6 +545,14 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
+	// B-504: a test for a task that cites a REF-IMG is written and reviewed by
+	// seats shown the reference — the test is where "matches the photo"
+	// becomes assertions. No render between rounds: the writer edits tests,
+	// not the product, so a capture would show nothing it changed.
+	params.Runner = s.newTaskVision(ctx, rs.run.ProjectID, req.TaskID, []string{rs.projectPath, projectRoot}, roster,
+		[]config.Role{config.RoleImplementer, config.RoleReviewer},
+		func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) }).wrap(params.Runner, roster)
+
 	// The round gate earns its suite only in pair: two rounds, and a green
 	// (the test does not fail) sends the writer back with the reviewer's
 	// verdict. In solo there is no second round for it to buy, and the
