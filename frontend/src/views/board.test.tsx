@@ -1283,7 +1283,7 @@ describe("the running task links its run", () => {
       runs: {
         "r-q": { id: "r-q", project_id: "p", task_id: "T-069", stage: "test", mode: "solo", status: "paused", verdict: "",
           pending_kind: "question", roster: { implementer: "terra", advisor: "qwen38-max" },
-          pending_data: { question: "Which threshold?", question_id: "q-1", advice: "Five refusals.", advisor: "qwen38-max" } } as never,
+          pending_data: { question: "Which threshold?", question_id: "q-1", advice: "Five refusals.", advisor: "qwen38-max", options: ["Three refusals", "Five refusals in a row"] } } as never,
       },
       events: {}, deltas: {}, reasoning: {}, spend: {},
     });
@@ -1317,6 +1317,11 @@ describe("the running task links its run", () => {
     fireEvent.change(screen.getByTestId("task-answer-input"), { target: { value: "Six." } });
     fireEvent.click(screen.getByTestId("task-answer-button"));
     await waitFor(() => expect(answer).toHaveBeenCalledWith("r-q", "q-1", "Six."));
+    // B-502: the offered options are buttons here too, answering with
+    // exactly the option's text.
+    expect(screen.getByTestId("task-question-option").querySelectorAll("button")).toHaveLength(2);
+    fireEvent.click(screen.getByTestId("task-question-option-2"));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("r-q", "q-1", "Five refusals in a row"));
   });
 });
 
