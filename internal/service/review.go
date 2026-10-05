@@ -150,7 +150,11 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		ProjectRoot:    projectRoot,
 		TaskID:         req.TaskID,
 		Prompt:         reviewPrompt(req.TaskID, diff),
-		Runner:         s.runnerFor(cache, roster, ectx),
+		// B-504: a review of a task citing a REF-IMG is judged by a seat shown
+		// it, as the build's own reviewer is.
+		Runner: s.newTaskVision(ctx, rs.run.ProjectID, req.TaskID, []string{projectRoot}, roster,
+			[]config.Role{config.RoleReviewer},
+			func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) }).wrap(s.runnerFor(cache, roster, ectx), roster),
 		Roster:         roster,
 		TurnCaps:       turnCaps.Caps,
 		TurnCapSources: turnCaps.Sources,

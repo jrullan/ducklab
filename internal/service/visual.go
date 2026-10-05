@@ -167,6 +167,22 @@ func encodePNG(img image.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// effectiveRenderContract is the project's [render] with what it inherits
+// from [run]: the command and its readiness check. The final gate and the
+// between-round visual feedback (B-504) must render the same way.
+func effectiveRenderContract(projCfg *config.Project) config.RenderContract {
+	render := projCfg.Render
+	if projCfg.RenderConfigured {
+		if render.Command == "" {
+			render.Command = projCfg.Run.Command
+		}
+		if render.Ready == "" {
+			render.Ready = projCfg.Run.Health
+		}
+	}
+	return render
+}
+
 // runVisualGate holds each configured capture against its reference and
 // stores the reference and the difference next to the captures. A compare
 // that cannot run (no such capture, unreadable reference) fails with the

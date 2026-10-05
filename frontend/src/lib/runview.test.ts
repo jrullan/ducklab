@@ -29,6 +29,24 @@ describe("buildTurns", () => {
     expect(turns[1]!.toolCalls).toHaveLength(0);
   });
 
+  // B-504 (TI-36X T-008): which images a seat saw is on its turn, and a blind
+  // seat says so instead of looking like one that saw nothing.
+  it("records the images each turn was shown, or that it could not see", () => {
+    const turns = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("turn_images", 2, {
+        round: 1, turn: 0, role: "implementer", duckling: "luna", can_see: true,
+        images: [{ id: "REF-IMG-6c63e390", kind: "reference" }, { id: "calculator.png", kind: "capture" }],
+      }),
+      ev("turn_end", 3, { round: 1, turn: 0 }),
+      ev("turn_start", 4, { round: 1, turn: 1, role: "reviewer", duckling: "glm52" }),
+      ev("turn_images", 5, { round: 1, turn: 1, role: "reviewer", can_see: false, images: [], notes: ["seat cannot see images; none attached"] }),
+      ev("turn_end", 6, { round: 1, turn: 1 }),
+    ]);
+    expect(turns[0]!.images).toEqual({ canSee: true, shown: ["REF-IMG-6c63e390", "capture calculator.png"], notes: [] });
+    expect(turns[1]!.images).toEqual({ canSee: false, shown: [], notes: ["seat cannot see images; none attached"] });
+  });
+
   // A run with forty reads must stay skimmable: forty calls, still one turn.
   it("keeps a turn with many tool calls as a single block", () => {
     const events: DucklabEvent[] = [

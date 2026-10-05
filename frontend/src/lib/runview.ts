@@ -124,6 +124,11 @@ export interface TurnBlock {
   /** Deliverable ids the implementer reported undelivered when this
    * reviewer approved anyway — the contradiction the record flagged. */
   deliverablesGap?: number[];
+  /** What images the engine showed this turn (B-504): reference ids, the
+   * candidate's capture and diff — or that the seat could not see them. A
+   * build that "matches REF-IMG" was once built and approved by seats that
+   * never saw it, and nothing on the record said so. */
+  images?: { canSee: boolean; shown: string[]; notes: string[] };
   /** A harness pause/resume rendered as its own divider in the lane. A run
    * that paused on its wallclock budget and was resumed replays the strategy
    * from round 1; without a marker the lane read imp → rev → imp → rev and
@@ -399,6 +404,18 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           for (const o of open) o.concurrent = true;
         }
         open.add(block);
+        break;
+      }
+      case "turn_images": {
+        const b = blockFor(d);
+        if (b) {
+          const shown = Array.isArray(d.images)
+            ? d.images.map((im: { id?: unknown; kind?: unknown }) =>
+                im?.kind === "reference" ? String(im.id ?? "") : `${String(im?.kind ?? "image")} ${String(im?.id ?? "")}`.trim())
+            : [];
+          const notes = Array.isArray(d.notes) ? d.notes.map(String) : [];
+          b.images = { canSee: d.can_see === true, shown, notes };
+        }
         break;
       }
       case "turn_interrupted": {

@@ -274,6 +274,10 @@ export const KNOWN_EVENT_TYPES = [
   "app_smoke",
   "render",
   "visual_compare",
+  // B-504: what images a build/test/review turn was shown (or told it could
+  // not see), and the candidate rendered between rounds for seeing seats.
+  "turn_images",
+  "visual_feedback",
   // An accept whose commit did not reproduce from a clean checkout takes
   // the commit back; the diff stays in the tree, uncommitted (B-069).
   "commit_withdrawn",

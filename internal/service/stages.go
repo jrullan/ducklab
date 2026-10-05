@@ -868,8 +868,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			return
 		}
 		arch := roster[config.RoleArchitect]
-		dcfg, ok := s.cfg.Ducklings[arch]
-		canSee := ok && dcfg.Caps.Vision != nil && *dcfg.Caps.Vision
+		canSee := s.seatCanSee(arch)
 		seed += renderRefImages(recs, canSee)
 		rs.writer.AppendEvent("reference_images", map[string]interface{}{
 			"images": recs, "shown_to_architect": canSee, "architect": string(arch),
@@ -878,7 +877,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	if len(images) > 0 {
 		arch := roster[config.RoleArchitect]
-		if dcfg, ok := s.cfg.Ducklings[arch]; !ok || dcfg.Caps.Vision == nil || !*dcfg.Caps.Vision {
+		if !s.seatCanSee(arch) {
 			rs.writer.AppendEvent("warning", map[string]interface{}{
 				"detail": fmt.Sprintf("%d image(s) dropped: architect %s has no vision capability", len(images), arch),
 			})
