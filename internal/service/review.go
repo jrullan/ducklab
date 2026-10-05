@@ -68,7 +68,6 @@ func (s *Service) ReviewStart(ctx context.Context, projectID string, req ReviewR
 		Stage:     "review",
 		Mode:      mode,
 		TaskID:    req.TaskID,
-		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		CommitSHA: sha,
 		Stream:    true,
@@ -76,6 +75,8 @@ func (s *Service) ReviewStart(ctx context.Context, projectID string, req ReviewR
 		// the reviewer's, and the human decides what to do about it (P3).
 		Gate: "none",
 	}
+	// Born running outside the queue: its active clock opens here or never.
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -191,7 +192,7 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 
 	// The reviewer's verdict is not the decision. A person reads the review and
 	// decides what happens to the task (05 §1).
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = map[string]interface{}{

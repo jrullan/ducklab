@@ -795,15 +795,21 @@ func splitLines(s string) []string {
 // writer used to parse every event of the run — at engine start, across
 // every recovered run, that was 17 of a 23 s startup (B-298).
 func lastSeq(path string) int {
+	seq, _ := lastRecord(path)
+	return seq
+}
+
+// lastRecord returns lastSeq's seq and the ts of the last complete line.
+func lastRecord(path string) (int, string) {
 	const tail = 64 * 1024
 	f, err := os.Open(path)
 	if err != nil {
-		return 0
+		return 0, ""
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return 0
+		return 0, ""
 	}
 	offset := st.Size() - tail
 	if offset < 0 {
@@ -811,20 +817,21 @@ func lastSeq(path string) int {
 	}
 	data := make([]byte, st.Size()-offset)
 	if _, err := f.ReadAt(data, offset); err != nil && err != io.EOF {
-		return 0
+		return 0, ""
 	}
 	lines := splitLines(string(data))
 	if offset > 0 && len(lines) > 0 {
 		// The first line of a mid-file window is a fragment.
 		lines = lines[1:]
 	}
-	max := 0
+	max, ts := 0, ""
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
 		var probe struct {
-			Seq int `json:"seq"`
+			Seq int    `json:"seq"`
+			TS  string `json:"ts"`
 		}
 		if err := json.Unmarshal([]byte(line), &probe); err != nil {
 			break
@@ -832,8 +839,25 @@ func lastSeq(path string) int {
 		if probe.Seq > max {
 			max = probe.Seq
 		}
+		ts = probe.TS
 	}
-	return max
+	return max, ts
+}
+
+// LastEventTime is when a run last recorded anything: the ts of the final
+// complete line of its events.jsonl, read from the tail like lastSeq.
+//
+// Engine-restart recovery settles an orphaned run's open active segment
+// here. The engine died somewhere after this event; the downtime until the
+// next start is not work, and dropping the open segment loses all of it
+// (B-500).
+func LastEventTime(runDir string) (time.Time, bool) {
+	_, ts := lastRecord(filepath.Join(runDir, "events.jsonl"))
+	if ts == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	return t, err == nil
 }
 
 // RunDirFor returns the directory for a run without needing an open writer.

@@ -537,7 +537,8 @@ func (s *Service) prBody(ctx context.Context, projectID string, p *projectState,
 		return fallback
 	}
 
-	run := &runlog.Run{ID: runlog.GenerateRunID(), ProjectID: projectID, Stage: "pr_body", Mode: "solo", Status: "running", StartedAt: s.now().UTC().Format(time.RFC3339), Stream: true, Gate: "none"}
+	run := &runlog.Run{ID: runlog.GenerateRunID(), ProjectID: projectID, Stage: "pr_body", Mode: "solo", StartedAt: s.now().UTC().Format(time.RFC3339), Stream: true, Gate: "none"}
+	setRunStatus(run, "running", s.now())
 	writer, err := runlog.NewWriter(p.git.Root, run)
 	if err != nil {
 		return fallback
@@ -560,12 +561,12 @@ func (s *Service) prBody(ctx context.Context, projectID string, p *projectState,
 	res, err := strategy.ExecuteScript(runCtx, strategy.ReleaseScript(), &strategy.ExecuteParams{LiveToolEvents: true, ProjectRoot: p.git.Root, Prompt: prScribePrompt(title, record), Runner: s.runnerFor(cache, roster, ectx), Roster: roster, TurnCaps: turnCaps.Caps, TurnCapSources: turnCaps.Sources, OnEvent: func(kind string, data map[string]interface{}) { writer.AppendEvent(kind, data) }})
 	recordSpend(rs, tracker)
 	if err != nil || res == nil || res.Outcome == nil || strings.TrimSpace(res.Outcome.Text) == "" {
-		run.Status = "failed"
+		setRunStatus(run, "failed", time.Now())
 		writer.AppendEvent("pr_body_fallback", map[string]interface{}{"reason": "scribe did not return a draft"})
 		writer.WriteState()
 		return fallback
 	}
-	run.Status = "done"
+	setRunStatus(run, "done", time.Now())
 	writer.AppendEvent("pr_body_drafted", map[string]interface{}{"source": "scribe"})
 	writer.WriteState()
 	return strings.TrimSpace(res.Outcome.Text)

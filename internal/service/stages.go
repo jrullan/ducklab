@@ -320,7 +320,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		ProjectID:            projectID,
 		Stage:                req.Stage,
 		Mode:                 mode,
-		Status:               "running",
 		StartedAt:            time.Now().UTC().Format(time.RFC3339),
 		Autonomy:             orDefault(req.Autonomy, "guarded"),
 		AgentTurns:           req.AgentTurns,
@@ -347,6 +346,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		run.RosterSources[string(role)] = "request"
 	}
 
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -807,17 +807,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// A resumed stage continues its own life: recorded ceilings, ledger
 		// seeded with what it already spent — a tracker reborn at zero would
 		// make "answer the question" a way to double the budget.
-		limits = &budget.Budget{
-			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
-			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
-		}
-		tracker = budget.NewTracker(limits)
-		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
-		tracker.Spend.AddUSD(rs.run.Budget.USD)
-		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
-		for i := 0; i < rs.run.Budget.Turns; i++ {
-			tracker.Spend.AddTurn()
-		}
+		limits, tracker = trackerFromRecord(rs.run)
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
@@ -1269,7 +1259,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	unread := rs.unreadRefs()
 	rs.wmu.Lock()
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	if rs.run.PendingData == nil {
@@ -1712,7 +1702,7 @@ func (s *Service) resolveStageRun(runID, approvedBy string) {
 	if !ok || rs.run.Status != "paused" {
 		return
 	}
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Accepted = true
 	rs.run.Resolution = "accepted by " + approvedBy
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)

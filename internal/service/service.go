@@ -1431,7 +1431,6 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		TaskID:       req.TaskID,
 		BugID:        bugID,
 		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
-		Status:       "running",
 		StartedAt:    time.Now().UTC().Format(time.RFC3339),
 		// Streaming on unless a caller opts out.
 		//
@@ -1510,6 +1509,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	}
 
 	// Create writer
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		if cleanupErr := vcs.New(entry.Path).WorktreeRemove(run.WorktreePath); cleanupErr != nil {
@@ -1822,7 +1822,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		os.WriteFile(promptsPath, data, 0o644)
 	}
 
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Verdict = "UNVERIFIED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "UNVERIFIED", "dry_run": true})
@@ -2032,17 +2032,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// was paused — and its ledger continues from what it already spent: a
 		// tracker reborn at zero would have made "resume" a way to double
 		// every budget, and the record would undercount the run's true cost.
-		b = budget.Budget{
-			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
-			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
-		}
-		tracker = budget.NewTracker(&b)
-		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
-		tracker.Spend.AddUSD(rs.run.Budget.USD)
-		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
-		for i := 0; i < rs.run.Budget.Turns; i++ {
-			tracker.Spend.AddTurn()
-		}
+		recorded, resumed := trackerFromRecord(rs.run)
+		b, tracker = *recorded, resumed
 	}
 	rs.setTracker(tracker)
 	recordLimits(rs, &b)
@@ -2528,7 +2519,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// to an observation they were explicitly told requires a human environment.
 	if rs.run.Autonomy == "manual" || rs.run.Autonomy == "guarded" || len(manualVerification) > 0 {
 		if verdict == "PASSED" || verdict == "UNVERIFIED" {
-			rs.run.Status = "paused"
+			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict}
@@ -2574,7 +2565,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			detail := fmt.Sprintf(
 				"gate green, but the reviewer's final verdict was %s (%d finding(s)) — auto-accept declined; decide it yourself",
 				dv, n)
-			rs.run.Status = "paused"
+			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "dissent": dv, "detail": detail}
@@ -2604,7 +2595,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// acceptance failure, exactly like reviewer dissent.
 		if aerr := s.acceptRun(ctx, rs, entry, "", ""); aerr != nil {
 			detail := fmt.Sprintf("auto-accept failed: %v — decide it yourself", aerr)
-			rs.run.Status = "paused"
+			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
@@ -2626,7 +2617,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	// UNVERIFIED never auto-accepts; yolo still reaches human gate
 	if verdict == "UNVERIFIED" && rs.run.Autonomy == "yolo" {
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "gate"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		gateData := map[string]interface{}{
@@ -2652,7 +2643,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": verdict})
 	rs.writer.WriteState()
@@ -2834,7 +2825,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.Verdict != "ABORTED" {
 		recordSpend(rs, rs.tracker)
 		s.publishSpend(rs, rs.tracker)
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "budget"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		// The decision the pause asks for is "lift, or stop?" — and the
@@ -2878,7 +2869,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.Verdict != "ABORTED" {
 		recordSpend(rs, rs.tracker)
 		s.publishSpend(rs, rs.tracker)
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "error"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error() + " — then resume: the run replays with the new settings"
@@ -2906,7 +2897,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.Verdict != "ABORTED" && !strings.Contains(err.Error(), "context canceled") {
 		recordSpend(rs, rs.tracker)
 		s.publishSpend(rs, rs.tracker)
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "provider"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error()
@@ -2936,7 +2927,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		!strings.Contains(err.Error(), "context canceled") && runHasUnsavedWork(rs) {
 		recordSpend(rs, rs.tracker)
 		s.publishSpend(rs, rs.tracker)
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "error"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error()
@@ -2959,7 +2950,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	// goroutine, so preserve that durable restart reason.
 	if errors.Is(err, context.Canceled) && (s.shuttingDown.Load() || rs.run.PendingKind == "engine_restart" || rs.run.PendingKind == "history_duration") {
 		if rs.run.PendingKind != "engine_restart" && rs.run.PendingKind != "history_duration" {
-			rs.run.Status = "paused"
+			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "engine_shutdown"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.writer.AppendEvent("checkpoint", map[string]interface{}{
@@ -2973,7 +2964,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	recordSpend(rs, rs.tracker)
 	s.publishSpend(rs, rs.tracker)
 	rs.wmu.Lock()
-	rs.run.Status = "failed"
+	setRunStatus(rs.run, "failed", time.Now())
 	rs.run.Verdict = "FAILED"
 	rs.run.Failure = err.Error()
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
@@ -3143,7 +3134,7 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 		s.resolveTriageSiblings(rs)
 		clearPending(rs.run)
 		rs.run.Accepted = true
-		rs.run.Status = "done"
+		setRunStatus(rs.run, "done", time.Now())
 		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		// Every other terminal path says so on the stream; without this the
@@ -3205,7 +3196,7 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 	if rs.run.Stage == "test" && !git.HasGit() {
 		defer s.continueChain(ctx, rs)
 		rs.run.Accepted = true
-		rs.run.Status = "done"
+		setRunStatus(rs.run, "done", time.Now())
 		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
@@ -3264,7 +3255,7 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 		defer s.continueChain(ctx, rs)
 		rs.run.Accepted = true
 		rs.run.CommitSHA = head
-		rs.run.Status = "done"
+		setRunStatus(rs.run, "done", time.Now())
 		rs.run.Resolution = "accepted by " + actor + "; the tree already carried this change"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
@@ -3328,7 +3319,7 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 	defer s.continueChain(ctx, rs)
 	rs.run.Accepted = true
 	rs.run.CommitSHA = sha
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	// Named even on the ordinary path: the record must say WHO decided —
 	// a person, or a chain the person pre-authorized.
 	rs.run.Resolution = "accepted by " + actor
@@ -3493,7 +3484,8 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if err != nil {
 			return err
 		}
-		rs.run.Accepted, rs.run.CommitSHA, rs.run.Status = true, sha, "done"
+		rs.run.Accepted, rs.run.CommitSHA = true, sha
+		setRunStatus(rs.run, "done", time.Now())
 		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
@@ -3556,7 +3548,8 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 					pending["conflicting_files"] = files
 					pending["rebase_aborted"] = true
 				}
-				rs.run.Status, rs.run.PendingKind = "paused", "gate"
+				setRunStatus(rs.run, "paused", time.Now())
+				rs.run.PendingKind = "gate"
 				rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 				rs.run.PendingData = pending
 				rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail})
@@ -3580,7 +3573,8 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 				output = reproduction.Output
 			}
 			detail := fmt.Sprintf("rebased commit %s failed its gate after base %s diverged to default %s: %v", short(rebasedSHA), short(rs.run.BaseSHA), short(defaultSHA), verifyErr)
-			rs.run.Status, rs.run.PendingKind = "paused", "gate"
+			setRunStatus(rs.run, "paused", time.Now())
+			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "output": output, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "retain_worktree": true}
 			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail, "output": output})
@@ -3633,7 +3627,8 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		}
 	}
 	defer s.continueChain(ctx, rs)
-	rs.run.Accepted, rs.run.CommitSHA, rs.run.Status = true, rebasedSHA, "done"
+	rs.run.Accepted, rs.run.CommitSHA = true, rebasedSHA
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Resolution = "accepted by " + actor
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
@@ -4038,8 +4033,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		rs.wmu.Lock()
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
-		rs.run.Status = "running"
-		startActiveWallclock(rs.run, time.Now())
+		setRunStatus(rs.run, "running", time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
 		w.AppendEvent("checkpoint", resumeCheckpointData(current, entry.Path, "", ""))
@@ -4064,7 +4058,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		// The note and the calls cap ride the record, as resumeRequest keeps
 		// them for a build: a resumed test run used to drop both.
 		treq := TestFirstRequest{TaskID: current.TaskID, Mode: current.Mode,
-			Note: runNote(current), AgentTurns: current.AgentTurns}
+			Note: runNote(current), AgentTurns: current.AgentTurns, resumed: true}
 		if imp := current.Roster["implementer"]; imp != "" {
 			treq.Ducklings = []string{imp}
 			if rev := current.Roster["reviewer"]; rev != "" && current.Mode == "pair" {
@@ -4084,8 +4078,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		rs.wmu.Lock()
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
-		rs.run.Status = "running"
-		startActiveWallclock(rs.run, time.Now())
+		setRunStatus(rs.run, "running", time.Now())
 		clearPending(rs.run)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
@@ -4113,8 +4106,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 	// Cleared BEFORE the queue looks: projectHeld counts paused build runs,
 	// and a run still wearing "paused" would hold the project against its own
 	// resume — queued forever behind itself.
-	rs.run.Status = "running"
-	startActiveWallclock(rs.run, time.Now())
+	setRunStatus(rs.run, "running", time.Now())
 	clearPending(rs.run)
 	// The failure text was the pause's reason (a budget pause records it);
 	// resuming answers it. Left in place, a resumed, working run went on
@@ -4275,7 +4267,10 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 			w.AppendEvent("warning", map[string]interface{}{"detail": warning})
 		}
 		w.AppendEvent("budget_lifted", data)
-		if err := w.WriteState(); err != nil {
+		rs.wmu.Lock()
+		err := w.WriteState()
+		rs.wmu.Unlock()
+		if err != nil {
 			return nil, err
 		}
 		out := rs.snapshotRun()
@@ -4285,17 +4280,7 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 	rs.wmu.Lock()
 	tracker := rs.tracker
 	if tracker == nil {
-		limits := budget.Budget{
-			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
-			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
-		}
-		tracker = budget.NewTracker(&limits)
-		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
-		tracker.Spend.AddUSD(rs.run.Budget.USD)
-		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
-		for i := 0; i < rs.run.Budget.Turns; i++ {
-			tracker.Spend.AddTurn()
-		}
+		_, tracker = trackerFromRecord(rs.run)
 		rs.tracker = tracker
 	}
 	rs.wmu.Unlock()
@@ -4318,11 +4303,15 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 	case "wallclock":
 		rs.run.Budget.Limit.WallclockS = 0
 	}
-	rs.wmu.Unlock()
 	w.AppendEvent("budget_lifted", map[string]interface{}{
 		"kind": kind, "was": was, "by": "human",
 	})
-	if err := w.WriteState(); err != nil {
+	// Marshalled under the run's lock: a lift lands while a paused question's
+	// advisor is still writing its advice into PendingData (found by the
+	// race detector on B-500's answer-then-gate test).
+	err = w.WriteState()
+	rs.wmu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	// The meters everywhere update now, not at the next model call.
@@ -4388,7 +4377,7 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 func (s *Service) finishUnacceptedRun(rs *runState, w *runlog.Writer, status, verdict, resolution string) error {
 	restoreErr := restoreAfterUnaccepted(rs)
 	rs.wmu.Lock()
-	rs.run.Status = status
+	setRunStatus(rs.run, status, time.Now())
 	rs.run.Verdict = verdict
 	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
@@ -4900,7 +4889,7 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 	if err != nil {
 		return
 	}
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	if rs.run.Stage == "intake" {
@@ -4949,7 +4938,7 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	rs.run.Verdict = "PASSED"
 	rs.run.CommitSHA = sha
 	if rs.run.Status == "paused" {
-		rs.run.Status = "done"
+		setRunStatus(rs.run, "done", time.Now())
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
 	}
@@ -5272,7 +5261,7 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	}
 	// Rejecting the test revokes the pre-authorized build.
 	rs.run.ChainBuild = nil
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	if rs.run.Stage == "intake" {
@@ -5642,7 +5631,7 @@ func recoverRun(rs *runState) {
 	// of exactly the runs worth being unhappy about.
 	recordSpend(rs, rs.tracker)
 	detail := fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack())
-	rs.run.Status = "failed"
+	setRunStatus(rs.run, "failed", time.Now())
 	rs.run.Verdict = "ABORTED"
 	rs.run.Failure = detail
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
@@ -6023,17 +6012,55 @@ func activeWallclock(run *runlog.Run, now time.Time) time.Duration {
 	return elapsed
 }
 
+// settleActiveWallclock closes the open working segment at now.
+//
+// It counts the segment whatever the status already says. It used to read
+// the segment through activeWallclock, which only counts it while the run is
+// "running" — so a caller that wrote "paused" first and settled second
+// recorded nothing, and an open segment that reached a later settle after its
+// status had moved on vanished (B-500).
 func settleActiveWallclock(run *runlog.Run, now time.Time) {
 	if run == nil {
 		return
 	}
-	run.ActiveWallclockMs = activeWallclock(run, now).Milliseconds()
+	if run.ActiveSince != "" {
+		if since, err := time.Parse(time.RFC3339Nano, run.ActiveSince); err == nil && now.After(since) {
+			run.ActiveWallclockMs += now.Sub(since).Milliseconds()
+		}
+	}
 	run.ActiveSince = ""
 }
 
+// startActiveWallclock opens a working segment. It only opens one on a
+// running run, and never over an open one, so a stray or repeated start —
+// the escalation monitor starts the clock too, possibly after the run has
+// already paused — cannot count a pause as work or count a segment twice.
 func startActiveWallclock(run *runlog.Run, now time.Time) {
-	if run != nil && run.ActiveSince == "" {
+	if run != nil && run.Status == "running" && run.ActiveSince == "" {
 		run.ActiveSince = now.UTC().Format(time.RFC3339Nano)
+	}
+}
+
+// setRunStatus is the one door a run's status passes through: entering
+// "running" opens a working segment, leaving it settles the open one.
+//
+// B-500: TI-36X T-005 test-first r-20261004-212715-5xxh worked 27 min,
+// paused 33 min on a question, worked 57 min after the answer and paused at
+// its gate — and recorded 27.5 min of active time. Only some pause paths
+// settled the clock (the question did, the gate did not), so the second
+// segment stayed open until the run ended, where nothing settled it either.
+// Every status write in this package goes through here; a test forbids the
+// bare assignment.
+func setRunStatus(run *runlog.Run, status string, now time.Time) {
+	if run == nil {
+		return
+	}
+	if status != "running" {
+		settleActiveWallclock(run, now)
+	}
+	run.Status = status
+	if status == "running" {
+		startActiveWallclock(run, now)
 	}
 }
 
@@ -6158,8 +6185,7 @@ func (s *Service) pauseAtSafePoint(rs *runState) bool {
 	data := rs.pausePending
 	rs.pausePending = nil
 	detail, _ := data["detail"].(string)
-	settleActiveWallclock(rs.run, time.Now())
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "history_duration"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = data

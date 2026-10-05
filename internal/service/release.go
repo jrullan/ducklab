@@ -97,13 +97,14 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 		ProjectID: projectID,
 		Stage:     "release",
 		Mode:      "solo",
-		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Stream:    true,
 		// Nothing executable runs, so the verdict is UNVERIFIED until a person
 		// approves the notes (P3).
 		Gate: "none",
 	}
+	// Born running outside the queue: its active clock opens here or never.
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -301,7 +302,7 @@ func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot 
 	rs.writer.AppendEvent("release_drafted", map[string]interface{}{
 		"version": notes.Version.String(), "path": rel, "tasks": len(notes.Milestones),
 	})
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = map[string]interface{}{

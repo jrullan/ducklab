@@ -310,13 +310,14 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 		// "operate" with nothing to say what had actually run.
 		Stage:     "triage",
 		Mode:      "solo",
-		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Stream:    true,
 		Gate:      "none",
 		Autonomy:  s.triageAutonomy(entry.Path),
 		Subject:   triageSubject(todo),
 	}
+	// Born running outside the queue: its active clock opens here or never.
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -458,7 +459,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	recordSpend(rs, tracker)
 
 	rs.run.Verdict = "UNVERIFIED"
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	// The proposals themselves, not just how many. Accepting the gate has to
