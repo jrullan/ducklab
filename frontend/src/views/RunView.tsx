@@ -840,6 +840,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ? Math.max(0, Date.parse(run.ended_at) - Date.parse(run.started_at))
           : 0;
   const elapsedLabel = `${Math.floor(elapsedMs / 60_000)}m`;
+  const originSummary = originTrace?.length
+    ? originTrace.length > 2
+      ? `${originTrace[0]!.id} → … → ${originTrace[originTrace.length - 1]!.id}`
+      : originTrace.map((crumb) => crumb.id).join(" → ")
+    : "no document spine";
+  const harnessSummary = run.harness_profile
+    ? [
+        ...(run.harness_profile.capabilities ?? []).slice(0, 2).map((capability) => capability.id),
+        `${run.harness_profile.effective_gate.kind} gate`,
+      ].join(" · ")
+    : "";
+  const harnessWarning = run.harness_profile
+    ? run.harness_profile.detection_error || (!run.harness_profile.effective_gate.command ? "no executable project gate" : "")
+    : "";
 
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
@@ -2528,127 +2542,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           >
             hide
           </button>
-          {originTrace !== null && (
-            <section className="rounded-card border border-hairline p-3" data-testid="run-origin-panel">
-              {originTrace.length === 0 ? (
-                <p className="text-sm text-ink-muted" data-testid="run-origin-none">this run has no document behind it — worth knowing</p>
-              ) : (() => {
-                const requirement = originTrace.find((crumb) => {
-                  const kind = traceKind(crumb);
-                  return kind.includes("require") || kind === "req" || crumb.id.toLowerCase().startsWith("req");
-                }) ?? originTrace[originTrace.length - 1];
-                const sentence = (requirement?.body ?? requirement?.title ?? "").trim();
-                const firstSentence = sentence.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || sentence;
-                return (
-                  <>
-                    <h2 className="text-sm font-medium text-ink">why this run exists</h2>
-                    {firstSentence && <blockquote className="mt-2 text-sm italic text-ink" data-testid="run-origin-requirement">“{firstSentence}”</blockquote>}
-                    <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs" aria-label="document chain" data-testid="run-origin-breadcrumb">
-                      {originTrace.map((crumb, index) => (
-                        <span key={crumb.id} className="flex items-center gap-1">
-                          {index > 0 && <span className="text-ink-muted" aria-hidden="true">←</span>}
-                          <a className="text-ink-secondary underline decoration-hairline underline-offset-2" href={traceHref(crumb)}>{crumb.title || crumb.id}</a>
-                        </span>
-                      ))}
-                    </nav>
-                  </>
-                );
-              })()}
-            </section>
-          )}
-          {(run.context_scopes?.length ?? 0) > 1 && (
-            <section className="rounded-card border border-hairline p-3" data-testid="run-diagnostic-scopes">
-              <h2 className="text-sm font-medium text-ink">diagnostic scope</h2>
-              <p className="mt-1 text-xs text-ink-muted">The consultant may compare these recorded project revisions; support scopes are read-only.</p>
-              <dl className="mt-2 space-y-2 text-xs">
-                {run.context_scopes!.map((scope) => (
-                  <div key={scope.name}>
-                    <dt className="font-medium text-ink">{scope.name}: {scope.project}</dt>
-                    <dd className="font-mono text-ink-muted">{scope.project_id} · {scope.revision || "unversioned"}</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-2 text-xs text-ink-secondary">
-                bug destination: {run.context_scopes!.find((scope) => scope.project_id === run.bug_target_project_id)?.project || run.bug_target_project_id || run.project_id}
-              </p>
-            </section>
-          )}
-          {run.harness_profile && (
-            <section className="rounded-card border border-hairline p-3" data-testid="run-harness-profile">
-              <h2 className="text-sm font-medium text-ink">project harness</h2>
-              {(run.harness_profile.capabilities?.length ?? 0) > 0 && (
-                <dl className="mt-2 space-y-1 text-xs">
-                  {run.harness_profile.capabilities!.map((capability) => (
-                    <div key={capability.id}>
-                      <dt className="font-medium text-ink">{capability.id}</dt>
-                      <dd className="break-words text-ink-muted">{capability.evidence?.join(", ") || "explicitly enabled"}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              <div className="mt-2 border-t border-hairline pt-2 text-xs">
-                <div className="text-ink-secondary">
-                  gate · {run.harness_profile.effective_gate.kind}
-                  {run.harness_profile.effective_gate.source ? ` (${run.harness_profile.effective_gate.source})` : ""}
-                </div>
-                {run.harness_profile.effective_gate.command ? (
-                  <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-gate">{run.harness_profile.effective_gate.command}</code>
-                ) : (
-                  <p className="mt-1 text-ink-muted">no executable project gate</p>
-                )}
-              </div>
-              {run.harness_profile.task_verification && (
-                <div className="mt-2 border-t border-hairline pt-2 text-xs">
-                  <div className="text-ink-secondary">task verification · authoritative</div>
-                  <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-task-gate">{run.harness_profile.task_verification}</code>
-                </div>
-              )}
-              {(run.harness_profile.diagnostics?.length ?? 0) > 0 && (
-                <div className="mt-2 border-t border-hairline pt-2 text-xs">
-                  <div className="text-ink-secondary">additional diagnostics</div>
-                  {run.harness_profile.diagnostics!.map((diagnostic) => (
-                    <div key={`${diagnostic.capability}:${diagnostic.name}`} className="mt-1">
-                      <span className="text-ink-muted">{diagnostic.capability} · {diagnostic.enforcement}</span>
-                      <code className="block whitespace-pre-wrap break-words font-mono text-ink">{diagnostic.command}</code>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warning">{run.harness_profile.detection_error}</p>}
-            </section>
-          )}
-          {run.review_evidence && (
-            <section className="rounded-card border border-hairline p-3" data-testid="run-review-evidence">
-              <h2 className="text-sm font-medium text-ink">semantic review</h2>
-              {run.review_evidence.status === "not_seated" ? (
-                <p className="mt-1 text-xs text-warning">No reviewer was seated. A green gate proves only that the configured commands passed.</p>
-              ) : (
-                <>
-                  <p className="mt-1 text-xs text-ink-secondary">
-                    {run.review_evidence.independence === "independent" ? "independent" : "self-consistency"} · {run.review_evidence.verdict || run.review_evidence.status}
-                    {run.review_evidence.findings ? ` · ${run.review_evidence.findings} finding(s)` : ""}
-                  </p>
-                  {run.review_evidence.implementer && run.review_evidence.reviewer && (
-                    <p className="mt-1 text-xs text-ink-muted">{run.review_evidence.implementer} → {run.review_evidence.reviewer}</p>
-                  )}
-                </>
-              )}
-            </section>
-          )}
-          {(run.gate_coverage?.length ?? 0) > 0 && (
-            <section className={`rounded-card border p-3 ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "border-critical" : "border-warning"}`} data-testid="run-gate-coverage">
-              <h2 className={`text-sm font-medium ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "text-critical" : "text-warning"}`}>
-                {run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "gate coverage failure" : "gate coverage caveat"}
-              </h2>
-              {run.gate_coverage!.map((finding) => (
-                <div className="mt-1 text-xs" key={`${finding.capability}:${finding.kind}`}>
-                  <p className="text-ink">{finding.detail}</p>
-                  {(finding.files?.length ?? 0) > 0 && <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink-muted">{finding.files!.join("\n")}</code>}
-                </div>
-              ))}
-            </section>
-          )}
-          {run.visual && <VisualCheck run={run} captureClient={client} />}
           {budget && finished && (
             /* A finished run's meters measure nothing any more; one line of
                what it actually spent, spenders beneath. */
@@ -2802,6 +2695,140 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+          {originTrace !== null && (
+            <details className="rounded-card border border-hairline p-3" data-testid="run-origin-panel">
+              <summary className="cursor-pointer select-none text-ink">
+                <span className="ml-1 text-sm font-medium">why this run exists</span>
+                <span className="mt-1 block truncate pl-4 text-xs text-ink-muted" data-testid="run-origin-summary">{originSummary}</span>
+              </summary>
+              <div className="mt-3 border-t border-hairline pt-3">
+                {originTrace.length === 0 ? (
+                  <p className="text-sm text-ink-muted" data-testid="run-origin-none">this run has no document behind it — worth knowing</p>
+                ) : (() => {
+                  const requirement = originTrace.find((crumb) => {
+                    const kind = traceKind(crumb);
+                    return kind.includes("require") || kind === "req" || crumb.id.toLowerCase().startsWith("req");
+                  }) ?? originTrace[originTrace.length - 1];
+                  const sentence = (requirement?.body ?? requirement?.title ?? "").trim();
+                  const firstSentence = sentence.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || sentence;
+                  return (
+                    <>
+                      {firstSentence && <blockquote className="text-sm italic text-ink" data-testid="run-origin-requirement">“{firstSentence}”</blockquote>}
+                      <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs" aria-label="document chain" data-testid="run-origin-breadcrumb">
+                        {originTrace.map((crumb, index) => (
+                          <span key={crumb.id} className="flex items-center gap-1">
+                            {index > 0 && <span className="text-ink-muted" aria-hidden="true">←</span>}
+                            <a className="text-ink-secondary underline decoration-hairline underline-offset-2" href={traceHref(crumb)}>{crumb.title || crumb.id}</a>
+                          </span>
+                        ))}
+                      </nav>
+                    </>
+                  );
+                })()}
+              </div>
+            </details>
+          )}
+          {(run.context_scopes?.length ?? 0) > 1 && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-diagnostic-scopes">
+              <h2 className="text-sm font-medium text-ink">diagnostic scope</h2>
+              <p className="mt-1 text-xs text-ink-muted">The consultant may compare these recorded project revisions; support scopes are read-only.</p>
+              <dl className="mt-2 space-y-2 text-xs">
+                {run.context_scopes!.map((scope) => (
+                  <div key={scope.name}>
+                    <dt className="font-medium text-ink">{scope.name}: {scope.project}</dt>
+                    <dd className="font-mono text-ink-muted">{scope.project_id} · {scope.revision || "unversioned"}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-2 text-xs text-ink-secondary">
+                bug destination: {run.context_scopes!.find((scope) => scope.project_id === run.bug_target_project_id)?.project || run.bug_target_project_id || run.project_id}
+              </p>
+            </section>
+          )}
+          {run.harness_profile && (
+            <details className="rounded-card border border-hairline p-3" data-testid="run-harness-profile">
+              <summary className="cursor-pointer select-none text-ink">
+                <span className="ml-1 text-sm font-medium">project harness</span>
+                <span className="mt-1 block truncate pl-4 text-xs text-ink-muted" data-testid="run-harness-summary">{harnessSummary}</span>
+                {harnessWarning && (
+                  <span className="mt-1 block truncate pl-4 text-xs text-warning" data-testid="run-harness-warning" title={harnessWarning}>⚠ {harnessWarning}</span>
+                )}
+              </summary>
+              <div className="mt-3 border-t border-hairline pt-3">
+                {(run.harness_profile.capabilities?.length ?? 0) > 0 && (
+                  <dl className="space-y-1 text-xs">
+                    {run.harness_profile.capabilities!.map((capability) => (
+                      <div key={capability.id}>
+                        <dt className="font-medium text-ink">{capability.id}</dt>
+                        <dd className="break-words text-ink-muted">{capability.evidence?.join(", ") || "explicitly enabled"}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                  <div className="text-ink-secondary">
+                    gate · {run.harness_profile.effective_gate.kind}
+                    {run.harness_profile.effective_gate.source ? ` (${run.harness_profile.effective_gate.source})` : ""}
+                  </div>
+                  {run.harness_profile.effective_gate.command ? (
+                    <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-gate">{run.harness_profile.effective_gate.command}</code>
+                  ) : (
+                    <p className="mt-1 text-ink-muted">no executable project gate</p>
+                  )}
+                </div>
+                {run.harness_profile.task_verification && (
+                  <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                    <div className="text-ink-secondary">task verification · authoritative</div>
+                    <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-task-gate">{run.harness_profile.task_verification}</code>
+                  </div>
+                )}
+                {(run.harness_profile.diagnostics?.length ?? 0) > 0 && (
+                  <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                    <div className="text-ink-secondary">additional diagnostics</div>
+                    {run.harness_profile.diagnostics!.map((diagnostic) => (
+                      <div key={`${diagnostic.capability}:${diagnostic.name}`} className="mt-1">
+                        <span className="text-ink-muted">{diagnostic.capability} · {diagnostic.enforcement}</span>
+                        <code className="block whitespace-pre-wrap break-words font-mono text-ink">{diagnostic.command}</code>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warning">{run.harness_profile.detection_error}</p>}
+              </div>
+            </details>
+          )}
+          {run.review_evidence && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-review-evidence">
+              <h2 className="text-sm font-medium text-ink">semantic review</h2>
+              {run.review_evidence.status === "not_seated" ? (
+                <p className="mt-1 text-xs text-warning">No reviewer was seated. A green gate proves only that the configured commands passed.</p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    {run.review_evidence.independence === "independent" ? "independent" : "self-consistency"} · {run.review_evidence.verdict || run.review_evidence.status}
+                    {run.review_evidence.findings ? ` · ${run.review_evidence.findings} finding(s)` : ""}
+                  </p>
+                  {run.review_evidence.implementer && run.review_evidence.reviewer && (
+                    <p className="mt-1 text-xs text-ink-muted">{run.review_evidence.implementer} → {run.review_evidence.reviewer}</p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+          {(run.gate_coverage?.length ?? 0) > 0 && (
+            <section className={`rounded-card border p-3 ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "border-critical" : "border-warning"}`} data-testid="run-gate-coverage">
+              <h2 className={`text-sm font-medium ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "text-critical" : "text-warning"}`}>
+                {run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "gate coverage failure" : "gate coverage caveat"}
+              </h2>
+              {run.gate_coverage!.map((finding) => (
+                <div className="mt-1 text-xs" key={`${finding.capability}:${finding.kind}`}>
+                  <p className="text-ink">{finding.detail}</p>
+                  {(finding.files?.length ?? 0) > 0 && <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink-muted">{finding.files!.join("\n")}</code>}
+                </div>
+              ))}
+            </section>
+          )}
+          {run.visual && <VisualCheck run={run} captureClient={client} />}
           {/* The gate on a finished run is already said once, in the turn
               list and the header; the box earned its place only while the
               command is still to run. */}
