@@ -78,7 +78,7 @@ export function DecisionCard({
   landedAs?: string;
   /** B-261: a green gate over an unconvinced reviewer belongs INSIDE the
    * decision, not beside it. */
-  dissent?: { verdict: string; findings: number; notes: string[] } | null;
+  dissent?: { verdict: string; findings: number; notes: string[]; testFirst?: boolean } | null;
   /** B-435: a document draft whose reviewer asked for changes. The findings
    * are the reason Accept is absent, so they live INSIDE the decision, above
    * the note they are meant to travel in — not in a sibling card pointing at
@@ -231,7 +231,25 @@ export function DecisionCard({
         </p>
       )}
 
-      {dissent && (
+      {dissent && dissent.testFirst && (
+        // B-501: a test-first's tests FAIL by design, and accepting one makes
+        // it the build's oracle (B-490). "The tests pass, the reviewer only
+        // advises" was false on both counts for TI-36X T-005.
+        <div className="mb-2 rounded border border-serious p-2" data-testid="decision-dissent">
+          <span className="text-xs font-medium text-serious">red test, reviewer still requests changes</span>
+          <p className="mt-1 text-sm text-ink">
+            The test fails as a specification should, but the reviewer's last verdict was “{dissent.verdict}”
+            {dissent.findings > 0 && ` with ${dissent.findings} finding${dissent.findings === 1 ? "" : "s"}`}
+            {" "}and its rounds ran out. Accepting locks this test in as the build's oracle — decide these objections first:
+          </p>
+          <ul className="mt-1 space-y-1 text-sm" data-testid="dissent-findings-list">
+            {dissent.notes.map((n, i) => (
+              <li key={i} className="text-ink-secondary">{n}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {dissent && !dissent.testFirst && (
         <div className="mb-2 rounded border border-serious p-2" data-testid="decision-dissent">
           <span className="text-xs font-medium text-serious">green gate, unconvinced reviewer</span>
           <p className="mt-1 text-sm text-ink">

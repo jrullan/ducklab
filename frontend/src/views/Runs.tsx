@@ -32,6 +32,8 @@ function verdictText(r: Run): string {
   if (r.verdict === "PASSED" && r.review_evidence?.status === "not_seated") label = "gates passed · no reviewer";
   if (r.verdict === "PASSED" && r.review_evidence?.status === "approved" && r.review_evidence.independence === "self") label = "gates passed · self-reviewed";
   if (r.verdict === "PASSED" && r.review_evidence?.status === "approved" && r.review_evidence.independence === "independent") label = "passed · independent review";
+  // B-501: a test-first passes on its gate alone; say when its reviewer still objected.
+  if (r.verdict === "PASSED" && r.review_evidence?.status === "dissent") label = "passed · reviewer still requests changes";
   if (r.verdict && r.acceptance_gate?.green) return `${label} · reproduced green at accept`;
   return label;
 }
