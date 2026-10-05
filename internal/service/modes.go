@@ -782,18 +782,21 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	}
 
 	// B-504 (TI-36X T-008): a task citing a REF-IMG is built and reviewed by
-	// seats that are shown it — every implementer, reviewer and judge turn,
-	// retries and resumes included, through the runner. Solo and pair also
-	// render the candidate for the seeing seats between rounds; tournament
-	// and split contestants work in their own worktrees, which the render
-	// command does not know about, so they get the references only.
+	// seats that are shown it — every implementer, reviewer, judge and
+	// advisor turn (B-507), retries and resumes included, through the runner.
+	// Solo and pair also render the candidate between turns whenever the tree
+	// changed (B-505), and the slices citing a compared reference are
+	// measured by that render rather than by the implementer's report
+	// (B-506). Tournament and split contestants work in their own worktrees,
+	// which the render command does not know about, so they get the
+	// references only, and their slices stay the implementer's.
 	vision := s.newTaskVision(ctx, mc.rs.run.ProjectID, mc.req.TaskID, []string{mc.entry.Path, root}, mc.roster,
-		[]config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleJudge},
+		[]config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleJudge, config.RoleAdvisor},
 		func(kind string, data map[string]interface{}) { mc.rs.writer.AppendEvent(kind, data) })
 	if m := mc.rs.run.Mode; m == "" || m == "solo" || m == "pair" {
 		contract := effectiveRenderContract(mc.projCfg)
 		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 {
-			vision = vision.withFeedback(mc.rs.runDir, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
+			vision = vision.withFeedback(mc.rs.runDir, base.Diff, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
 				rendered, err := captureRender(ctx, root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
 				if len(rendered.Captures) == 0 {
 					if err == nil {
@@ -803,6 +806,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 				}
 				return runVisualGate(mc.entry.Path, contract, mc.rs.writer, rendered.Captures, root), rendered.Captures, nil
 			})
+			base.Visual = vision.visualCheck(deliverables, contract)
 		}
 	}
 	base.Runner = vision.wrap(base.Runner, mc.roster)

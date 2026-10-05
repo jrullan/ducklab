@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -54,9 +55,15 @@ type ExecuteParams struct {
 	// acceptance contract, but never become reviewer findings against the
 	// implementer.
 	ManualDeliverables map[int]bool
-	AgentLoop          *agent.Loop
-	ExecContext        *tools.ExecContext
-	Rounds             int
+	// Visual is the run's visual comparison when the build renders between
+	// turns (solo and pair with [[render.compare]] on a task citing a
+	// reference): the slices it measures are the harness's, not the
+	// implementer's (visualcheck.go, B-506). nil leaves every slice to the
+	// implementer's report.
+	Visual      *VisualCheck
+	AgentLoop   *agent.Loop
+	ExecContext *tools.ExecContext
+	Rounds      int
 	// KnownIDs are the section ids that exist across the project's documents
 	// (requirements, spec, plan). A document council's structure check flags
 	// an Implements: target outside this set — eleven dangling references
@@ -646,7 +653,18 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 				}
 			}
-			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role], priorAttempt)
+			// B-505 (TI-36X T-008 r-20261005-012549-uvns): every implementer
+			// turn — the round's, a report retry, an advisor retry, a resumed
+			// one — and every review starts from a measurement of the tree as it
+			// is. Measure renders only when the tree changed since the last one.
+			var visual *VisualMeasurement
+			switch turn.Role {
+			case config.RoleImplementer:
+				visual = params.Visual.measure(ctx, round, "before implementer turn")
+			case config.RoleReviewer:
+				visual = params.Visual.measure(ctx, round, "before review")
+			}
+			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role], priorAttempt, visual)
 			priorAttempt = ""
 			if manifestPatchBase != nil {
 				prompt += "\n\n## Canonical plan manifest — patch this object\n\n```json\n" +
@@ -1183,27 +1201,60 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// acceptance slice 1 was explicitly partial, and auto mode committed
 			// it. Convert the contradiction into a normal review ledger item so
 			// it receives the same bounded repair loop as any other finding.
+			//
+			// A harness-measured slice is judged by the measurement the reviewer
+			// was shown, never by the self-report (B-506, TI-36X T-008
+			// r-20261005-012549-uvns): passed closes it, a diagnostic mismatch is
+			// the person's caveat and does not block, a required mismatch is a
+			// finding carrying the figure. The self-report on those slices is
+			// already normalized out of lastReport.
 			if turn.Role == config.RoleReviewer && lastReport != nil {
 				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil && v.Verdict == "approve" {
-					if gap := incompleteDeliverables(lastReport, len(params.Deliverables), params.ManualDeliverables); len(gap) > 0 {
+					gap := incompleteDeliverables(lastReport, len(params.Deliverables), params.ManualDeliverables)
+					visualGap := params.Visual.visualGap(visual)
+					if len(gap) > 0 || len(visualGap) > 0 {
 						v.Verdict = "request-changes"
-						for _, id := range gap {
+						sliceText := func(id int) string {
 							item := fmt.Sprintf("acceptance slice %d", id)
 							if id > 0 && id <= len(params.Deliverables) {
 								item += ": " + params.Deliverables[id-1]
 							}
+							return item
+						}
+						for _, id := range gap {
 							v.Findings = append(v.Findings, agent.Finding{
 								Severity: "major", File: "*",
 								Invariant: "Every numbered acceptance slice is complete before approval",
-								Issue:     item + " remains undelivered in the implementer's completion report",
+								Issue:     sliceText(id) + " remains undelivered in the implementer's completion report",
 								Fix:       "complete the slice and report it done, or return concrete evidence that the report was wrong",
 							})
 						}
-						emit(params, "deliverables_gap", map[string]interface{}{
+						var visualIDs []int
+						figures := map[string]string{}
+						for id := range visualGap {
+							visualIDs = append(visualIDs, id)
+						}
+						sort.Ints(visualIDs)
+						for _, id := range visualIDs {
+							figure := visualFigures(visualGap[id])
+							figures[fmt.Sprint(id)] = figure
+							v.Findings = append(v.Findings, agent.Finding{
+								Severity: "major", File: "*",
+								Invariant: "A required visual check passes before approval",
+								Issue:     sliceText(id) + " — the harness's visual check measured " + figure,
+								Fix:       "change the product so the capture looks like the reference; the percentage follows the appearance, never the other way round",
+							})
+						}
+						event := map[string]interface{}{
 							"round": round, "undelivered": gap, "original_verdict": "approve",
 							"effective_verdict": "request-changes",
 							"detail":            "reviewer approval was converted to request-changes because the work contract remains incomplete",
-						})
+						}
+						if len(visualIDs) > 0 {
+							event["visual"] = visualIDs
+							event["visual_figures"] = figures
+						}
+						emit(params, "deliverables_gap", event)
 					}
 				}
 			}
@@ -1307,9 +1358,19 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if consultRetries > 0 {
 						reportData["retry"] = consultRetries
 					}
-					reportData["missing"] = rawReport.Undelivered()
-					emit(params, "deliverables_report", reportData)
+					// A harness-measured slice is the visual check's, not the
+					// implementer's: its self-report is neither distress nor a
+					// stuck item (B-506). Manual slices were already exempt from
+					// both here; "missing" is what the service's escalation counts,
+					// and it counted them anyway — the same report now means the
+					// same thing on both sides.
 					lastReport = reportWithoutManualItems(rawReport, len(params.Deliverables), params.ManualDeliverables)
+					if measured := params.Visual.ids(); len(measured) > 0 {
+						lastReport = reportWithoutItems(lastReport, len(params.Deliverables), measured, harnessMeasuredNote)
+						reportData["visual"] = params.Visual.sortedIDs()
+					}
+					reportData["missing"] = lastReport.Undelivered()
+					emit(params, "deliverables_report", reportData)
 					if lastReport.Unreported && reportRetries == 0 {
 						reportRetries++
 						reportRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)
@@ -1604,7 +1665,7 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if script.MaterializeCandidate != nil {
 			promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
 		}
-		prompt, err := buildPrompt(&turn, params, promptTranscript, nil, nil, "", nil, nil, nil, "")
+		prompt, err := buildPrompt(&turn, params, promptTranscript, nil, nil, "", nil, nil, nil, "", nil)
 		if err != nil {
 			return err
 		}
@@ -1751,7 +1812,7 @@ func hasParentEvidence(prompt string) bool {
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string, prior string) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string, prior string, visual *VisualMeasurement) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 	if hasParentEvidence(params.Prompt) {
@@ -1784,6 +1845,9 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		if len(params.Deliverables) > 0 {
 			b.WriteString("\n\n" + deliverablesContract(params.Deliverables))
 		}
+		if section := params.Visual.forImplementer(visual); section != "" {
+			b.WriteString("\n\n" + section)
+		}
 		// Put review feedback LAST. On a long task prompt, placing it before
 		// the specification and deliverables made a small implementer read the
 		// files, run a green compiler gate, and declare success without changing
@@ -1813,7 +1877,10 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		if operational != "" {
 			b.WriteString("\n\n## Operational summary\n\n```json\n" + operational + "\n```\n")
 		}
-		if section := deliverablesForReviewer(params.Deliverables, report); section != "" {
+		if section := deliverablesForReviewer(params.Deliverables, report, params.Visual.ids()); section != "" {
+			b.WriteString("\n\n" + section)
+		}
+		if section := params.Visual.forReviewer(visual); section != "" {
 			b.WriteString("\n\n" + section)
 		}
 		// A document critic gets the draft under its own heading, with the

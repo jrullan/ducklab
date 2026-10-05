@@ -548,9 +548,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// B-504: a test for a task that cites a REF-IMG is written and reviewed by
 	// seats shown the reference — the test is where "matches the photo"
 	// becomes assertions. No render between rounds: the writer edits tests,
-	// not the product, so a capture would show nothing it changed.
+	// not the product, so a capture would show nothing it changed. The
+	// advisor consulted on a distressed writer sees the reference too (B-507).
 	params.Runner = s.newTaskVision(ctx, rs.run.ProjectID, req.TaskID, []string{rs.projectPath, projectRoot}, roster,
-		[]config.Role{config.RoleImplementer, config.RoleReviewer},
+		[]config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleAdvisor},
 		func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) }).wrap(params.Runner, roster)
 
 	// The round gate earns its suite only in pair: two rounds, and a green

@@ -124,6 +124,9 @@ export interface TurnBlock {
   /** Deliverable ids the implementer reported undelivered when this
    * reviewer approved anyway — the contradiction the record flagged. */
   deliverablesGap?: number[];
+  /** Harness-measured slices that failed a required visual check when this
+   * reviewer approved (B-506), with the figure that decided it. */
+  visualGap?: { id: number; figure: string }[];
   /** What images the engine showed this turn (B-504): reference ids, the
    * candidate's capture and diff — or that the seat could not see them. A
    * build that "matches REF-IMG" was once built and approved by seats that
@@ -154,6 +157,9 @@ export interface DeliverableLine {
   text: string;
   status: "done" | "partial" | "not_done" | "blocked" | "unreported";
   note?: string;
+  /** The harness's visual check measures this slice, not the implementer's
+   * report (B-506): its status is the implementer's word, nothing more. */
+  measured?: boolean;
 }
 export interface DeliverablesState {
   round: number;
@@ -164,6 +170,8 @@ export interface DeliverablesState {
   total: number;
   /** True when a reviewer approved over items the implementer reported undelivered. */
   gap: boolean;
+  /** Slice ids the harness's visual check measures (B-506). */
+  measured: number[];
 }
 
 /** The LATEST deliverables_report wins: a retried implementer turn re-files. */
@@ -189,13 +197,16 @@ export function buildDeliverables(events: DucklabEvent[]): DeliverablesState | n
       if (id >= 1) byId.set(id, { status: String(it.status ?? ""), note: it.note ? String(it.note) : undefined });
     }
   }
+  const measured = Array.isArray(d.visual) ? d.visual.map(Number).filter((id: number) => id >= 1) : [];
   const lines: DeliverableLine[] = [];
   for (let id = 1; id <= Math.max(total, texts.length); id++) {
     const r = byId.get(id);
     const status = (r && ["done", "partial", "not_done", "blocked"].includes(r.status)
       ? r.status
       : "unreported") as DeliverableLine["status"];
-    lines.push({ id, text: texts[id - 1] ?? `deliverable ${id}`, status, note: r?.note });
+    const line: DeliverableLine = { id, text: texts[id - 1] ?? `deliverable ${id}`, status, note: r?.note };
+    if (measured.includes(id)) line.measured = true;
+    lines.push(line);
   }
   return {
     round: Number(d.round ?? 0),
@@ -205,6 +216,7 @@ export function buildDeliverables(events: DucklabEvent[]): DeliverablesState | n
     done: lines.filter((l) => l.status === "done").length,
     total: lines.length,
     gap,
+    measured,
   };
 }
 
@@ -497,10 +509,15 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         // card: an unreviewed progress report must not read as a result.
         const round = Number(d.round ?? 0);
         const ids = Array.isArray(d.undelivered) ? d.undelivered.map(Number) : [];
+        const figures = (d.visual_figures ?? {}) as Record<string, unknown>;
+        const visual = Array.isArray(d.visual)
+          ? d.visual.map((id: unknown) => ({ id: Number(id), figure: String(figures[String(id)] ?? "") }))
+          : [];
         for (let i = blocks.length - 1; i >= 0; i--) {
           const rb = blocks[i]!;
           if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
             rb.deliverablesGap = ids;
+            if (visual.length > 0) rb.visualGap = visual;
             break;
           }
         }

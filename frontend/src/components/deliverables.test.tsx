@@ -124,6 +124,41 @@ describe("an approve over undelivered items", () => {
   });
 });
 
+// B-506 (TI-36X T-008 r-20261005-012549-uvns): a slice the harness's visual
+// check measures says so on the checklist, and an approval converted by a
+// failed required check names the slice and the figure.
+describe("a harness-measured slice", () => {
+  it("is marked measured on the report and the checklist", () => {
+    const d = buildDeliverables([report(5, { visual: [1] })])!;
+    expect(d.measured).toEqual([1]);
+    expect(d.lines[0]!.measured).toBe(true);
+    expect(d.lines[1]!.measured).toBeUndefined();
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "luna", content: 'Built.\n\n{"deliverables":[{"id":1,"status":"partial"},{"id":2,"status":"done"}]}' }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer" }),
+    ];
+    render(<ConversationTurn block={buildTurns(events)[0]!} roster={["luna"]} deliverableTexts={["Match REF-IMG-6c63e390", "Scale"]} deliverableMeasured={[1]} />);
+    const marks = screen.getAllByTestId("deliverable-measured");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.closest("[data-testid=deliverable-inline]")!.getAttribute("data-id")).toBe("1");
+  });
+
+  it("names a failed required check on the converted verdict", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm52" }),
+      ev("message", 2, { round: 1, turn: 1, role: "reviewer", duckling: "glm52", content: "{}", verdict: "request-changes", findings: [] }),
+      ev("turn_end", 3, { round: 1, turn: 1, role: "reviewer" }),
+      ev("deliverables_gap", 4, { round: 1, undelivered: [], visual: [1], visual_figures: { "1": "calculator.png against REF-IMG-6c63e390: 44.5% of pixels differ (allowed 2.0%)" } }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.visualGap).toEqual([{ id: 1, figure: "calculator.png against REF-IMG-6c63e390: 44.5% of pixels differ (allowed 2.0%)" }]);
+    render(<ConversationTurn block={block} roster={["glm52"]} />);
+    expect(screen.getByTestId("visual-gap").textContent).toMatch(/slice 1 \(calculator.png against REF-IMG-6c63e390: 44.5%/);
+    expect(screen.queryByTestId("deliverables-gap")).toBeNull();
+  });
+});
+
 describe("an ask_advisor consult", () => {
   it("renders the duck's answer open, in the middle of the turn", () => {
     const events: DucklabEvent[] = [

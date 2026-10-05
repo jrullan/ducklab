@@ -28,6 +28,7 @@ export function ConversationTurn({
   collapsed = false,
   onToggle,
   deliverableTexts,
+  deliverableMeasured,
 }: {
   block: TurnBlock;
   roster: readonly string[];
@@ -48,6 +49,8 @@ export function ConversationTurn({
   /** The task's deliverable texts, when the run's report event carried them,
    * so the implementer's closing report renders as a readable checklist. */
   deliverableTexts?: string[];
+  /** Slice ids the harness's visual check measures (B-506). */
+  deliverableMeasured?: number[];
 }) {
   const anonymous = !!block.label;
   const isGate = block.role === "gate";
@@ -214,7 +217,7 @@ export function ConversationTurn({
           its own compact toggle — n/m at a glance, the checklist on click,
           without unfolding forty tool calls. */}
       {collapsed && report && (
-        <FoldedReport items={report.items} done={reportDone} texts={deliverableTexts} />
+        <FoldedReport items={report.items} done={reportDone} texts={deliverableTexts} measured={deliverableMeasured} />
       )}
 
       {isGate && block.done && block.gateExitCode !== undefined && (
@@ -304,7 +307,7 @@ export function ConversationTurn({
           ) : (
             <>
               {report.prose && <Prose body={report.prose} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
-              <DeliverablesInline items={report.items} texts={deliverableTexts} />
+              <DeliverablesInline items={report.items} texts={deliverableTexts} measured={deliverableMeasured} />
             </>
           )}
         </div>
@@ -332,10 +335,12 @@ function FoldedReport({
   items,
   done,
   texts,
+  measured,
 }: {
   items: { id: number; status: string; note?: string }[];
   done: number;
   texts?: string[];
+  measured?: number[];
 }) {
   const [open, setOpen] = useState(false);
   const complete = done === items.length;
@@ -352,7 +357,7 @@ function FoldedReport({
       >
         {complete ? "☑" : "◐"} {done}/{items.length} <span className="text-ink-muted">{open ? "⌄" : "›"}</span>
       </button>
-      {open && <DeliverablesInline items={items} texts={texts} />}
+      {open && <DeliverablesInline items={items} texts={texts} measured={measured} />}
     </div>
   );
 }
@@ -370,6 +375,12 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
         <span className="ml-2 text-sm" data-testid="deliverables-gap" style={{ color: statusVar("critical") }}>
           ⚠ approved over deliverables the implementer reported undelivered: {block.deliverablesGap.join(", ")}
         </span>
+      )}
+      {block.visualGap && block.visualGap.length > 0 && (
+        <div className="mt-1 text-sm" data-testid="visual-gap" style={{ color: statusVar("critical") }}>
+          ⚠ approved over a failed required visual check:{" "}
+          {block.visualGap.map((g) => `slice ${g.id}${g.figure ? ` (${g.figure})` : ""}`).join("; ")}
+        </div>
       )}
       {findings.length === 0 ? (
         approved ? null : (
