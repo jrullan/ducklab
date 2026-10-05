@@ -1058,6 +1058,27 @@ func recordLimits(rs *runState, b *budget.Budget) {
 	}
 }
 
+// trackerFromRecord rebuilds a resumed run's tracker from its record: the
+// ceilings recorded on it — including any a person lifted while it was paused
+// — and a ledger continuing from what it already spent. A tracker reborn at
+// zero makes "resume" a way to double every budget and restarts the budget
+// clock. It was written out at each resume path; the test-first one never got
+// it (B-500).
+func trackerFromRecord(run *runlog.Run) (*budget.Budget, *budget.Tracker) {
+	b := &budget.Budget{
+		MaxUSD: run.Budget.Limit.USD, MaxTokens: run.Budget.Limit.Tokens,
+		MaxTurns: run.Budget.Limit.Turns, MaxWallclockS: run.Budget.Limit.WallclockS,
+	}
+	tracker := budget.NewTracker(b)
+	tracker.Spend.AddTokens(run.Budget.Tokens)
+	tracker.Spend.AddUSD(run.Budget.USD)
+	tracker.Spend.RestoreWallclock(run.Budget.WallclockS)
+	for i := 0; i < run.Budget.Turns; i++ {
+		tracker.Spend.AddTurn()
+	}
+	return b, tracker
+}
+
 // recordSpend copies the budget tracker's totals onto the run record.
 func recordSpend(rs *runState, tracker *budget.Tracker) {
 	if rs == nil || rs.run == nil {

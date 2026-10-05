@@ -183,7 +183,6 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 		ProjectID:          projectID,
 		Stage:              "chat",
 		Mode:               "solo",
-		Status:             "running",
 		StartedAt:          time.Now().UTC().Format(time.RFC3339),
 		Stream:             true,
 		Gate:               "none",
@@ -201,6 +200,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	if req.AboutKind == "task" {
 		run.TaskID = req.AboutID
 	}
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -299,7 +299,7 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 	rs.wmu.Lock()
 	rs.cancel = cancel
 	rs.done = make(chan struct{})
-	rs.run.Status = "running"
+	setRunStatus(rs.run, "running", time.Now())
 	clearPending(rs.run)
 	w.WriteState()
 	rs.wmu.Unlock()
@@ -333,7 +333,7 @@ func (s *Service) ChatEnd(ctx context.Context, runID string) (*runlog.Run, error
 		return nil, err
 	}
 	rs.wmu.Lock()
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Resolution = "ended by human"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
@@ -465,7 +465,7 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	})
 
 	rs.wmu.Lock()
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "chat"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "chat"})

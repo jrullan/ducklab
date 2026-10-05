@@ -232,7 +232,7 @@ func (s *Service) reconcileAcceptedRun(rs *runState) (bool, error) {
 		return false, err
 	}
 	previousStatus, previousPending := rs.run.Status, rs.run.PendingKind
-	rs.run.Status = "done"
+	setRunStatus(rs.run, "done", time.Now())
 	if rs.run.EndedAt == "" {
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -332,7 +332,13 @@ func (s *Service) markEngineRestart(rs *runState) error {
 	if err != nil {
 		return err
 	}
-	rs.run.Status = "paused"
+	// The engine that held this run died with its working segment open. It
+	// ended no later than the run's last event; settling at recovery time
+	// would count the downtime as work (B-500).
+	if last, ok := runlog.LastEventTime(rs.runDir); ok {
+		settleActiveWallclock(rs.run, last)
+	}
+	setRunStatus(rs.run, "paused", s.now())
 	rs.run.PendingKind = "engine_restart"
 	if rs.run.PendingSince == "" {
 		rs.run.PendingSince = s.now().UTC().Format(time.RFC3339Nano)
@@ -364,7 +370,7 @@ func (s *Service) RequestRestart(ctx context.Context, requester string) error {
 		if err != nil {
 			return err
 		}
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", s.now())
 		rs.run.PendingKind = "engine_restart"
 		now := s.now().UTC()
 		rs.run.PendingSince = now.Format(time.RFC3339Nano)
@@ -539,7 +545,7 @@ func (s *Service) PauseAllRuns(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			rs.run.Status = "paused"
+			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "engine_shutdown"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			w.AppendEvent("checkpoint", map[string]interface{}{
@@ -654,8 +660,7 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	}
 	advisor := s.pickAdvisor(rs)
 	rs.wmu.Lock()
-	settleActiveWallclock(rs.run, time.Now())
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "question"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = map[string]interface{}{

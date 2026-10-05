@@ -78,6 +78,10 @@ type TestFirstRequest struct {
 	// Redo is the explicit consent to redo a task that was already accepted;
 	// without it, launching finished work is refused (see RunRequest.Redo).
 	Redo bool `json:"redo,omitempty"`
+	// resumed is set only by RunResume: the run keeps its recorded ceilings
+	// and its ledger continues from what it already spent, as build and
+	// stage resumes already did (B-500).
+	resumed bool
 }
 
 const maxRedoCommitsPerTask = 10
@@ -206,7 +210,6 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		AgentTurns:       req.AgentTurns,
 		TaskID:           req.TaskID,
 		TaskBodyHash:     taskBodyHashForTask(ctx, s, projectID, req.TaskID),
-		Status:           "running",
 		StartedAt:        time.Now().UTC().Format(time.RFC3339),
 		Stream:           true,
 		Gate:             string(verify.Gate(projCfg.Verify.Mode)),
@@ -217,6 +220,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	if err := s.createRunWorktree(run, entry.Path); err != nil {
 		return nil, err
 	}
+	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		if cleanupErr := vcs.New(entry.Path).WorktreeRemove(run.WorktreePath); cleanupErr != nil {
@@ -478,6 +482,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	}, projCfg.Budget)
 	limits := &limitsValue
 	tracker := budget.NewTracker(limits)
+	if req.resumed {
+		// B-500: a test-first answered after its question re-entered here
+		// with a fresh tracker — the budget card restarted its clock at zero
+		// (57 of 86 working minutes shown), and the ceilings the person had
+		// lifted while it waited came back, so they lifted them twice more.
+		limits, tracker = trackerFromRecord(rs.snapshotRun())
+	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
 	ectx := &tools.ExecContext{
@@ -601,7 +612,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// installing a spec nobody read stays off the table (P3).
 	if verdict == "FAILED" && autonomy == "yolo" && s.autopilotOn(projectID) {
 		rs.wmu.Lock()
-		rs.run.Status = "failed"
+		setRunStatus(rs.run, "failed", time.Now())
 		rs.run.Failure = detail
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
@@ -617,7 +628,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// specification of the next run, and installing one nobody read would put
 	// a model's opinion where a person's belongs.
 	rs.wmu.Lock()
-	rs.run.Status = "paused"
+	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = map[string]interface{}{
@@ -855,7 +866,7 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 	runID := rs.snapshotRun().ID
 	if _, err := s.RunAcceptAs(ctx, runID, "chained: the test landed red", "auto:tdd"); err != nil {
 		rs.wmu.Lock()
-		rs.run.Status = "paused"
+		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "gate"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		if rs.run.PendingData == nil {

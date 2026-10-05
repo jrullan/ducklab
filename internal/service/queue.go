@@ -122,8 +122,7 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	q.mu.Unlock()
 
 	item.rs.wmu.Lock()
-	settleActiveWallclock(item.rs.run, time.Now())
-	item.rs.run.Status = "queued"
+	setRunStatus(item.rs.run, "queued", time.Now())
 	item.rs.run.QueuedReason = reason
 	item.rs.writer.AppendEvent("run_queued", map[string]interface{}{
 		"reason": reason,
@@ -206,8 +205,7 @@ func (q *runQueue) reserve(item *queued) {
 
 func (q *runQueue) start(s *Service, item *queued) {
 	item.rs.wmu.Lock()
-	item.rs.run.Status = "running"
-	startActiveWallclock(item.rs.run, time.Now())
+	setRunStatus(item.rs.run, "running", time.Now())
 	item.rs.run.QueuedReason = ""
 	item.rs.writer.WriteState()
 	runID := item.rs.run.ID
