@@ -406,4 +406,6 @@ export const KNOWN_EVENT_TYPES = [
   "overflow",
   "engine_recovered",
   "config_amendment",
+  // B-513: a chat moved to another consultant duckling mid-conversation.
+  "consultant_switched",
 ] as const;

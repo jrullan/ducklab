@@ -213,18 +213,30 @@ describe("ChatAbout image attachments", () => {
     await waitFor(() => expect(screen.queryByTestId("chat-image-chip")).toBeNull());
   });
 
-  it("disables image selection for a text-only duckling and refuses non-images", async () => {
+  // Rewritten for B-512. This pinned a DISABLED "Add image" whose only
+  // explanation was a hover title — the person learned nothing at the point
+  // of use. The button now stays live for a text-only duckling and, instead of
+  // a file dialog whose result nobody would see, says plainly why and offers
+  // the ducklings that can see.
+  it("explains a text-only duckling at the point of use and refuses non-images", async () => {
     const requests: { body?: unknown }[] = [];
     render(<ChatAbout client={chatClient(requests)} projectId="p" aboutKind="task" aboutId="T-1" ducklings={ducklings} />);
     fireEvent.click(screen.getByTestId("chat-about"));
     fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "text-only" } });
     const picker = screen.getByTestId("chat-image") as HTMLInputElement;
     const add = screen.getByTestId("chat-add-image") as HTMLButtonElement;
-    expect(add.disabled).toBe(true);
-    expect(add.title).toMatch(/vision|see/i);
+    expect(screen.getByTestId("chat-vision-note")).toHaveTextContent("text-only can't see images");
+    const dialog = vi.spyOn(picker, "click");
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    expect(dialog).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-switch-offer")).toHaveTextContent("text-only can't see images");
+    expect(screen.getByTestId("chat-switch-to-seeing")).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "seeing" } });
-    expect(add.disabled).toBe(false);
+    expect(screen.queryByTestId("chat-vision-note")).toBeNull();
+    fireEvent.click(add);
+    expect(dialog).toHaveBeenCalled();
     fireEvent.change(picker, { target: { files: [new File(["not an image"], "notes.txt", { type: "text/plain" })] } });
     expect(await screen.findByTestId("chat-image-error")).toHaveTextContent(/image/i);
     expect(screen.queryByTestId("chat-image-chip")).toBeNull();

@@ -66,6 +66,7 @@ type fakeEngine struct {
 	adoptedGateProject  string
 	adoptedGateActor    string
 	answerActor         string
+	chatSwitch          []string
 	startReq            map[string]interface{}
 	visualSet           map[string]interface{}
 	visualImport        string
@@ -190,6 +191,10 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 	}
 	f.budgetLifted = kind + " by " + actor
 	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
+}
+func (f *fakeEngine) ChatSwitch(id, duckling, actor string) (map[string]interface{}, error) {
+	f.chatSwitch = []string{id, duckling, actor}
+	return map[string]interface{}{"id": id, "roster": map[string]interface{}{"consultant": duckling}}, nil
 }
 func (f *fakeEngine) RunAnswerAs(_, _, _, actor string) error {
 	f.answerActor = actor
@@ -1378,6 +1383,19 @@ func TestAnswerIsAttributedToTheOperator(t *testing.T) {
 	}
 	if !strings.HasPrefix(eng.answerActor, "mcp:") {
 		t.Errorf("answered as %q; an operator's answer must be attributed to it", eng.answerActor)
+	}
+}
+
+// B-513: an operator can move a consultant chat to a duckling that can see,
+// and the record names the operator as the one who switched — never a person.
+func TestChatSwitchIsAttributedToTheOperator(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "chat_switch", `{"run_id":"r-chat","duckling":"seer"}`))
+	if text, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatalf("chat_switch failed: %s", text)
+	}
+	if len(eng.chatSwitch) != 3 || eng.chatSwitch[0] != "r-chat" || eng.chatSwitch[1] != "seer" || !strings.HasPrefix(eng.chatSwitch[2], "mcp:") {
+		t.Fatalf("chat_switch reached the engine as %q; want run, duckling and an mcp: actor", eng.chatSwitch)
 	}
 }
 

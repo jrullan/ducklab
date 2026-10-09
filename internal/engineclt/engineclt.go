@@ -930,6 +930,18 @@ func (c *Client) RunAnswerWithLane(id, questionID, answer string, widenLane []st
 	}, nil)
 }
 
+// ChatSwitch moves a paused chat to another consultant duckling. The actor
+// is recorded on the consultant_switched event; empty means a person.
+func (c *Client) ChatSwitch(id, duckling, actor string) (map[string]interface{}, error) {
+	body := map[string]string{"duckling": duckling}
+	if actor != "" {
+		body["actor"] = actor
+	}
+	var result map[string]interface{}
+	err := c.post("/v1/runs/"+id+"/chat/consultant", body, &result)
+	return result, err
+}
+
 // RunAnswerAs answers on behalf of a named non-human decider ("mcp:<client>").
 func (c *Client) RunAnswerAs(id, questionID, answer, actor string) error {
 	body := map[string]string{"question_id": questionID, "answer": answer}

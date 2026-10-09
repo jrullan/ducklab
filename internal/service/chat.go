@@ -260,21 +260,35 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 	if len(imageSets) > 0 {
 		images = imageSets[0]
 	}
+	return s.ChatSendWith(ctx, runID, message, ChatSendOptions{Images: images})
+}
+
+// ChatSendOptions carries what may ride the person's next message.
+type ChatSendOptions struct {
+	// Images are screenshots shown only with the reply to this message.
+	Images []string
+	// Duckling, when set and different from the chat's consultant, switches
+	// the consultant in the same act: the switch is recorded first and this
+	// message — with its images — goes to the new duckling (B-513). The
+	// screenshot that made the person switch must not be checked against the
+	// blind duckling it was switching away from.
+	Duckling string
+	// Actor names who switched when it is not a person: "mcp:<client>".
+	Actor string
+}
+
+// ChatSendWith continues a paused conversation, optionally on another duckling.
+func (s *Service) ChatSendWith(ctx context.Context, runID, message string, opts ChatSendOptions) (*runlog.Run, error) {
+	images := opts.Images
 	if strings.TrimSpace(message) == "" {
 		return nil, fmt.Errorf("say something")
 	}
-	s.runsMu.RLock()
-	rs, ok := s.runs[runID]
-	s.runsMu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("run %q not found", runID)
+	rs, current, err := s.chatRun(runID)
+	if err != nil {
+		return nil, err
 	}
-	current := rs.snapshotRun()
-	if current.Stage != "chat" {
-		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, current.Stage)
-	}
-	if current.Status != "paused" || current.PendingKind != "chat" {
-		return nil, fmt.Errorf("the chat is not waiting for you (status %s)", current.Status)
+	if err := chatAtRest(current); err != nil {
+		return nil, err
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -288,15 +302,47 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 	about := strings.TrimPrefix(current.Note, "chat about ")
 	kind, id, _ := strings.Cut(about, " ")
 	duckling := current.Roster["consultant"]
+	// The requested consultant, if any. Whether it is a CHANGE is decided
+	// only under the run lock below: deciding it from this snapshot let a
+	// concurrent switch to the same duckling (during the image check) be
+	// recorded twice — a target→target event and a second divider.
+	switchTo := strings.TrimSpace(opts.Duckling)
+	if switchTo != "" {
+		if _, err := s.ducklings.Get(config.DucklingID(switchTo)); err != nil {
+			return nil, fmt.Errorf("invalid_request: %v", err)
+		}
+		duckling = switchTo
+	}
+	// Images are checked against the duckling that will answer — after a
+	// switch, the new one. A refusal here changes nothing: no switch, no
+	// message on the record.
 	if err := s.validateChatImages(ctx, duckling, images); err != nil {
 		return nil, err
 	}
 
+	runCtx, cancel := context.WithCancel(context.Background())
+	rs.wmu.Lock()
+	// Re-checked under the run lock: a switch or a second send may have
+	// landed between the snapshot above and here.
+	if err := chatAtRest(rs.run); err != nil {
+		rs.wmu.Unlock()
+		cancel()
+		return nil, err
+	}
+	if seated := rs.run.Roster["consultant"]; seated != duckling && switchTo != "" {
+		// Recorded only when the seat still differs, read under the lock.
+		recordConsultantSwitch(rs, w, switchTo, opts.Actor)
+	} else if seated != duckling {
+		// The consultant changed after the images were validated for the
+		// old one; refuse rather than send them to a duckling nobody checked.
+		changed := rs.run.Roster["consultant"]
+		rs.wmu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("the consultant changed to %s while you were sending; send again", changed)
+	}
 	w.AppendEvent("message", map[string]interface{}{
 		"role": "human", "content": message, "images": images,
 	})
-	runCtx, cancel := context.WithCancel(context.Background())
-	rs.wmu.Lock()
 	rs.cancel = cancel
 	rs.done = make(chan struct{})
 	setRunStatus(rs.run, "running", time.Now())
@@ -309,6 +355,103 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 		exec: func(c context.Context) { s.executeChatTurn(c, rs, entry.Path, kind, id, duckling, images) },
 	})
 	return out, nil
+}
+
+// ChatSwitch changes the chat's consultant duckling while the chat waits for
+// the person (B-513). A screenshot needed eyes the current duckling did not
+// have, and the only way out was ending the chat and losing its context.
+//
+// The next turn runs on the new duckling with the whole conversation: a
+// chat's memory is its event log, replayed into every turn's prompt (see
+// chatPromptFor), so nothing has to be migrated — only the seat changes.
+//
+// Refused while a reply is being written: that turn was dispatched to the
+// old duckling with its prompt, and switching under it would either throw
+// away paid work or put the new duckling's name on the old one's answer.
+// Wait for the reply (or stop the chat), then switch.
+func (s *Service) ChatSwitch(ctx context.Context, runID, duckling, actor string) (*runlog.Run, error) {
+	duckling = strings.TrimSpace(duckling)
+	if duckling == "" {
+		return nil, fmt.Errorf("invalid_request: pick the duckling to switch to")
+	}
+	rs, current, err := s.chatRun(runID)
+	if err != nil {
+		return nil, err
+	}
+	// The same check ChatStart makes: the duckling must exist in the fleet.
+	if _, err := s.ducklings.Get(config.DucklingID(duckling)); err != nil {
+		return nil, fmt.Errorf("invalid_request: %v", err)
+	}
+	if err := chatAtRest(current); err != nil {
+		return nil, err
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return nil, err
+	}
+	rs.wmu.Lock()
+	if err := chatAtRest(rs.run); err != nil {
+		rs.wmu.Unlock()
+		return nil, err
+	}
+	if rs.run.Roster["consultant"] == duckling {
+		// Already seated: nothing changed, so nothing goes on the record.
+		rs.wmu.Unlock()
+		return rs.snapshotRun(), nil
+	}
+	recordConsultantSwitch(rs, w, duckling, actor)
+	if err := w.WriteState(); err != nil {
+		rs.wmu.Unlock()
+		return nil, err
+	}
+	rs.wmu.Unlock()
+	return rs.snapshotRun(), nil
+}
+
+// chatRun finds a chat run by id and snapshots it.
+func (s *Service) chatRun(runID string) (*runState, *runlog.Run, error) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, nil, fmt.Errorf("run %q not found", runID)
+	}
+	current := rs.snapshotRun()
+	if current.Stage != "chat" {
+		return nil, nil, fmt.Errorf("%s is a %s run, not a chat", runID, current.Stage)
+	}
+	return rs, current, nil
+}
+
+// chatAtRest says whether the chat is waiting for the person, and if not,
+// why not in words the composer can show.
+func chatAtRest(run *runlog.Run) error {
+	if run.Status == "paused" && run.PendingKind == "chat" {
+		return nil
+	}
+	if run.Status == "running" || run.Status == "queued" {
+		return fmt.Errorf("the consultant is still answering; wait for its reply, then try again (status %s)", run.Status)
+	}
+	return fmt.Errorf("the chat is not waiting for you (status %s)", run.Status)
+}
+
+// recordConsultantSwitch moves the consultant seat and records who moved it.
+// The caller holds rs.wmu. The roster map is replaced, never mutated: a
+// snapshot handed out earlier must not change under its reader.
+func recordConsultantSwitch(rs *runState, w *runlog.Writer, to, actor string) {
+	if strings.TrimSpace(actor) == "" {
+		actor = "human"
+	}
+	from := rs.run.Roster["consultant"]
+	roster := cloneStringMap(rs.run.Roster)
+	if roster == nil {
+		roster = map[string]string{}
+	}
+	roster["consultant"] = to
+	rs.run.Roster = roster
+	w.AppendEvent("consultant_switched", map[string]interface{}{
+		"from": from, "to": to, "actor": actor,
+	})
 }
 
 // ChatEnd closes a conversation as what it was: finished, not failed. Abort
@@ -798,20 +941,74 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 	// its event log, so an engine restart loses nothing.
 	events, _ := runlog.ReadEvents(rs.runDir)
 	b.WriteString("\n## The conversation so far\n\n")
-	for _, e := range events {
-		if e.Type != "message" {
-			continue
-		}
-		role := fmt.Sprintf("%v", e.Data["role"])
-		content := fmt.Sprintf("%v", e.Data["content"])
-		if role == "human" {
-			b.WriteString("HUMAN: " + content + "\n\n")
-		} else {
-			b.WriteString("YOU: " + firstN(content, 4000) + "\n\n")
-		}
-	}
+	writeChatTranscript(&b, events, rs.run.Roster["consultant"])
 	b.WriteString("Reply to the human's last message.")
 	return b.String()
+}
+
+// writeChatTranscript replays the conversation into the next prompt.
+//
+// The consultant can change mid-conversation (B-513), so a reply is "YOU"
+// only when the duckling answering now wrote it; an earlier consultant's
+// replies keep that consultant's name, and the switch itself is said where
+// it happened. Screenshots ride ONLY the reply to their own message — the
+// current one's are attached to this request — so an earlier message says
+// that it had images instead of re-sending them: re-sending would grow every
+// turn by megabytes, and a text-only duckling must never receive one.
+func writeChatTranscript(b *strings.Builder, events []*runlog.Event, current string) {
+	lastHuman := -1
+	for i, e := range events {
+		if e.Type == "message" && fmt.Sprint(e.Data["role"]) == "human" {
+			lastHuman = i
+		}
+	}
+	for i, e := range events {
+		switch e.Type {
+		case "consultant_switched":
+			from, _ := e.Data["from"].(string)
+			to, _ := e.Data["to"].(string)
+			// Who switched is provenance: an operator's switch is not the
+			// person's intent, and the next model must not be told it was.
+			actor, _ := e.Data["actor"].(string)
+			by := runlog.ActorPhrase(actor)
+			if to == current {
+				fmt.Fprintf(b, "[Here %s switched the consultant from %s to you (%s). Continue the same conversation; the earlier replies were %s's.]\n\n", by, from, to, from)
+			} else {
+				fmt.Fprintf(b, "[Here %s switched the consultant from %s to %s.]\n\n", by, from, to)
+			}
+		case "message":
+			role := fmt.Sprintf("%v", e.Data["role"])
+			content := fmt.Sprintf("%v", e.Data["content"])
+			if role == "human" {
+				b.WriteString("HUMAN: " + content + "\n")
+				if n := chatImageCount(e.Data["images"]); n > 0 {
+					if i == lastHuman {
+						fmt.Fprintf(b, "[%d screenshot(s) attached to this message are shown to you with it.]\n", n)
+					} else {
+						fmt.Fprintf(b, "[%d screenshot(s) were attached to this message and shown only with the reply to it; they are not re-sent. Ask the person to attach them again if you need to see them.]\n", n)
+					}
+				}
+				b.WriteString("\n")
+				continue
+			}
+			by, _ := e.Data["duckling"].(string)
+			if by != "" && by != current {
+				b.WriteString("EARLIER CONSULTANT (" + by + "): " + firstN(content, 4000) + "\n\n")
+			} else {
+				b.WriteString("YOU: " + firstN(content, 4000) + "\n\n")
+			}
+		}
+	}
+}
+
+func chatImageCount(v interface{}) int {
+	switch images := v.(type) {
+	case []interface{}:
+		return len(images)
+	case []string:
+		return len(images)
+	}
+	return 0
 }
 
 func statusStrings(statuses []bug.Status) []string {

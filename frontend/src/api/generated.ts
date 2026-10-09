@@ -252,6 +252,7 @@ export interface DucklingDuckling {
   provider?: string;
   roles?: string[];
   tier?: string;
+  vision_status?: string;
 }
 
 export interface EngineapiacceptRequest {
@@ -288,8 +289,14 @@ export interface EngineapicandidateCriteriaRequest {
 }
 
 export interface EngineapichatSendRequest {
+  duckling?: string;
   images?: string[];
   message?: string;
+}
+
+export interface EngineapichatSwitchRequest {
+  actor?: string;
+  duckling?: string;
 }
 
 export interface EngineapidiffResponse {
@@ -1391,6 +1398,7 @@ export const OPERATIONS = [
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
   { id: "RunCapture", method: "GET", path: "/v1/runs/{id}/captures/{name}" },
   { id: "ChatSend", method: "POST", path: "/v1/runs/{id}/chat" },
+  { id: "ChatSwitch", method: "POST", path: "/v1/runs/{id}/chat/consultant" },
   { id: "ChatEnd", method: "POST", path: "/v1/runs/{id}/chat/end" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
