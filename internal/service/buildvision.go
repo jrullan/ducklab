@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -274,6 +275,10 @@ func (v *taskVision) withFeedback(runDir string, tree func() (string, error), re
 	}
 	v.render, v.runDir, v.tree = render, runDir, tree
 	events, _ := runlog.ReadEvents(runDir)
+	// A resumed run continues its feedback numbering from what it recorded,
+	// even if the files themselves are gone (B-509); refresh also counts the
+	// files on disk.
+	v.renders = recordedFeedbackSeq(events)
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
 		if e.Type != "visual_feedback" || e.Data["ok"] != true {
@@ -523,17 +528,20 @@ func (v *taskVision) refresh(ctx context.Context, phase string, round int, tree 
 		}
 		return
 	}
-	v.mu.Lock()
-	v.renders++
-	seq := v.renders
-	v.mu.Unlock()
 	// The final gate writes the same capture names; feedback evidence is
 	// renamed so it survives, and so the run's own captures stay the final's.
 	dir := filepath.Join(v.runDir, "captures")
+	// The number continues past every feedback this run already has, on disk
+	// or in its events: an in-memory count restarted at 01 on resume and the
+	// resumed render overwrote the run's first evidence (B-509).
+	v.mu.Lock()
+	seq := nextFeedbackSeq(dir, v.renders)
+	v.renders = seq
+	v.mu.Unlock()
 	renamed := map[string]string{}
 	for _, c := range captures {
-		to := fmt.Sprintf("feedback-%02d-%s", seq, c)
-		if os.Rename(filepath.Join(dir, c), filepath.Join(dir, to)) == nil {
+		to := feedbackName(seq, c)
+		if renameFresh(filepath.Join(dir, c), filepath.Join(dir, to)) == nil {
 			renamed[c] = to
 		}
 	}
@@ -555,8 +563,13 @@ func (v *taskVision) refresh(ctx context.Context, phase string, round int, tree 
 			}
 		}
 		if r.DiffCapture != "" {
-			to := fmt.Sprintf("feedback-%02d-%s", seq, r.DiffCapture)
-			if os.Rename(filepath.Join(dir, r.DiffCapture), filepath.Join(dir, to)) == nil {
+			to := feedbackName(seq, r.DiffCapture)
+			if err := renameFresh(filepath.Join(dir, r.DiffCapture), filepath.Join(dir, to)); err != nil {
+				// The unrenamed name is the final gate's: it would later hold
+				// another render's diff, so the record names no file at all.
+				fb.notes = append(fb.notes, fmt.Sprintf("diff of %s was not kept: %v", r.Capture, err))
+				r.DiffCapture = ""
+			} else {
 				r.DiffCapture = to
 				if img, err := loadTurnImage(filepath.Join(dir, to)); err == nil {
 					img.ID, img.Kind, img.File = r.Capture+" vs "+r.Reference, "diff", "captures/"+to
@@ -591,8 +604,104 @@ func (v *taskVision) refresh(ctx context.Context, phase string, round int, tree 
 		v.emit("visual_feedback", map[string]interface{}{
 			"round": round, "phase": phase, "ok": true, "passed": vg.Passed,
 			"summary": fb.Summary, "results": fb.Results, "shown": fb.images, "tree": tree,
+			"feedback": seq, "files": feedbackFiles(seq, renamed, fb.Results),
 		})
 	}
+}
+
+// feedbackPrefix matches the stored name of a feedback render's evidence.
+var feedbackPrefix = regexp.MustCompile(`^feedback-(\d{1,6})-`)
+
+// feedbackName is the stored name of file for feedback render seq.
+func feedbackName(seq int, file string) string {
+	return fmt.Sprintf("feedback-%02d-%s", seq, file)
+}
+
+// nextFeedbackSeq is the number for the next feedback render: one past the
+// highest the run already holds, counting the files under dir and the count
+// this process (or the restored events) reached. Gaps are skipped, never
+// filled: a number names one render for the life of the run (B-509).
+func nextFeedbackSeq(dir string, known int) int {
+	highest := known
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if n := feedbackSeqOf(e.Name()); n > highest {
+			highest = n
+		}
+	}
+	return highest + 1
+}
+
+// feedbackSeqOf reads the render number out of a stored name (a bare name or
+// a run-relative path); 0 when it is not a feedback file.
+func feedbackSeqOf(name string) int {
+	m := feedbackPrefix.FindStringSubmatch(filepath.Base(filepath.FromSlash(name)))
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+// recordedFeedbackSeq is the highest feedback number the run's events name:
+// the event's own number, or the files it shows and compares.
+func recordedFeedbackSeq(events []*runlog.Event) int {
+	highest := 0
+	note := func(n int) {
+		if n > highest {
+			highest = n
+		}
+	}
+	for _, e := range events {
+		if e == nil || e.Type != "visual_feedback" {
+			continue
+		}
+		note(intValue(e.Data["feedback"]))
+		for _, key := range []string{"shown", "results"} {
+			items, _ := e.Data[key].([]interface{})
+			for _, item := range items {
+				m, _ := item.(map[string]interface{})
+				note(feedbackSeqOf(stringValueAny(m["file"])))
+				note(feedbackSeqOf(stringValueAny(m["diff_capture"])))
+			}
+		}
+		if files, ok := e.Data["files"].([]interface{}); ok {
+			for _, f := range files {
+				note(feedbackSeqOf(stringValueAny(f)))
+			}
+		}
+	}
+	return highest
+}
+
+// renameFresh moves from to to and refuses to replace an existing file:
+// evidence a run recorded is never overwritten by a later render.
+func renameFresh(from, to string) error {
+	if _, err := os.Lstat(to); err == nil {
+		return fmt.Errorf("%s already exists", filepath.Base(to))
+	}
+	return os.Rename(from, to)
+}
+
+// feedbackFiles lists, run-relative and once each, the files one feedback
+// render kept, so its event names exactly the evidence it describes.
+func feedbackFiles(seq int, renamed map[string]string, results []runlog.VisualCompare) []string {
+	files := []string{}
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		files = append(files, "captures/"+name)
+	}
+	for _, r := range results {
+		add(renamed[r.Capture])
+		if feedbackSeqOf(r.DiffCapture) == seq {
+			add(r.DiffCapture)
+		}
+	}
+	return files
 }
 
 // forTurn is what one turn is shown: the data URLs (for a seeing seat), the

@@ -102,8 +102,13 @@ export interface TurnBlock {
   gate?: "running" | "green" | "red" | string;
   /** The lifecycle phase that opened a harness gate. */
   gatePhase?: string;
-  /** Recorded completion details for the gate that opened this block. */
+  /** Recorded completion details for the gate that opened this block.
+   * gateExitCode is the command's own exit code, not the gate's red/green: a
+   * gate can be red over a passing command (B-510). */
   gateExitCode?: number;
+  /** In words, why the gate is red when the command alone does not say:
+   * "tests passed; visual check failed: …". */
+  gateSummary?: string;
   gateCommand?: string;
   gateOutput?: string;
   gateDurationS?: number;
@@ -268,9 +273,56 @@ export function splitDeliverablesReport(text: string): {
   return { prose, items };
 }
 
+/** One check that made a final gate red, as the engine records it. */
+export interface GateRedCause {
+  check: string;
+  summary: string;
+}
+
+/** A gate event read for red/green (B-510). The engine's final gate keeps the
+ * command's real exit code in exit_code and the gate's own outcome in
+ * effective_exit_code; older events carried only the latter, as exit_code
+ * (or exit). A passing command under a red visual check must never read as
+ * a pass, so green comes from the effective code and the `red` word. */
+export interface GateRecord {
+  green: boolean;
+  /** The command's own exit code. */
+  exitCode?: number;
+  /** The kind of command gate ("tests", "build", …), when recorded. */
+  commandGate?: string;
+  redBy: GateRedCause[];
+  /** Set when a check other than the command made the gate red. */
+  summary?: string;
+}
+
+export function readGateRecord(d: Record<string, unknown>): GateRecord {
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  const exitCode = num(d.exit_code) ?? num(d.exit);
+  const effective = num(d.effective_exit_code) ?? exitCode;
+  const redBy: GateRedCause[] = Array.isArray(d.red_by)
+    ? d.red_by.flatMap((c) => {
+        const r = c as Record<string, unknown> | null;
+        return r && typeof r.check === "string" ? [{ check: r.check, summary: String(r.summary ?? r.check) }] : [];
+      })
+    : [];
+  const green = effective === 0 && d.gate !== "red" && redBy.length === 0;
+  const commandGate = typeof d.command_gate === "string" ? d.command_gate : undefined;
+  const others = redBy.filter((c) => c.check !== "command");
+  let summary: string | undefined;
+  if (!green && others.length > 0) {
+    const kind = commandGate ?? "command";
+    const head = commandGate === "none" ? [] : [exitCode === 0 ? `${kind} passed` : `${kind} failed`];
+    summary = [...head, ...others.map((c) => c.summary)].join("; ");
+  }
+  return { green, exitCode, commandGate, redBy, summary };
+}
+
 export interface GateState {
   gate: string;
+  /** The command's own exit code. A gate can be red over a passing command
+   * (B-510): the red is on redBy and the label, never inferred from this. */
   exitCode?: number;
+  redBy: GateRedCause[];
   cmd?: string;
   output?: string;
   durationS?: number;
@@ -661,10 +713,11 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         // Correlate that completion with its open final announcement; round_gate
         // has its own event type and must never settle this card.
         if (openGate && !openGate.done && (openGate.gatePhase === "final" || String(d.phase ?? "") === openGate.gatePhase)) {
-          const exitCode = typeof d.exit_code === "number" ? d.exit_code : typeof d.exit === "number" ? d.exit : undefined;
+          const record = readGateRecord(d);
           openGate.done = true;
-          openGate.gate = exitCode === 0 ? "green" : "red";
-          openGate.gateExitCode = exitCode;
+          openGate.gate = record.green ? "green" : "red";
+          openGate.gateExitCode = record.exitCode;
+          openGate.gateSummary = record.summary;
           openGate.gateCommand = typeof d.command === "string" ? d.command : typeof d.cmd === "string" ? d.cmd : undefined;
           openGate.gateOutput = typeof d.output === "string" ? d.output : undefined;
           openGate.gateDurationS = typeof d.duration_s === "number" ? d.duration_s : undefined;
@@ -863,7 +916,9 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
 
   const d = latest.data ?? {};
   const gate = String(d.gate ?? "tests");
-  const exit = typeof d.exit_code === "number" ? d.exit_code : typeof d.exit === "number" ? d.exit : undefined;
+  const record = readGateRecord(d);
+  const exit = record.exitCode;
+  const redBy = record.redBy;
   const cmd = typeof d.command === "string" ? d.command : typeof d.cmd === "string" ? d.cmd : undefined;
   const output = typeof d.output === "string" ? d.output : undefined;
   const durationS = typeof d.duration_s === "number" ? d.duration_s : undefined;
@@ -871,20 +926,23 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
 
   if (gate === "none") {
     return {
-      gate, exitCode: exit, cmd, output, durationS,
+      gate, exitCode: exit, redBy, cmd, output, durationS,
       role: "warning",
       label: "unverified — nothing executable to run",
       unverified: true,
     };
   }
-  const green = exit === 0;
+  const green = record.green;
   // The baseline is not a verdict: "✓ tests passed" on a test-first's rail
   // read as a judgment of work that had not happened yet.
   const phaseWord = phase === "before" ? "baseline " : "";
+  // The command's kind names it when recorded: "red failed" said nothing,
+  // and a red visual check over passing tests is not "tests failed" (B-510).
+  const kind = record.commandGate && record.commandGate !== "none" ? record.commandGate : gate;
   return {
-    gate, exitCode: exit, cmd, output, durationS,
+    gate, exitCode: exit, redBy, cmd, output, durationS,
     role: green ? "good" : "critical",
-    label: green ? `${phaseWord}${gate} passed` : `${phaseWord}${gate} failed`,
+    label: green ? `${phaseWord}${kind} passed` : record.summary ? `${phaseWord}${record.summary}` : `${phaseWord}${kind} failed`,
     unverified: false,
   };
 }

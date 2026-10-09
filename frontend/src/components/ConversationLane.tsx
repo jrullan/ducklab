@@ -222,7 +222,10 @@ export function ConversationTurn({
 
       {isGate && block.done && block.gateExitCode !== undefined && (
         <div className="mt-1 text-sm text-ink-secondary" data-testid="gate-result">
-          exit code {block.gateExitCode}{block.gateDurationS !== undefined ? ` · ${block.gateDurationS}s` : ""}
+          {/* A red gate over a passing command says what made it red, before
+              the command's own exit code (B-510). */}
+          {block.gateSummary && <div data-testid="gate-red-by">{block.gateSummary}</div>}
+          {block.gateSummary ? "command " : ""}exit code {block.gateExitCode}{block.gateDurationS !== undefined ? ` · ${block.gateDurationS}s` : ""}
           {block.gateCommand && <div className="break-all font-mono text-xs">{block.gateCommand}</div>}
           {block.gateOutput && <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs">{block.gateOutput}</pre>}
         </div>

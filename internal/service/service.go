@@ -15,7 +15,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2247,9 +2246,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if taskGateLog != "" {
 		verificationOutput = taskGateLog + "\nproject verification:\n" + verificationOutput
 	}
-	probeGate := "none"
+	probeGate, probeLog := "none", ""
 	if taskGate != "red" && verify.IsGreen(gateResult) {
-		var probeLog string
 		probeGate, probeLog, err = tools.RunAcceptanceProbeGate(ctx, ectx)
 		if err != nil {
 			s.failRun(rs, fmt.Errorf("verify acceptance probes: %w", err))
@@ -2263,12 +2261,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 		}
 	}
-	appSmokeGate := "none"
+	appSmokeGate, appSmokeReason := "none", ""
 	smokeCommand, smokeSource, smokeExpectation, smokeTimeoutS := productSmokeConfig(projCfg.Run)
 	if taskGate != "red" && probeGate != "red" && verify.IsGreen(gateResult) && smokeCommand != "" {
 		note, smokeErr := smokeRunCommand(ctx, ectx.ProjectRoot, smokeCommand, smokeSource, smokeExpectation, smokeTimeoutS, rs.run.ID, rs.run.ProjectID)
 		if smokeErr != nil {
 			appSmokeGate = "red"
+			appSmokeReason = smokeErr.Error()
 			verificationOutput = "blocking product smoke: " + smokeErr.Error() + "\n\nprior successful verification evidence:\n" + verificationOutput
 			rs.writer.AppendEvent("app_smoke", map[string]interface{}{"ok": false, "command": smokeCommand, "source": smokeSource, "expectation": smokeExpectation, "timeout_s": smokeTimeoutS, "reason": smokeErr.Error()})
 		} else {
@@ -2304,13 +2303,14 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// The visual gate (B-460): captures held against reference images. A
 	// required mismatch fails the run like a red test; a diagnostic one is a
 	// caveat the person sees with the images side by side.
-	visualGate := ""
+	visualGate, visualSummary := "", ""
 	if projCfg.RenderConfigured && len(render.Compare) > 0 {
 		rs.wmu.Lock()
 		captures := append([]string(nil), rs.run.Captures...)
 		rs.wmu.Unlock()
 		vg := runVisualGate(entry.Path, render, rs.writer, captures, ectx.ProjectRoot)
 		summary := visualGateSummary(vg)
+		visualSummary = summary
 		// The run is visible to RunGet while the gate runs; its record is
 		// changed only under the lock snapshotRun takes (review of #123).
 		rs.wmu.Lock()
@@ -2333,41 +2333,31 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			visualGate = "red"
 		}
 	}
-	effectiveGate := string(gateResult.Gate)
-	effectiveExit := gateResult.ExitCode
-	if taskGate == "red" || probeGate == "red" || appSmokeGate == "red" || visualGate == "red" {
-		effectiveGate = "red"
-		if effectiveExit == 0 {
-			effectiveExit = 1
-		}
-	}
 	// Get the candidate once, before publishing the final gate: capability
 	// coverage is part of that gate's verdict, not a warning applied after a
 	// green event has already been recorded (B-400).
 	git := vcs.New(ectx.ProjectRoot)
 	diff, _ := git.DiffExcluding(runDiffExclusions(rs.run, ectx.ProjectRoot, rs.projectPath)...)
-	var coverageFindings []capability.GateFinding
-	if effectiveExit == 0 && verify.IsGreen(gateResult) && len(ectx.ActiveCapabilities) > 0 {
-		coverageFindings = tools.ObserveGateCoverage(ectx, diff, gateResult.Output)
-		effectiveGate, effectiveExit, verificationOutput = applyFinalCapabilityCoverage(
-			effectiveGate, effectiveExit, verificationOutput, coverageFindings,
-		)
-	}
+	settled := settleFinalGate(gateResult, finalGateChecks{
+		Task: taskGate, TaskLog: taskGateLog, Probe: probeGate, ProbeLog: probeLog,
+		Smoke: appSmokeGate, SmokeReason: appSmokeReason, Visual: visualGate, VisualSummary: visualSummary,
+	}, verificationOutput, func() []capability.GateFinding {
+		if len(ectx.ActiveCapabilities) == 0 {
+			return nil
+		}
+		return tools.ObserveGateCoverage(ectx, diff, gateResult.Output)
+	})
+	effectiveExit, verificationOutput, coverageFindings := settled.Exit, settled.Output, settled.Coverage
 	rs.writer.WriteVerify(verificationOutput)
 	// Persist render attachments and caveats before the gate state is exposed.
 	rs.writer.WriteState()
 	// The output rides the event, bounded: a FAILED run whose gate event
 	// said only exit:1 sent the person re-running the whole suite by hand
 	// to learn which test broke (B-122).
-	rs.writer.AppendEvent("gate", map[string]interface{}{
-		"gate":       effectiveGate,
-		"command":    gateResult.Command,
-		"exit_code":  effectiveExit,
-		"output":     tailOf(verificationOutput, 4000),
-		"duration_s": gateResult.Duration,
-	})
+	redBy := settled.RedBy
+	rs.writer.AppendEvent("gate", finalGateEvent(settled.Gate, effectiveExit, gateResult, tailOf(verificationOutput, 4000), redBy))
 	if effectiveExit != 0 {
-		rs.run.Failure = "gate failed (exit " + strconv.Itoa(effectiveExit) + "):\n" + tailOf(verificationOutput, 1500)
+		rs.run.Failure = finalGateFailure(gateResult, redBy) + ":\n" + tailOf(verificationOutput, 1500)
 	}
 
 	// A run with no gate ends UNVERIFIED, which is honest and easy to miss.
@@ -2761,6 +2751,15 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 	if current.TaskID == "" {
 		return
 	}
+	// Once per run. A resume re-enters the launch path and replayed the
+	// identical reminder, still labelled "launch", as if the run had been
+	// launched anew (B-511). There is no "resume" variant: this reminder is
+	// the task's history, which a resume does not change, and evidence from
+	// the run itself has its own points (wallclock_history, distress_pause,
+	// failed_run).
+	if launchEscalationRecorded(rs.writer.RunDir()) {
+		return
+	}
 	failures := 0
 	s.runsMu.RLock()
 	priors := make([]*runState, 0, len(s.runs))
@@ -2797,6 +2796,18 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 		data["candidate"] = cands[0]
 	}
 	rs.writer.AppendEvent("escalation_suggestion", data)
+}
+
+// launchEscalationRecorded says the run's record already holds its launch
+// reminder.
+func launchEscalationRecorded(runDir string) bool {
+	events, _ := runlog.ReadEvents(runDir)
+	for _, e := range events {
+		if e != nil && e.Type == "escalation_suggestion" && e.Data["point"] == "launch" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) failRun(rs *runState, err error) {
