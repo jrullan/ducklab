@@ -242,6 +242,29 @@ describe("entry points open the pane instead of navigating", () => {
   });
 });
 
+describe("the pane's composer and a pending switch", () => {
+  // Codex on #165, carried into the pane: a message must not leave while a
+  // switch is unresolved, or it can reach the duckling being left.
+  it("holds Send until the switch resolves", async () => {
+    useRuns.setState({ runs: { "r-chat": runsById["r-chat"]! }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const client = new EngineClient({ baseUrl: "http://engine.test", token: "t", fetchFn: (async (url: string) => engineFetch(url)) as never });
+    let finish: (run: Run) => void = () => {};
+    vi.spyOn(client, "chatSwitch").mockImplementation(() => new Promise<Run>((resolve) => { finish = resolve; }));
+    const chatSend = vi.spyOn(client, "chatSend").mockResolvedValue(runsById["r-chat"]!);
+    useConsultant.getState().openChat("r-chat");
+    render(<ConsultantPane client={client} projectId="p" subject={null} />);
+    const pane = await screen.findByTestId("consultant-pane-conversation");
+    await within(pane).findByTestId("chat-vision-note");
+    fireEvent.change(within(pane).getByTestId("chat-message"), { target: { value: "for seer" } });
+    fireEvent.change(within(pane).getByTestId("chat-consultant"), { target: { value: "seer" } });
+    expect((within(pane).getByTestId("chat-send") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(within(pane).getByTestId("chat-message"), { key: "Enter" });
+    expect(chatSend).not.toHaveBeenCalled();
+    await act(async () => { finish({ ...runsById["r-chat"]!, roster: { consultant: "seer" } } as Run); });
+    await waitFor(() => expect((within(pane).getByTestId("chat-send") as HTMLButtonElement).disabled).toBe(false));
+  });
+});
+
 describe("the pane's subject follows the view", () => {
   it("names the run, the document section, a chat's own subject, or the project", () => {
     const runs = { "r-chat": runsById["r-chat"]! };
