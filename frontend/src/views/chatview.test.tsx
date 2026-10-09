@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { RunView } from "./RunView";
 import { ChatAbout } from "../components/ChatAbout";
 import { useRuns } from "../store/runs";
+import { useConsultant } from "../store/consultant";
 import { EngineClient, type Run } from "../api/client";
 import { buildTurns } from "../lib/runview";
 import type { DucklabEvent } from "../api/events";
@@ -139,8 +140,15 @@ describe("ChatAbout returns to a live chat", () => {
     ]);
     render(<ChatAbout client={{} as EngineClient} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={ducklings} />);
     const door = screen.getByTestId("chat-about-existing");
-    expect(door.getAttribute("href")).toBe("#/runs/r-live");
+    // B-514 rewrote the door's destination: it was an href to the run view,
+    // which took the person away from what they were asking about. It now
+    // opens the conversation in the consultant pane, beside it.
+    expect(door.getAttribute("href")).toBeNull();
     expect(door.textContent).toContain("r-live");
+    useConsultant.setState({ open: false, activeRunId: null });
+    fireEvent.click(door);
+    expect(useConsultant.getState()).toMatchObject({ open: true, activeRunId: "r-live" });
+    useConsultant.setState({ open: false, activeRunId: null });
     expect(screen.queryByTestId("chat-about")).toBeNull();
     seedRuns([]);
   });

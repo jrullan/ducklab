@@ -14,6 +14,13 @@ surfaces that own them: next steps are decisions → Now; recent runs →
 Records; autopilot control → sidebar, near engine status). No standing
 right-hand rail on any view (see §3 for where its content went).
 
+One sanctioned exception, by the operator's request (B-514): the
+**consultant pane** — app-wide, on the right, hideable (sidebar footer
+door, Ctrl+J), resizable, remembered per viewer. Only the consultant lives
+there; closed, it takes no space. It is not a per-view rail: it stays as
+the person navigates so a conversation survives looking at other things,
+and a chat run's view remains its record.
+
 Sidebar, top to bottom:
 - **No app-name text** — the window title bar already says it. At most
   the glyph.

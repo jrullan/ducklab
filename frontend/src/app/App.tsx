@@ -22,6 +22,8 @@ import { Ducklings } from "../views/Ducklings";
 import { Roster } from "../views/Roster";
 import { Settings } from "../views/Settings";
 import { parseRoute, routeHref, type Route } from "./routes";
+import { ConsultantPane, useConsultantShortcut } from "../components/ConsultantPane";
+import { useConsultant, type ConsultantSubject } from "../store/consultant";
 import { loadTheme, type Theme } from "./theme";
 
 /** Must match internal/build.Version: the engine rejects a client whose
@@ -127,6 +129,27 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
 };
 
 
+/** What a new consultant conversation would be about, from where the person
+ * is: the run they are reading (or, in a chat's record, that chat's own
+ * subject), the document section they selected — and otherwise the project. */
+export function consultantSubjectFor(route: Route, runs: Record<string, Run>, projectId: string): ConsultantSubject | null {
+  if (route.name === "run") {
+    const run = runs[route.id];
+    if (run?.stage === "chat") {
+      const match = /^chat about (bug|task|run|ducklab|document) (\S+)$/.exec(run.note ?? "");
+      if (match) {
+        const aboutKind = match[1] as ConsultantSubject["aboutKind"];
+        return { aboutKind, aboutId: match[2]!, label: aboutKind === "ducklab" ? "the project" : `${aboutKind} ${match[2]}` };
+      }
+    }
+    return { aboutKind: "run", aboutId: route.id, label: `run ${route.id}` };
+  }
+  if (route.name === "cycle" && route.section) {
+    return { aboutKind: "document", aboutId: route.section, label: route.section };
+  }
+  return projectId ? { aboutKind: "ducklab", aboutId: projectId, label: "the project" } : null;
+}
+
 /** Every view that needs a project says the same thing and points at the one
  * place that fixes it. Before this it said "No project registered yet." and
  * stopped — true, and a dead end. */
@@ -211,6 +234,8 @@ export function App() {
 
   const connection = useRuns((s) => s.connection);
   const runs = useRuns((s) => s.runs);
+  const consultantOpen = useConsultant((s) => s.open);
+  useConsultantShortcut();
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute(location.hash));
@@ -659,6 +684,13 @@ export function App() {
           />
         )}
       </main>
+        {/* B-514: the consultant's own surface, beside every view and outside
+            <main>, so navigating never unmounts the conversation and the
+            reply gets the window's full height. Hideable: closed, it takes
+            no space (desktop blueprint §1). */}
+        {consultantOpen && client && (
+          <ConsultantPane client={client} projectId={projectId} subject={consultantSubjectFor(route, runs, projectId)} />
+        )}
       </div>
 
     </div>

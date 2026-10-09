@@ -88,7 +88,7 @@ export function ChatComposer({
         </div>
       </div>
       <VisionNote duckling={consultant} id={consultantId} />
-      <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <textarea
           aria-label="chat message"
           data-testid="chat-message"
@@ -104,7 +104,7 @@ export function ChatComposer({
           rows={2}
           disabled={!waiting}
           placeholder={waiting ? "your reply… (Enter to send; paste or drop a screenshot)" : "the consultant is thinking…"}
-          className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
+          className="min-w-[12rem] flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
         />
         <input ref={imageInput} type="file" accept="image/*" multiple data-testid="chat-image" className="hidden" onChange={(e) => { draft.add(Array.from(e.target.files ?? [])); setTriedToAttach(true); e.currentTarget.value = ""; }} />
         <button
