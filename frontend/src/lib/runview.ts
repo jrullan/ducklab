@@ -308,6 +308,16 @@ export interface PendingHuman {
  * must still be skimmable, so the lane shows one line each rather than forty
  * message bubbles.
  */
+/** Who did a recorded act, from the event's actor — the same words as the
+ * engine's runlog.ActorPhrase. Empty/"human" is the person; "mcp:<client>" is
+ * an operator, never the person (Codex on #165). */
+export function actorPhrase(actor: string): string {
+  const a = actor.trim();
+  if (a === "" || a === "human") return "the person";
+  if (a.startsWith("mcp:")) return `the MCP operator ${a}`;
+  return a;
+}
+
 export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   const blocks: TurnBlock[] = [];
   const byKey = new Map<string, TurnBlock>();
@@ -512,7 +522,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           round: 0, turn: -1, role: "switch", duckling: String(d.to ?? ""),
           toolCalls: [], done: true, messageOnly: true,
           text: `consultant switched from ${String(d.from ?? "?")} to ${String(d.to ?? "?")}`,
-          author: d.actor && d.actor !== "human" ? String(d.actor) : undefined,
+          author: actorPhrase(typeof d.actor === "string" ? d.actor : ""),
         });
         break;
       }

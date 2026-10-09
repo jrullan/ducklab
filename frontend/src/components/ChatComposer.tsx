@@ -42,7 +42,7 @@ export function ChatComposer({
   const switchWhy = "You can switch ducklings once the consultant has replied.";
 
   const switchTo = (id: string) => {
-    if (!id || id === consultantId) return;
+    if (!id || id === consultantId || switching) return;
     setSwitching(true);
     setError(null);
     void client.chatSwitch(run.id, id)
@@ -57,7 +57,9 @@ export function ChatComposer({
   };
 
   const send = () => {
-    if (!message.trim() || busy || !waiting || holdingImages) return;
+    // Held while a switch is unresolved (Codex on #165): the message is meant
+    // for the duckling just picked, and sent now it could reach the old one.
+    if (!message.trim() || busy || switching || !waiting || holdingImages) return;
     setBusy(true);
     setError(null);
     void client.chatSend(run.id, message.trim(), draft.images.map((image) => image.data))
@@ -82,7 +84,7 @@ export function ChatComposer({
             onChange={switchTo}
             testId="chat-consultant"
             ariaLabel="switch the consultant duckling"
-            disabled={!waiting || switching}
+            disabled={!waiting || switching || busy}
             title={waiting ? "Switch ducklings: the next reply comes from the one you pick, with the whole conversation so far" : switchWhy}
           />
         </div>
@@ -125,8 +127,8 @@ export function ChatComposer({
         <button
           type="button"
           data-testid="chat-send"
-          disabled={busy || !waiting || !message.trim() || holdingImages}
-          title={holdingImages ? `${consultantId} can't see the attached images: switch ducklings or remove them` : undefined}
+          disabled={busy || switching || !waiting || !message.trim() || holdingImages}
+          title={switching ? "Switching ducklings — send when the switch is done" : holdingImages ? `${consultantId} can't see the attached images: switch ducklings or remove them` : undefined}
           onClick={send}
           className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
         >
@@ -152,7 +154,7 @@ export function ChatComposer({
             ? `${consultantId} can't see images, so it would not see ${draft.images.length === 1 ? "this screenshot" : "these screenshots"}. Switch, and ${draft.images.length === 1 ? "it goes" : "they go"} with your message to the new duckling — or remove ${draft.images.length === 1 ? "it" : "them"}.`
             : `${consultantId} can't see images. To show a screenshot, switch to a duckling that can — the conversation so far comes along.`}
           onSwitch={switchTo}
-          disabled={!waiting || switching}
+          disabled={!waiting || switching || busy}
           disabledWhy={!waiting ? switchWhy : undefined}
         />
       )}

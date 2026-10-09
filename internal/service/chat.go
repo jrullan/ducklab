@@ -302,14 +302,16 @@ func (s *Service) ChatSendWith(ctx context.Context, runID, message string, opts 
 	about := strings.TrimPrefix(current.Note, "chat about ")
 	kind, id, _ := strings.Cut(about, " ")
 	duckling := current.Roster["consultant"]
+	// The requested consultant, if any. Whether it is a CHANGE is decided
+	// only under the run lock below: deciding it from this snapshot let a
+	// concurrent switch to the same duckling (during the image check) be
+	// recorded twice — a target→target event and a second divider.
 	switchTo := strings.TrimSpace(opts.Duckling)
-	if switchTo != "" && switchTo != duckling {
+	if switchTo != "" {
 		if _, err := s.ducklings.Get(config.DucklingID(switchTo)); err != nil {
 			return nil, fmt.Errorf("invalid_request: %v", err)
 		}
 		duckling = switchTo
-	} else {
-		switchTo = ""
 	}
 	// Images are checked against the duckling that will answer — after a
 	// switch, the new one. A refusal here changes nothing: no switch, no
@@ -327,9 +329,10 @@ func (s *Service) ChatSendWith(ctx context.Context, runID, message string, opts 
 		cancel()
 		return nil, err
 	}
-	if switchTo != "" {
+	if seated := rs.run.Roster["consultant"]; seated != duckling && switchTo != "" {
+		// Recorded only when the seat still differs, read under the lock.
 		recordConsultantSwitch(rs, w, switchTo, opts.Actor)
-	} else if rs.run.Roster["consultant"] != duckling {
+	} else if seated != duckling {
 		// The consultant changed after the images were validated for the
 		// old one; refuse rather than send them to a duckling nobody checked.
 		changed := rs.run.Roster["consultant"]
@@ -964,10 +967,14 @@ func writeChatTranscript(b *strings.Builder, events []*runlog.Event, current str
 		case "consultant_switched":
 			from, _ := e.Data["from"].(string)
 			to, _ := e.Data["to"].(string)
+			// Who switched is provenance: an operator's switch is not the
+			// person's intent, and the next model must not be told it was.
+			actor, _ := e.Data["actor"].(string)
+			by := runlog.ActorPhrase(actor)
 			if to == current {
-				fmt.Fprintf(b, "[The person switched the consultant here from %s to you (%s). Continue the same conversation; the earlier replies were %s's.]\n\n", from, to, from)
+				fmt.Fprintf(b, "[Here %s switched the consultant from %s to you (%s). Continue the same conversation; the earlier replies were %s's.]\n\n", by, from, to, from)
 			} else {
-				fmt.Fprintf(b, "[The person switched the consultant here from %s to %s.]\n\n", from, to)
+				fmt.Fprintf(b, "[Here %s switched the consultant from %s to %s.]\n\n", by, from, to)
 			}
 		case "message":
 			role := fmt.Sprintf("%v", e.Data["role"])

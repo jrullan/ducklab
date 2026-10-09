@@ -77,7 +77,7 @@ export function ConversationTurn({
     return (
       <div data-testid="consultant-switch-divider" className="my-2 flex items-center gap-2 text-xs text-ink-muted" role="separator">
         <span className="h-px flex-1 bg-hairline" />
-        <span>⇄ {block.text}{block.author ? ` · by ${block.author}` : ""} — the conversation so far came along</span>
+        <span>⇄ {block.text} · by {block.author ?? "the person"} — the conversation so far came along</span>
         <span className="h-px flex-1 bg-hairline" />
       </div>
     );
