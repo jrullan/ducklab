@@ -91,6 +91,16 @@ func toolList() []map[string]interface{} {
 			}, "run_id", "kind"),
 		},
 		{
+			"name": "chat_switch",
+			"description": "Switch a consultant chat (a run with stage chat) to another duckling while it waits for the person (pending_kind=chat). " +
+				"The next reply comes from the new duckling with the whole conversation so far; the switch is recorded with you as its actor. " +
+				"Refused while the consultant is still answering. Use it when the chat needs a duckling that can see images (duckling list: vision_status verified or declared).",
+			"inputSchema": obj(map[string]interface{}{
+				"run_id":   str("the chat run id, r-..."),
+				"duckling": str("the duckling id to continue with"),
+			}, "run_id", "duckling"),
+		},
+		{
 			"name":        "answer",
 			"description": "Answer a question a run asked (pending_kind=question in run_get).",
 			"inputSchema": obj(map[string]interface{}{
@@ -622,6 +632,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolJSON(bugs), nil
 	case "budget_lift":
 		out, err := s.eng.RunBudgetLift(a.str("run_id"), a.str("kind"), "mcp:"+s.client)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "chat_switch":
+		out, err := s.eng.ChatSwitch(a.str("run_id"), a.str("duckling"), "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}

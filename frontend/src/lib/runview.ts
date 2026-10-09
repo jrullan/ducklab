@@ -504,6 +504,18 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         }
         break;
       }
+      case "consultant_switched": {
+        // B-513: where the conversation changed hands, said in the lane, so a
+        // reader knows why the next reply wears another duckling's name.
+        blocks.push({
+          key: `switch:${e.seq ?? blocks.length}`,
+          round: 0, turn: -1, role: "switch", duckling: String(d.to ?? ""),
+          toolCalls: [], done: true, messageOnly: true,
+          text: `consultant switched from ${String(d.from ?? "?")} to ${String(d.to ?? "?")}`,
+          author: d.actor && d.actor !== "human" ? String(d.actor) : undefined,
+        });
+        break;
+      }
       case "deliverables_gap": {
         // Belongs to the reviewer's verdict of that round, not to a rail
         // card: an unreviewed progress report must not read as a result.

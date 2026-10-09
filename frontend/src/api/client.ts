@@ -502,6 +502,11 @@ export interface Duckling {
   /** The declared stand-in for provider weather, or `auto` to select from
    * the Flock criteria at reseat time. */
   fallback?: string;
+  /** The chat's own image rule, computed by the engine's listing (B-512):
+   * verified = declared and an image test passed; declared = declared, the
+   * first screenshot checks it; refuted = declared but the server rejected
+   * an image; none = text only. Older engines omit it. */
+  vision_status?: "verified" | "declared" | "refuted" | "none";
 }
 
 export interface ModelEndpoint {
@@ -1266,11 +1271,19 @@ export class EngineClient {
     });
   }
   /** Send the next message in a paused chat. */
-  chatSend(runId: string, message: string, images?: string[]) {
+  chatSend(runId: string, message: string, images?: string[], duckling?: string) {
     return this.request<Run>("POST", `/v1/runs/${runId}/chat`, {
       message,
       ...(images?.length ? { images } : {}),
+      // Switches the consultant first; this message goes to the new one.
+      ...(duckling ? { duckling } : {}),
     });
+  }
+  /** Switch a waiting chat's consultant duckling (B-513). The next reply comes
+   * from the new duckling with the whole conversation so far; refused while
+   * the consultant is still answering. */
+  chatSwitch(runId: string, duckling: string) {
+    return this.request<Run>("POST", `/v1/runs/${runId}/chat/consultant`, { duckling });
   }
   /** End a chat as finished — a done consultation is not an abort. */
   chatEnd(runId: string) {

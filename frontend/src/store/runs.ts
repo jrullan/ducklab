@@ -221,6 +221,11 @@ export const useRuns = create<RunsState>((set) => ({
           // and Now's inbox count — outlived the click that answered them.
           const { pending_kind: _pk, pending_since: _ps, pending_data: _pd, next: _n, failure: _f, ...resumed } = run;
           runs = { ...runs, [runId]: { ...resumed, status: "running" } };
+        } else if (e.type === "consultant_switched" && typeof e.data?.to === "string" && e.data.to) {
+          // B-513: the seat moved. Every composer reads the consultant from
+          // the record, so the record must follow without a refetch — or the
+          // vision note keeps describing the duckling that left.
+          runs = { ...runs, [runId]: { ...run, roster: { ...(run.roster ?? {}), consultant: e.data.to } } };
         } else if (e.type === "error") {
           // The engine emits `error` only on the fatal paths, with the reason.
           // The store used to drop it — so a run watched LIVE failed with

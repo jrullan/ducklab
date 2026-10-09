@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { DiagnosticDefaultsView, Duckling, EngineClient } from "../api/client";
 import { useRuns } from "../store/runs";
+import { canSeeImages, knownBlind } from "../lib/vision";
+import { ConsultantPicker, ImageChips, SwitchToSeeing, VisionNote, useImageDraft } from "./ConsultantVision";
 
 /** A conversation that ended, however it ended, is a record, not a door. */
 const TERMINAL = new Set(["done", "failed", "aborted", "canceled", "cancelled", "ended"]);
@@ -66,8 +68,9 @@ export function ChatAbout({
   const [message, setMessage] = useState(initialMessage);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [images, setImages] = useState<{ name: string; data: string }[]>([]);
-  const [imageError, setImageError] = useState<string | null>(null);
+  const draft = useImageDraft();
+  const images = draft.images;
+  const [triedToAttach, setTriedToAttach] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticDefaultsView | null>(null);
   const [inspectHarness, setInspectHarness] = useState(false);
   const [bugTarget, setBugTarget] = useState<"subject" | "harness">("subject");
@@ -89,23 +92,12 @@ export function ChatAbout({
     if (preselectedDuckling) setDuckling((current) => current || preselectedDuckling);
   }, [preselectedDuckling]);
   const selectedDuckling = ducklings.find((d) => d.id === duckling);
-  const canSee = !!selectedDuckling?.caps?.vision;
-  const readImages = (files: FileList | null) => {
-    if (!files) return;
-    setImageError(null);
-    const picked = Array.from(files);
-    if (picked.some((file) => !file.type.startsWith("image/"))) {
-      setImageError("Only image files can be attached.");
-      return;
-    }
-    void Promise.all(picked.map((file) => new Promise<{ name: string; data: string }>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ name: file.name, data: String(reader.result) });
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    }))).then((pickedImages) => setImages((current) => [...current, ...pickedImages]))
-      .catch(() => setImageError("Could not read the selected image."));
-  };
+  const canSee = canSeeImages(selectedDuckling);
+  // Known blind, not merely unknown: a duckling missing from the list is the
+  // engine's to judge, and the desktop must not claim it cannot see.
+  const blind = !!duckling && knownBlind(selectedDuckling);
+  const holdingImages = blind && images.length > 0;
+  const pick = (id: string) => { pickerTouched.current = true; setDuckling(id); setTriedToAttach(false); };
   if (!open && liveChat) {
     return (
       <a href={`#/runs/${liveChat.id}`} data-testid="chat-about-existing" className="text-xs text-ink underline">
@@ -126,21 +118,22 @@ export function ChatAbout({
     );
   }
   return (
-    <div className="space-y-1 rounded border border-hairline p-2" data-testid="chat-about-form">
-      <select
-        value={duckling}
-        onChange={(e) => { pickerTouched.current = true; setDuckling(e.target.value); }}
-        data-testid="chat-duckling"
-        className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
-      >
-        <option value="">pick a duckling…</option>
-        {ducklings.map((d) => (
-          <option key={d.id} value={d.id}>{d.id}</option>
-        ))}
-      </select>
+    <div
+      className="space-y-1 rounded border border-hairline p-2"
+      data-testid="chat-about-form"
+      onDragOver={draft.onDragOver}
+      onDrop={(e) => { draft.onDrop(e); setTriedToAttach(true); }}
+    >
+      <ConsultantPicker ducklings={ducklings} value={duckling} onChange={pick} />
+      <VisionNote duckling={selectedDuckling} id={duckling} />
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
+        onPaste={(e) => {
+          const pastedImage = Array.from(e.clipboardData?.files ?? []).some((file) => file.type.startsWith("image/"));
+          draft.onPaste(e);
+          if (pastedImage) setTriedToAttach(true);
+        }}
         placeholder={placeholder ?? `e.g. this ${aboutKind} is not actually fixed — investigate why`}
         data-testid="chat-message"
         rows={2}
@@ -185,25 +178,19 @@ export function ChatAbout({
           Cross-project diagnosis is not configured. Choose a harness project in Settings → Engine.
         </p>
       ) : null}
-      {images.length > 0 && (
-        <div className="flex flex-wrap gap-1" data-testid="chat-image-chips">
-          {images.map((image, index) => (
-            <span key={`${image.name}-${index}`} data-testid="chat-image-chip" className="flex items-center gap-1 rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs">
-              <img src={image.data} alt="" className="h-6 w-6 object-cover" />
-              {image.name}
-              <button type="button" aria-label={`remove image ${image.name}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-      <input ref={imageInput} type="file" accept="image/*" multiple data-testid="chat-image" className="hidden" onChange={(e) => { readImages(e.target.files); e.currentTarget.value = ""; }} />
+      <ImageChips images={images} onRemove={draft.remove} />
+      <input ref={imageInput} type="file" accept="image/*" multiple data-testid="chat-image" className="hidden" onChange={(e) => { draft.add(Array.from(e.target.files ?? [])); setTriedToAttach(true); e.currentTarget.value = ""; }} />
       <div className="flex items-center gap-2">
         <button
           type="button"
           data-testid="chat-add-image"
-          disabled={!canSee}
-          title={canSee ? "Add images" : "Pick a duckling with vision to attach images"}
-          onClick={() => imageInput.current?.click()}
+          title={canSee ? "Add images" : blind ? `${duckling} can't see images — click to see who can` : "Pick a duckling that can see images (👁) to attach screenshots"}
+          onClick={() => {
+            // Blind, or nobody picked yet: explain and offer the seeing
+            // ducklings instead of a file dialog whose result nobody sees.
+            if (canSee || (duckling && !blind)) imageInput.current?.click();
+            else setTriedToAttach(true);
+          }}
           className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
         >
           Add image
@@ -211,7 +198,8 @@ export function ChatAbout({
         <button
           type="button"
           data-testid="chat-start"
-          disabled={busy || !duckling || !message.trim()}
+          disabled={busy || !duckling || !message.trim() || holdingImages}
+          title={holdingImages ? `${duckling} can't see the attached images: pick a duckling that can, or remove them` : undefined}
           onClick={() => {
             setBusy(true);
             setError(null);
@@ -226,7 +214,7 @@ export function ChatAbout({
                 bugTarget: inspectHarness ? bugTarget : "subject",
               })
               .then((r) => {
-                setImages([]);
+                draft.clear();
                 location.hash = `#/runs/${r.id}`;
               })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -240,7 +228,19 @@ export function ChatAbout({
           cancel
         </button>
       </div>
-      {imageError && <p className="text-xs text-critical" data-testid="chat-image-error">{imageError}</p>}
+      {(blind || !duckling) && (triedToAttach || images.length > 0) && (
+        <SwitchToSeeing
+          ducklings={ducklings}
+          current={duckling}
+          reason={!duckling
+            ? "Pick who to talk to first. Only a duckling that can see images (👁) can look at a screenshot."
+            : images.length > 0
+              ? `${duckling} can't see images, so it would not see ${images.length === 1 ? "this screenshot" : "these screenshots"}. Pick a duckling that can, or remove ${images.length === 1 ? "it" : "them"}.`
+              : `${duckling} can't see images. To show a screenshot, pick a duckling that can.`}
+          onSwitch={pick}
+        />
+      )}
+      {draft.error && <p className="text-xs text-critical" data-testid="chat-image-error">{draft.error}</p>}
       {error && <p className="text-xs text-critical" data-testid="chat-error">{error}</p>}
     </div>
   );

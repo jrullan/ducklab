@@ -38,7 +38,24 @@ type Duckling struct {
 	// Fallback is the declared stand-in for provider weather; "auto" delegates
 	// the choice to the person's Flock candidate criteria at reseat time.
 	Fallback string `json:"fallback,omitempty"`
+	// VisionStatus is the chat's own image rule, said once for every picker
+	// (B-512): "verified" (declared and an image probe answered), "declared"
+	// (declared, not yet probed — the first image checks it), "refuted"
+	// (declared, but the endpoint rejected an image: no projector), or
+	// "none" (not declared). Caps.Vision alone could not tell a confirmed
+	// seer from a claim, and a probe that saw an image on an undeclared
+	// duckling made the list say "vision" where the chat still refused.
+	// Computed by List; never configured.
+	VisionStatus string `json:"vision_status,omitempty"`
 }
+
+// Vision statuses reported by List.
+const (
+	VisionVerified = "verified"
+	VisionDeclared = "declared"
+	VisionRefuted  = "refuted"
+	VisionNone     = "none"
+)
 
 // Capabilities describes what a duckling can do.
 type Capabilities struct {
@@ -234,13 +251,30 @@ func (r *Registry) List() []*Duckling {
 	result := make([]*Duckling, 0, len(r.ducklings))
 	for _, d := range r.ducklings {
 		copy := *d
-		if cached, ok := r.CachedCaps(d.ID); ok {
+		cached, probed := r.CachedCaps(d.ID)
+		if probed {
 			copy.Caps = *cached
 		}
+		copy.VisionStatus = visionStatus(d.Caps.Vision, cached, probed)
 		result = append(result, &copy)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+// visionStatus applies the same two-step rule the chat enforces before it
+// sends an image: the declaration, then the probe's answer when there is one.
+func visionStatus(declared bool, cached *Capabilities, probed bool) string {
+	switch {
+	case !declared:
+		return VisionNone
+	case !probed:
+		return VisionDeclared
+	case cached.Vision:
+		return VisionVerified
+	default:
+		return VisionRefuted
+	}
 }
 
 // Provider returns the provider for a duckling.

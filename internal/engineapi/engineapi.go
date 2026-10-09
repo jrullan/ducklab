@@ -968,6 +968,35 @@ func (s *Server) handleBugAttachment(w http.ResponseWriter, r *http.Request) {
 type chatSendRequest struct {
 	Message string   `json:"message"`
 	Images  []string `json:"images,omitempty"`
+	// Duckling, when it differs from the chat's consultant, switches the
+	// consultant first; this message and its images go to the new one (B-513).
+	Duckling string `json:"duckling,omitempty"`
+}
+
+// chatSwitchRequest names the duckling a paused chat continues with.
+type chatSwitchRequest struct {
+	Duckling string `json:"duckling"`
+	// Actor names who switched when it is not a person: "mcp:<client>".
+	// Empty means human.
+	Actor string `json:"actor,omitempty"`
+}
+
+func (s *Server) handleChatSwitch(w http.ResponseWriter, r *http.Request) {
+	var req chatSwitchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.ChatSwitch(r.Context(), r.PathValue("id"), req.Duckling, req.Actor)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "invalid_request:") {
+			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		} else {
+			s.error(w, http.StatusConflict, "conflict", err.Error())
+		}
+		return
+	}
+	s.json(w, http.StatusOK, run)
 }
 
 func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
@@ -999,7 +1028,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	run, err := s.svc.ChatSend(r.Context(), r.PathValue("id"), req.Message, req.Images)
+	run, err := s.svc.ChatSendWith(r.Context(), r.PathValue("id"), req.Message, service.ChatSendOptions{Images: req.Images, Duckling: req.Duckling})
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "invalid_request:") || err.Error() == "say something" {
 			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())

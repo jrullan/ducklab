@@ -897,6 +897,9 @@
           },
           "tier": {
             "type": "string"
+          },
+          "vision_status": {
+            "type": "string"
           }
         },
         "required": [
@@ -1030,6 +1033,9 @@
       },
       "EngineapichatSendRequest": {
         "properties": {
+          "duckling": {
+            "type": "string"
+          },
           "images": {
             "items": {
               "type": "string"
@@ -1042,6 +1048,20 @@
         },
         "required": [
           "message"
+        ],
+        "type": "object"
+      },
+      "EngineapichatSwitchRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "duckling": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "duckling"
         ],
         "type": "object"
       },
@@ -8982,6 +9002,52 @@
           }
         ],
         "summary": "Send the next message in a paused chat"
+      }
+    },
+    "/v1/runs/{id}/chat/consultant": {
+      "post": {
+        "operationId": "ChatSwitch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapichatSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Switch a paused chat's consultant duckling; the next reply comes from the new one with the whole conversation so far"
       }
     },
     "/v1/runs/{id}/chat/end": {
