@@ -1211,6 +1211,34 @@ func printLaneWidened(client *engineclt.Client, runID string, lane []string) {
 }
 
 // asStrings reads a JSON array of strings out of an event payload.
+// gateEventLine is one line for a gate event. The final gate records the
+// command's real exit code beside the gate's outcome (B-510): "gate red: exit
+// 0" with nothing else read as a contradiction, so the checks that made it red
+// are named. The line used to read e.Data["exit"], which the final gate never
+// set, and printed "exit <nil>".
+func gateEventLine(d map[string]interface{}) string {
+	exit := d["exit_code"]
+	if exit == nil {
+		exit = d["exit"]
+	}
+	line := fmt.Sprintf("gate %v: exit %v", d["gate"], exit)
+	if eff, ok := d["effective_exit_code"]; ok && fmt.Sprint(eff) != fmt.Sprint(exit) {
+		line = fmt.Sprintf("gate %v: command exit %v", d["gate"], exit)
+	}
+	var causes []string
+	if items, ok := d["red_by"].([]interface{}); ok {
+		for _, it := range items {
+			if m, ok := it.(map[string]interface{}); ok && m["check"] != "command" {
+				causes = append(causes, fmt.Sprint(m["summary"]))
+			}
+		}
+	}
+	if len(causes) > 0 {
+		line += "; red by " + strings.Join(causes, "; ")
+	}
+	return line
+}
+
 func asStrings(v interface{}) []string {
 	items, ok := v.([]interface{})
 	if !ok {
@@ -1389,7 +1417,7 @@ func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *e
 		case "policy_violation":
 			fmt.Printf("    ! policy: %v\n", e.Data["detail"])
 		case "gate":
-			fmt.Printf("  gate %v: exit %v\n", e.Data["gate"], e.Data["exit"])
+			fmt.Printf("  %s\n", gateEventLine(e.Data))
 		case "round_gate":
 			fmt.Printf("  round %v: %v\n", e.Data["round"], e.Data["result"])
 		case "verdict":

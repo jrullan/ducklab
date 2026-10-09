@@ -311,6 +311,20 @@ func runTimelineEntry(eventType string, d map[string]interface{}) string {
 			command = d["command"]
 		}
 		fmt.Fprintf(&b, "- gate exit %v: %v", exit, truncate(compactLine(fmt.Sprint(command)), 120))
+		// exit_code is the command's own since B-510; a red gate over a
+		// passing command is red for the checks named here, and a reader
+		// must not take "exit 0" for a pass.
+		if g := fmt.Sprint(d["gate"]); g == "red" {
+			fmt.Fprintf(&b, " (gate red")
+			if items, ok := d["red_by"].([]interface{}); ok {
+				for _, it := range items {
+					if m, ok := it.(map[string]interface{}); ok && m["check"] != "command" {
+						fmt.Fprintf(&b, "; %v", truncate(compactLine(fmt.Sprint(m["summary"])), 200))
+					}
+				}
+			}
+			b.WriteString(")")
+		}
 	case "verdict":
 		fmt.Fprintf(&b, "- verdict: %v", d["verdict"])
 		if detail := strings.TrimSpace(fmt.Sprint(d["detail"])); detail != "" && detail != "<nil>" {
