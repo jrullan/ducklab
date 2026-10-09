@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-import type { Duckling, EngineClient, Project } from "../api/client";
+import type { EngineClient, Project } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { AppControl } from "./AppControl";
 import { routeHref, type Route } from "../app/routes";
 import { AutopilotControl } from "./GuidePanel";
-import { ChatAbout } from "./ChatAbout";
+import { useConsultant } from "../store/consultant";
+import { useRuns } from "../store/runs";
+import { CONSULTANT_SHORTCUT } from "./ConsultantPane";
 
 export type SidebarZone = {
   label: string;
@@ -43,11 +44,10 @@ export function Sidebar({
   update?: { version: string; dirty: boolean };
 }) {
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
-  const [ducklings, setDucklings] = useState<Duckling[]>([]);
-  useEffect(() => {
-    if (!client || !projectId) return;
-    client.ducklings().then(setDucklings).catch(() => setDucklings([]));
-  }, [client, projectId]);
+  const paneOpen = useConsultant((s) => s.open);
+  // Conversations waiting for the person's reply: worth a mark on the door
+  // while the pane is hidden.
+  const waitingChats = useRuns((s) => Object.values(s.runs).filter((r) => r.stage === "chat" && r.status === "paused" && r.pending_kind === "chat").length);
   // Settings is one door; its rooms are deliberately owned by the category
   // menu inside the Settings view, not by a sidebar subnav.
   const hasSettings = configMembers.includes("settings");
@@ -95,15 +95,22 @@ export function Sidebar({
         <div className="mt-3"><AutopilotControl client={client} projectId={projectId} /></div>
       </details>}
       <footer className="mt-4 flex flex-col gap-1 border-t border-hairline pt-3 text-sm" data-testid="sidebar-footer">
-        {client && projectId && ducklings.length > 0 && (
-          <ChatAbout
-            client={client}
-            projectId={projectId}
-            aboutKind="ducklab"
-            aboutId={projectId}
-            ducklings={ducklings}
-            label="Ask how & why — chat about the project"
-          />
+        {/* The consultant's door (B-514). The project chat used to open as an
+            inline form in this footer and then take over the content pane;
+            the consultant now has its own hideable pane beside every view. */}
+        {client && (
+          <button
+            type="button"
+            data-testid="consultant-pane-toggle"
+            aria-pressed={paneOpen}
+            onClick={() => useConsultant.getState().toggle()}
+            title={`${paneOpen ? "Hide" : "Show"} the consultant (${CONSULTANT_SHORTCUT})`}
+            className={`flex items-center gap-1 rounded px-2 py-1 text-left ${paneOpen ? "bg-surface2 text-ink" : "text-ink-muted hover:text-ink"}`}
+          >
+            <span>Consultant — ask how &amp; why</span>
+            {waitingChats > 0 && <span className="text-serious" data-testid="consultant-waiting">● {waitingChats}</span>}
+            <span className="ml-auto text-xs text-ink-muted">{CONSULTANT_SHORTCUT}</span>
+          </button>
         )}
         {update?.dirty ? (
           <span data-testid="engine-source-dirty">engine built from uncommitted sources</span>

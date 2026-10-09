@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DiagnosticDefaultsView, Duckling, EngineClient } from "../api/client";
 import { useRuns } from "../store/runs";
+import { useConsultant } from "../store/consultant";
 import { canSeeImages, knownBlind } from "../lib/vision";
 import { ConsultantPicker, ImageChips, SwitchToSeeing, VisionNote, useImageDraft } from "./ConsultantVision";
 
@@ -9,8 +10,10 @@ const TERMINAL = new Set(["done", "failed", "aborted", "canceled", "cancelled", 
 
 /** "Chat about this": a conversation with a chosen duckling about one
  * subject, its history as context, read-only tools to investigate. The chat
- * is a run; starting one lands the person in the run view, which is the
- * conversation panel. */
+ * is a run; starting one — or continuing one — opens it in the consultant
+ * pane (B-514), which stays beside whatever the person is looking at. It used
+ * to land them in the run view, and every look at another run meant leaving
+ * the conversation and finding it again through Runs. */
 export function ChatAbout({
   client,
   projectId,
@@ -23,6 +26,7 @@ export function ChatAbout({
   /** A finding can open a consultation with its evidence already in the draft. */
   initialMessage = "",
   startOpen = false,
+  onCancel,
 }: {
   client: EngineClient;
   projectId: string;
@@ -38,6 +42,9 @@ export function ChatAbout({
   preselectedDuckling?: string;
   initialMessage?: string;
   startOpen?: boolean;
+  /** Where "cancel" goes when the form has no closed state to fall back to
+   * (the consultant pane's new-conversation view). */
+  onCancel?: () => void;
 }) {
   const [open, setOpen] = useState(startOpen);
   const [duckling, setDuckling] = useState(preselectedDuckling);
@@ -47,7 +54,7 @@ export function ChatAbout({
   const runs = useRuns((s) => s.runs);
   const subject = `chat about ${aboutKind} ${aboutId}`;
   const liveChat = Object.values(runs)
-    .filter((r) => r.stage === "chat" && r.note === subject && !TERMINAL.has(String(r.status).toLowerCase()))
+    .filter((r) => r.stage === "chat" && r.note === subject && r.project_id === projectId && !TERMINAL.has(String(r.status).toLowerCase()))
     .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0];
   const pickerTouched = useRef(false);
   // The consultant is a roster decision, not a second question at the chat door.
@@ -100,9 +107,15 @@ export function ChatAbout({
   const pick = (id: string) => { pickerTouched.current = true; setDuckling(id); setTriedToAttach(false); };
   if (!open && liveChat) {
     return (
-      <a href={`#/runs/${liveChat.id}`} data-testid="chat-about-existing" className="text-xs text-ink underline">
+      <button
+        type="button"
+        data-testid="chat-about-existing"
+        onClick={() => useConsultant.getState().openChat(liveChat.id, projectId)}
+        title="Opens the conversation in the consultant pane"
+        className="text-left text-xs text-ink underline"
+      >
         continue the chat ({liveChat.id})
-      </a>
+      </button>
     );
   }
   if (!open) {
@@ -215,7 +228,9 @@ export function ChatAbout({
               })
               .then((r) => {
                 draft.clear();
-                location.hash = `#/runs/${r.id}`;
+                setOpen(startOpen);
+                setMessage(initialMessage);
+                useConsultant.getState().openChat(r.id, projectId);
               })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setBusy(false));
@@ -224,7 +239,7 @@ export function ChatAbout({
         >
           {busy ? "Starting…" : "Start chat"}
         </button>
-        <button type="button" onClick={() => setOpen(false)} className="text-xs text-ink-muted underline">
+        <button type="button" data-testid="chat-cancel" onClick={() => (onCancel ? onCancel() : setOpen(false))} className="text-xs text-ink-muted underline">
           cancel
         </button>
       </div>

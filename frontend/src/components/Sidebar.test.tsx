@@ -3,6 +3,7 @@ import { EngineClient } from "../api/client";
 import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
 import { routeHref } from "../app/routes";
+import { useConsultant } from "../store/consultant";
 
 const zones = [
   { label: "Now", testid: "nav-now", home: { name: "now" as const }, members: ["now" as const] },
@@ -38,19 +39,27 @@ describe("desktop sidebar rail", () => {
     expect(screen.queryByRole("button", { name: /hide utility drawer/i })).not.toBeInTheDocument();
   });
 
-  it("renders the project chat door and opens the chat", async () => {
+  // Rewritten for B-514. The footer's project chat used to open an inline
+  // form in this 16rem column and then replace the content pane with the
+  // run view. The door now toggles the app-wide consultant pane, where the
+  // project conversation is one "new conversation" away (ConsultantPane).
+  it("renders the consultant door, which toggles the consultant pane", async () => {
+    useConsultant.getState().hide();
     const client = new EngineClient({
       baseUrl: "http://engine",
       token: "t",
-      fetchFn: (async () => new Response('[{"id":"luna","provider":"test","model":"test"}]', { status: 200, headers: { "Content-Type": "application/json" } })) as never,
+      fetchFn: (async () => new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })) as never,
     });
-    vi.spyOn(client, "roster").mockResolvedValue({ entries: [] });
-    vi.spyOn(client, "ducklings").mockResolvedValue([{ id: "luna", provider: "test", model: "test" }]);
     render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[{ id: "p", name: "project", path: "." }]} projectId="p" onProject={() => {}} client={client} waitingCount={0} connection="open" />);
 
-    await waitFor(() => expect(within(screen.getByTestId("sidebar-footer")).getByTestId("chat-about")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("chat-about"));
-    expect(screen.getByTestId("chat-about-form")).toBeInTheDocument();
+    const door = within(screen.getByTestId("sidebar-footer")).getByTestId("consultant-pane-toggle");
+    expect(door).toHaveAttribute("aria-pressed", "false");
+    expect(door).toHaveTextContent("Ctrl+J");
+    fireEvent.click(door);
+    expect(useConsultant.getState().open).toBe(true);
+    await waitFor(() => expect(door).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(door);
+    expect(useConsultant.getState().open).toBe(false);
   });
 
   // Jose: a new project starts from the guided form at any time, with or

@@ -19,6 +19,7 @@ import { QuestionOptions } from "../components/QuestionOptions";
 import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { ChatComposer } from "../components/ChatComposer";
+import { useConsultant } from "../store/consultant";
 import { DecisionCard } from "../components/DecisionCard";
 import { StageRequestCard } from "../components/StageRequestCard";
 import { SurveyCoverageLine, SurveyInventory, type SurveyInventoryItem } from "../components/SurveyInventory";
@@ -1309,6 +1310,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             a stage opened with an empty space where its name should be. The
             same fallback the runs list uses — task, else stage, else id. */}
         <span className="text-md">{runLabel(run)}</span>
+        {/* B-514: this page is the conversation's record; the conversation
+            itself lives in the consultant pane, beside whatever is read. */}
+        {run.stage === "chat" && (
+          <button
+            type="button"
+            data-testid="open-in-consultant-pane"
+            onClick={() => useConsultant.getState().openChat(run.id, run.project_id)}
+            className="rounded border border-hairline px-2 py-0.5 text-xs text-ink-muted hover:text-ink"
+          >
+            Open in the consultant pane
+          </button>
+        )}
         {run.bug_id && (
           <a
             href={routeHref({ name: "board", tab: "bugs" })}
