@@ -33,19 +33,12 @@ export function knownBlind(duckling: Duckling | undefined): boolean {
   return state === "none" || state === "refuted";
 }
 
-/** The marker beside a duckling's name in a picker. Plain words after the eye,
- * because a native <option> renders text only and the eye alone is a code. */
+/** The marker beside a duckling's name in a picker: the eye for a duckling
+ * that can see images, nothing otherwise. Jose asked for the eye alone — the
+ * words made every option long. A duckling whose server rejected a test image
+ * cannot see, so it gets no eye; the composer says why when it is picked. */
 export function visionMark(duckling: Duckling | undefined): string {
-  switch (visionState(duckling)) {
-    case "verified":
-      return "👁 sees images";
-    case "declared":
-      return "👁 sees images (not yet tested)";
-    case "refuted":
-      return "no images: its server has no vision support";
-    default:
-      return "";
-  }
+  return canSeeImages(duckling) ? "👁" : "";
 }
 
 /** A picker option's label: the id, then the marker when there is one. */
@@ -55,8 +48,7 @@ export function pickerLabel(duckling: Duckling): string {
 }
 
 /** The legend every consultant picker shows once, under itself. */
-export const VISION_LEGEND =
-  "👁 sees images — it can look at screenshots you attach. “Not yet tested” means its settings say it can see; the first screenshot checks. No mark: text only.";
+export const VISION_LEGEND = "👁 sees images — it can look at screenshots you attach. No mark: text only.";
 
 /** One sentence for the composer, at the point of use. Empty when there is
  * nothing to warn about. */

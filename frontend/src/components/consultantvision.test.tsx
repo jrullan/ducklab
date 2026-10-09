@@ -29,10 +29,11 @@ describe("vision states", () => {
     expect(fleet.map(canSeeImages)).toEqual([false, true, true, false]);
     expect(visionState({ id: "old", provider: "p", model: "m", caps: { native_tools: true, context_tokens: 1, vision: true } })).toBe("declared");
     expect(visionState(undefined)).toBe("unknown");
-    expect(pickerLabel(fleet[2]!)).toBe("seer · 👁 sees images");
-    expect(pickerLabel(fleet[1]!)).toContain("not yet tested");
+    expect(pickerLabel(fleet[2]!)).toBe("seer · 👁");
+    expect(pickerLabel(fleet[1]!)).toBe("claimed · 👁");
     expect(pickerLabel(fleet[0]!)).toBe("blind");
-    expect(pickerLabel(fleet[3]!)).toContain("no vision support");
+    // A server that rejected a test image cannot see: no eye (Jose: the eye alone).
+    expect(pickerLabel(fleet[3]!)).toBe("no-projector");
   });
 });
 
@@ -55,8 +56,8 @@ describe("the chat start form", () => {
     render(<ChatAbout client={startClient([])} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={fleet} startOpen />);
     const picker = screen.getByTestId("chat-duckling");
     const options = within(picker).getAllByRole("option").map((o) => [o.getAttribute("value"), o.textContent]);
-    expect(options).toContainEqual(["seer", "seer · 👁 sees images"]);
-    expect(options).toContainEqual(["claimed", "claimed · 👁 sees images (not yet tested)"]);
+    expect(options).toContainEqual(["seer", "seer · 👁"]);
+    expect(options).toContainEqual(["claimed", "claimed · 👁"]);
     expect(options).toContainEqual(["blind", "blind"]);
     expect(screen.getByTestId("chat-duckling-legend")).toHaveTextContent("👁 sees images");
   });
@@ -144,7 +145,7 @@ describe("the live chat composer", () => {
     render(<RunView runId="r-v" client={liveClient()} />);
     expect(await screen.findByTestId("chat-vision-note")).toHaveTextContent("blind can't see images");
     expect(screen.getByTestId("chat-consultant")).toHaveValue("blind");
-    expect(within(screen.getByTestId("chat-consultant")).getByRole("option", { name: "seer · 👁 sees images" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("chat-consultant")).getByRole("option", { name: "seer · 👁" })).toBeInTheDocument();
   });
 
   it("offers a seeing duckling when a screenshot is attached, switches, and sends it there", async () => {
@@ -257,8 +258,8 @@ describe("the switch in the transcript", () => {
 describe("the roster's consultant seat", () => {
   it("marks which candidates can see, only for the consultant", () => {
     const { unmount } = render(<DucklingPickerDrawer mode="common" role="consultant" ducklings={fleet} scorecards={[]} current={[]} multiple={false} scope="global" onClose={vi.fn()} onApply={vi.fn()} />);
-    expect(screen.getByTestId("roster-pick-vision-seer")).toHaveTextContent("👁 sees images");
-    expect(screen.getByTestId("roster-pick-vision-claimed")).toHaveTextContent("not yet tested");
+    expect(screen.getByTestId("roster-pick-vision-seer")).toHaveTextContent("👁");
+    expect(screen.getByTestId("roster-pick-vision-claimed")).toHaveTextContent("👁");
     expect(screen.queryByTestId("roster-pick-vision-blind")).toBeNull();
     expect(screen.getByTestId("roster-vision-legend")).toBeInTheDocument();
     unmount();
