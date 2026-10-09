@@ -153,7 +153,7 @@ func TestChatSwitchCarriesTheConversationToASeeingDuckling(t *testing.T) {
 		`"model":"m-seer"`, "image_url",
 		"Why does the login return 401?",                       // the earlier question
 		"EARLIER CONSULTANT (blind): reply written by m-blind", // the earlier answer, still blind's
-		"switched the consultant here from blind to you (seer)",
+		"Here the person switched the consultant from blind to you (seer)",
 		"Look at this screenshot",
 		"Ducklab is a full-cycle software development harness", // the dossier is rebuilt
 	} {

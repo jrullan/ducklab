@@ -92,6 +92,10 @@ func renderTranscript(events []*runlog.Event) string {
 			b.WriteString("\n\n")
 			b.WriteString(strings.TrimSpace(content))
 			b.WriteString("\n\n")
+		case "consultant_switched":
+			// A chat changed hands (B-513); who switched it is part of the record.
+			actor, _ := e.Data["actor"].(string)
+			fmt.Fprintf(&b, "_consultant switched from %v to %v by %s_\n\n", e.Data["from"], e.Data["to"], runlog.ActorPhrase(actor))
 		case "tool_call":
 			name, _ := e.Data["tool"].(string)
 			ok, present := e.Data["ok"].(bool)

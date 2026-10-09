@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 // Run history for the consultant.
@@ -294,6 +296,9 @@ func runTimelineEntry(eventType string, d map[string]interface{}) string {
 				fmt.Fprintf(&b, "- R%v %v said: %s", d["round"], d["role"], truncate(compactLine(c), 300))
 			}
 		}
+	case "consultant_switched":
+		actor, _ := d["actor"].(string)
+		fmt.Fprintf(&b, "- consultant switched from %v to %v by %s", d["from"], d["to"], runlog.ActorPhrase(actor))
 	case "round_gate":
 		fmt.Fprintf(&b, "- R%v gate: %v", d["round"], d["result"])
 	case "gate":

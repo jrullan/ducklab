@@ -179,6 +179,37 @@ describe("the live chat composer", () => {
     expect(await screen.findByTestId("chat-error")).toHaveTextContent("still answering");
   });
 
+  // Codex on #165 (P1): with the switch still in flight, Send stayed live and
+  // the message — meant for the duckling just picked — could reach the old
+  // one. Send (button, Enter) waits for the switch to resolve.
+  it("holds Send while a switch is unresolved", async () => {
+    const client = liveClient();
+    let finish: (run: Run) => void = () => {};
+    const chatSwitch = vi.spyOn(client, "chatSwitch").mockImplementation(() => new Promise<Run>((resolve) => { finish = resolve; }));
+    const chatSend = vi.spyOn(client, "chatSend").mockResolvedValue(visionRun("running"));
+    render(<RunView runId="r-v" client={client} />);
+    await screen.findByTestId("chat-vision-note");
+    fireEvent.change(screen.getByTestId("chat-message"), { target: { value: "for the new one" } });
+    expect((screen.getByTestId("chat-send") as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.change(screen.getByTestId("chat-consultant"), { target: { value: "seer" } });
+    await waitFor(() => expect(chatSwitch).toHaveBeenCalledWith("r-v", "seer"));
+    const send = screen.getByTestId("chat-send") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.title).toMatch(/switch/i);
+    fireEvent.click(send);
+    fireEvent.keyDown(screen.getByTestId("chat-message"), { key: "Enter" });
+    expect(chatSend).not.toHaveBeenCalled();
+    // A second switch cannot be started over the first.
+    expect((screen.getByTestId("chat-consultant") as HTMLSelectElement).disabled).toBe(true);
+
+    await act(async () => { finish({ ...visionRun(), roster: { architect: "seer", consultant: "seer" } } as Run); });
+    await waitFor(() => expect((screen.getByTestId("chat-send") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.keyDown(screen.getByTestId("chat-message"), { key: "Enter" });
+    await waitFor(() => expect(chatSend).toHaveBeenCalledWith("r-v", "for the new one", []));
+    expect(useRuns.getState().runs["r-v"]!.roster!.consultant).toBe("seer");
+  });
+
   it("cannot switch while the consultant is answering", async () => {
     useRuns.setState({ runs: { "r-v": visionRun("running") }, events: { "r-v": transcript.slice(0, 4) }, spend: {}, deltas: {}, reasoning: {} });
     render(<RunView runId="r-v" client={liveClient()} />);
@@ -214,7 +245,12 @@ describe("the switch in the transcript", () => {
     ]);
     const block = turns[2]!;
     render(<ConversationTurn block={block} roster={[]} />);
-    expect(screen.getByTestId("consultant-switch-divider")).toHaveTextContent("consultant switched from blind to seer · by mcp:elena");
+    expect(screen.getByTestId("consultant-switch-divider")).toHaveTextContent("consultant switched from blind to seer · by the MCP operator mcp:elena");
+    // The person's own switch says so — and an operator's never does.
+    const [own] = buildTurns([ev("consultant_switched", 1, { from: "seer", to: "blind", actor: "human" })]);
+    render(<ConversationTurn block={own!} roster={[]} />);
+    expect(screen.getAllByTestId("consultant-switch-divider")[1]).toHaveTextContent("consultant switched from seer to blind · by the person");
+    expect(screen.getAllByTestId("consultant-switch-divider")[0]).not.toHaveTextContent("the person");
   });
 });
 
