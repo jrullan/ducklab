@@ -25,16 +25,21 @@ export interface ConsultantState {
   width: number;
   /** The conversation shown; null shows the list and the new-chat form. */
   activeRunId: string | null;
+  /** The project the conversation in front (or being composed) belongs to.
+   * A chat is a project's run: the pane shows it only under that project,
+   * so a remembered conversation never follows the person into another one
+   * (Codex on #166). */
+  scope: string;
   /** A new conversation being composed in the pane, about this subject. */
   composing: ConsultantSubject | null;
   show: () => void;
   hide: () => void;
   toggle: () => void;
   setWidth: (width: number) => void;
-  /** Show this conversation in the pane, opening the pane. */
-  openChat: (runId: string) => void;
-  /** Start composing a new conversation about a subject, in the pane. */
-  compose: (subject: ConsultantSubject) => void;
+  /** Show this conversation (a chat run of `projectId`) in the pane. */
+  openChat: (runId: string, projectId: string) => void;
+  /** Start composing a new conversation about a subject of `projectId`. */
+  compose: (subject: ConsultantSubject, projectId: string) => void;
   /** Back to the list of conversations. */
   showList: () => void;
 }
@@ -47,6 +52,7 @@ const KEYS = {
   open: "ducklab.consultantPane.open",
   width: "ducklab.consultantPane.width",
   active: "ducklab.consultantPane.active",
+  scope: "ducklab.consultantPane.scope",
 };
 
 function read(key: string): string | null {
@@ -73,12 +79,15 @@ export function clampWidth(width: number): number {
 
 /** The remembered state, read fresh — exported so tests (and a reset) can
  * rebuild the store from storage. */
-export function loadConsultantPane(): Pick<ConsultantState, "open" | "width" | "activeRunId" | "composing"> {
+export function loadConsultantPane(): Pick<ConsultantState, "open" | "width" | "activeRunId" | "composing" | "scope"> {
   const width = Number(read(KEYS.width));
   return {
     open: read(KEYS.open) === "true",
     width: read(KEYS.width) ? clampWidth(width) : PANE_DEFAULT_WIDTH,
     activeRunId: read(KEYS.active) || null,
+    // A remembered conversation with no remembered project is not shown
+    // anywhere: the scope check below never matches an empty scope.
+    scope: read(KEYS.scope) ?? "",
     composing: null,
   };
 }
@@ -99,14 +108,17 @@ export const useConsultant = create<ConsultantState>((set, get) => ({
     write(KEYS.width, String(clamped));
     set({ width: clamped });
   },
-  openChat: (runId) => {
+  openChat: (runId, projectId) => {
     write(KEYS.open, "true");
     write(KEYS.active, runId);
-    set({ open: true, activeRunId: runId, composing: null });
+    write(KEYS.scope, projectId);
+    set({ open: true, activeRunId: runId, scope: projectId, composing: null });
   },
-  compose: (subject) => {
+  compose: (subject, projectId) => {
     write(KEYS.open, "true");
-    set({ open: true, composing: subject, activeRunId: null });
+    write(KEYS.active, null);
+    write(KEYS.scope, projectId);
+    set({ open: true, composing: subject, activeRunId: null, scope: projectId });
   },
   showList: () => {
     write(KEYS.active, null);

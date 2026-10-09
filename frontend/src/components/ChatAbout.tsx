@@ -54,7 +54,7 @@ export function ChatAbout({
   const runs = useRuns((s) => s.runs);
   const subject = `chat about ${aboutKind} ${aboutId}`;
   const liveChat = Object.values(runs)
-    .filter((r) => r.stage === "chat" && r.note === subject && !TERMINAL.has(String(r.status).toLowerCase()))
+    .filter((r) => r.stage === "chat" && r.note === subject && r.project_id === projectId && !TERMINAL.has(String(r.status).toLowerCase()))
     .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0];
   const pickerTouched = useRef(false);
   // The consultant is a roster decision, not a second question at the chat door.
@@ -110,7 +110,7 @@ export function ChatAbout({
       <button
         type="button"
         data-testid="chat-about-existing"
-        onClick={() => useConsultant.getState().openChat(liveChat.id)}
+        onClick={() => useConsultant.getState().openChat(liveChat.id, projectId)}
         title="Opens the conversation in the consultant pane"
         className="text-left text-xs text-ink underline"
       >
@@ -230,7 +230,7 @@ export function ChatAbout({
                 draft.clear();
                 setOpen(startOpen);
                 setMessage(initialMessage);
-                useConsultant.getState().openChat(r.id);
+                useConsultant.getState().openChat(r.id, projectId);
               })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setBusy(false));

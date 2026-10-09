@@ -1316,7 +1316,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <button
             type="button"
             data-testid="open-in-consultant-pane"
-            onClick={() => useConsultant.getState().openChat(run.id)}
+            onClick={() => useConsultant.getState().openChat(run.id, run.project_id)}
             className="rounded border border-hairline px-2 py-0.5 text-xs text-ink-muted hover:text-ink"
           >
             Open in the consultant pane

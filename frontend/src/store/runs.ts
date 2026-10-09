@@ -50,6 +50,11 @@ export interface RunsState {
   acceptState: Record<string, AcceptState>;
   /** True after an overflow, until the caller refetches. */
   needsResync: boolean;
+  /** Moves on every overflow or reconnect. needsResync is one flag that the
+   * route's run clears at once; a surface holding a run OUTSIDE the route
+   * (the consultant pane) missed it and kept a transcript with a permanent
+   * hole (Codex on #166). Such surfaces refetch when this number changes. */
+  resyncEpoch: number;
 
   applyEvent: (e: DucklabEvent) => void;
   /** Applies a frame's worth of streamed text in one update (AC-33). */
@@ -61,6 +66,8 @@ export interface RunsState {
   setConnection: (s: ConnectionState) => void;
   markOverflow: () => void;
   clearResync: () => void;
+  /** A resync for run-holding surfaces without the overflow flag (reconnect). */
+  requestResync: () => void;
   beginAccept: (runId: string) => void;
   confirmAccept: (runId: string, sha: string) => void;
   failAccept: (runId: string, message: string) => void;
@@ -111,6 +118,7 @@ export const useRuns = create<RunsState>((set) => ({
   connection: "connecting",
   acceptState: {},
   needsResync: false,
+  resyncEpoch: 0,
 
   applyEvent: (e) =>
     set((state) => {
@@ -314,8 +322,9 @@ export const useRuns = create<RunsState>((set) => ({
 
   setConnection: (connection) => set((state) => ({ ...state, connection })),
 
-  markOverflow: () => set((state) => ({ ...state, needsResync: true })),
+  markOverflow: () => set((state) => ({ ...state, needsResync: true, resyncEpoch: state.resyncEpoch + 1 })),
   clearResync: () => set((state) => ({ ...state, needsResync: false })),
+  requestResync: () => set((state) => ({ ...state, resyncEpoch: state.resyncEpoch + 1 })),
 
   beginAccept: (runId) =>
     set((state) => ({ ...state, acceptState: { ...state.acceptState, [runId]: { kind: "pending" } } })),
@@ -338,7 +347,7 @@ export const useRuns = create<RunsState>((set) => ({
   reset: () =>
     set({
       runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {}, connection: "connecting",
-      acceptState: {}, needsResync: false,
+      acceptState: {}, needsResync: false, resyncEpoch: 0,
       applyEvent: useRuns.getState().applyEvent,
       applyDeltaBatch: useRuns.getState().applyDeltaBatch,
       setRuns: useRuns.getState().setRuns,
@@ -347,6 +356,7 @@ export const useRuns = create<RunsState>((set) => ({
       setConnection: useRuns.getState().setConnection,
       markOverflow: useRuns.getState().markOverflow,
       clearResync: useRuns.getState().clearResync,
+      requestResync: useRuns.getState().requestResync,
       beginAccept: useRuns.getState().beginAccept,
       confirmAccept: useRuns.getState().confirmAccept,
       failAccept: useRuns.getState().failAccept,

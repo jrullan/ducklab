@@ -94,7 +94,7 @@ describe("the pane's remembered state", () => {
     expect(loadConsultantPane().width).toBe(PANE_MIN_WIDTH);
     useConsultant.getState().toggle();
     expect(loadConsultantPane().open).toBe(false);
-    useConsultant.getState().openChat("r-chat");
+    useConsultant.getState().openChat("r-chat", "p");
     expect(loadConsultantPane()).toMatchObject({ open: true, activeRunId: "r-chat" });
   });
 
@@ -160,7 +160,7 @@ describe("the consultant pane in the app", () => {
   });
 
   it("comes back open after a reload when it was left open", async () => {
-    useConsultant.getState().openChat("r-chat");
+    useConsultant.getState().openChat("r-chat", "p");
     useConsultant.setState(loadConsultantPane());
     renderApp("#/runs");
     expect(await screen.findByTestId("consultant-pane")).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe("entry points open the pane instead of navigating", () => {
     useRuns.setState({ runs: { "r-chat": runsById["r-chat"]! }, events: {}, deltas: {}, reasoning: {}, spend: {} });
     const client = new EngineClient({ baseUrl: "http://engine.test", token: "t", fetchFn: (async (url: string) => engineFetch(url)) as never });
     const chatSwitch = vi.spyOn(client, "chatSwitch").mockResolvedValue({ ...runsById["r-chat"]!, roster: { consultant: "seer" } } as Run);
-    useConsultant.getState().openChat("r-chat");
+    useConsultant.getState().openChat("r-chat", "p");
     render(<ConsultantPane client={client} projectId="p" subject={null} />);
     expect(await screen.findByTestId("chat-vision-note")).toHaveTextContent("blind can't see images");
     fireEvent.click(screen.getByTestId("chat-add-image"));
@@ -251,7 +251,7 @@ describe("the pane's composer and a pending switch", () => {
     let finish: (run: Run) => void = () => {};
     vi.spyOn(client, "chatSwitch").mockImplementation(() => new Promise<Run>((resolve) => { finish = resolve; }));
     const chatSend = vi.spyOn(client, "chatSend").mockResolvedValue(runsById["r-chat"]!);
-    useConsultant.getState().openChat("r-chat");
+    useConsultant.getState().openChat("r-chat", "p");
     render(<ConsultantPane client={client} projectId="p" subject={null} />);
     const pane = await screen.findByTestId("consultant-pane-conversation");
     await within(pane).findByTestId("chat-vision-note");
@@ -262,6 +262,129 @@ describe("the pane's composer and a pending switch", () => {
     expect(chatSend).not.toHaveBeenCalled();
     await act(async () => { finish({ ...runsById["r-chat"]!, roster: { consultant: "seer" } } as Run); });
     await waitFor(() => expect((within(pane).getByTestId("chat-send") as HTMLButtonElement).disabled).toBe(false));
+  });
+});
+
+describe("the pane belongs to the selected project (Codex on #166)", () => {
+  const foreign = { ...chat("r-foreign", "chat about run r-elsewhere"), project_id: "old-project" } as Run;
+  function clientWith(runs: Record<string, Run>) {
+    const client = new EngineClient({
+      baseUrl: "http://engine.test", token: "t",
+      fetchFn: (async (url: string) => {
+        const one = /\/v1\/runs\/(r-[a-z0-9-]+)$/.exec(url);
+        if (one && runs[one[1]!]) return json({ run: runs[one[1]!], events: transcript(one[1]!, "a foreign answer") });
+        return engineFetch(url);
+      }) as never,
+    });
+    return { client, run: vi.spyOn(client, "run") };
+  }
+
+  it("does not show a conversation remembered from another project after a reload", async () => {
+    useConsultant.getState().openChat("r-foreign", "old-project");
+    useConsultant.setState(loadConsultantPane());
+    const { client, run } = clientWith({ "r-foreign": foreign });
+    render(<ConsultantPane client={client} projectId="new-project" subject={null} />);
+    expect(await screen.findByTestId("consultant-pane-list")).toBeInTheDocument();
+    expect(screen.queryByText("a foreign answer")).toBeNull();
+    expect(run).not.toHaveBeenCalled();
+    expect(useRuns.getState().runs["r-foreign"]).toBeUndefined();
+  });
+
+  it("drops a fetched run of another project instead of injecting it", async () => {
+    useConsultant.getState().openChat("r-foreign", "new-project");
+    const { client, run } = clientWith({ "r-foreign": foreign });
+    render(<ConsultantPane client={client} projectId="new-project" subject={null} />);
+    await waitFor(() => expect(run).toHaveBeenCalledWith("r-foreign"));
+    expect(await screen.findByTestId("consultant-pane-list")).toBeInTheDocument();
+    expect(screen.queryByText("a foreign answer")).toBeNull();
+    expect(screen.queryByTestId("chat-reply")).toBeNull();
+    expect(useRuns.getState().runs["r-foreign"]).toBeUndefined();
+    expect(useRuns.getState().events["r-foreign"]).toBeUndefined();
+  });
+
+  it("does not show another project's run already in the store", async () => {
+    useRuns.setState({ runs: { "r-foreign": foreign }, events: { "r-foreign": transcript("r-foreign", "a foreign answer") as never }, deltas: {}, reasoning: {}, spend: {} });
+    useConsultant.getState().openChat("r-foreign", "new-project");
+    const client = new EngineClient({ baseUrl: "http://engine.test", token: "t", fetchFn: (async () => new Response("down", { status: 503 })) as never });
+    render(<ConsultantPane client={client} projectId="new-project" subject={null} />);
+    expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText("a foreign answer")).toBeNull();
+    expect(screen.queryByTestId("chat-reply")).toBeNull();
+  });
+
+  it("does not list or reuse another project's open chats", async () => {
+    useRuns.setState({ runs: { "r-foreign": { ...foreign, note: "chat about ducklab new-project" }, "r-chat": runsById["r-chat"]! }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const { client } = clientWith({});
+    useConsultant.getState().show();
+    render(<ConsultantPane client={client} projectId="p" subject={{ aboutKind: "ducklab", aboutId: "new-project", label: "the project" }} />);
+    expect(await screen.findByTestId("consultant-conversation-r-chat")).toBeInTheDocument();
+    expect(screen.queryByTestId("consultant-conversation-r-foreign")).toBeNull();
+    expect(screen.getByTestId("consultant-pane-new")).toHaveTextContent("+ New conversation");
+  });
+
+  it("the chat door does not continue another project's chat", () => {
+    useRuns.setState({ runs: { "r-foreign": { ...foreign, note: "chat about bug B-1" } }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<ChatAbout client={{} as EngineClient} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={fleet} />);
+    expect(screen.queryByTestId("chat-about-existing")).toBeNull();
+    expect(screen.getByTestId("chat-about")).toBeInTheDocument();
+  });
+});
+
+describe("the pane after the event stream fell behind (Codex on #166)", () => {
+  it.each([
+    ["an overflow", () => useRuns.getState().markOverflow()],
+    ["a reconnect", () => useRuns.getState().requestResync()],
+  ])("refetches its conversation after %s while the chat stays paused", async (_name, resync) => {
+    useRuns.setState({ runs: { "r-chat": runsById["r-chat"]! }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    let fetches = 0;
+    const client = new EngineClient({
+      baseUrl: "http://engine.test", token: "t",
+      fetchFn: (async (url: string) => {
+        if (/\/v1\/runs\/r-chat$/.test(url)) {
+          fetches++;
+          const events = transcript("r-chat", answers["r-chat"]!);
+          // What streamed while this window was dropped: only the record has it.
+          if (fetches > 1) events.push({ type: "message", seq: 6, run_id: "r-chat", data: { round: 1, turn: 0, role: "human", content: "the message the stream lost" } } as never);
+          return json({ run: runsById["r-chat"], events });
+        }
+        return engineFetch(url);
+      }) as never,
+    });
+    useConsultant.getState().openChat("r-chat", "p");
+    render(<ConsultantPane client={client} projectId="p" subject={null} />);
+    expect(await screen.findByText("The gate failed on a missing fixture.")).toBeInTheDocument();
+    expect(fetches).toBe(1);
+    act(() => {
+      resync();
+      // App clears the flag at once when the route is not a run.
+      useRuns.getState().clearResync();
+    });
+    expect(await screen.findByText("the message the stream lost")).toBeInTheDocument();
+    expect(fetches).toBe(2);
+  });
+});
+
+describe("a reconnect asks run-holding surfaces to resync", () => {
+  it("moves the resync epoch when the stream comes back", async () => {
+    const sources: { onopen: ((e: unknown) => void) | null; onerror: ((e: unknown) => void) | null }[] = [];
+    class RecordingSource {
+      onerror: ((e: unknown) => void) | null = null;
+      onopen: ((e: unknown) => void) | null = null;
+      constructor() { sources.push(this); }
+      addEventListener() {}
+      close() {}
+    }
+    history.replaceState({}, "", "/?engine=http%3A%2F%2Fengine.test&token=t#/runs");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => engineFetch(url)));
+    vi.stubGlobal("EventSource", RecordingSource);
+    render(<App />);
+    await waitFor(() => expect(sources.length).toBe(1));
+    act(() => { sources[0]!.onopen?.({}); });
+    const before = useRuns.getState().resyncEpoch;
+    act(() => { sources[0]!.onerror?.({}); });
+    await waitFor(() => expect(sources.length).toBe(2), { timeout: 3000 });
+    act(() => { sources[1]!.onopen?.({}); });
+    expect(useRuns.getState().resyncEpoch).toBe(before + 1);
   });
 });
 

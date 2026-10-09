@@ -353,7 +353,9 @@ export function App() {
       onState: (s) => useRuns.getState().setConnection(s),
       // A reconnect can miss a run_start that happened on the dead stream;
       // replace the run list from HTTP after the new stream is open.
-      onReconnect: () => refresh(),
+      // Run-holding surfaces outside the route (the consultant pane) refetch
+      // their record too: whatever the dead stream carried is not in it.
+      onReconnect: () => { refresh(); useRuns.getState().requestResync(); },
       staleAfterMs: 30_000,
       // Overflow means we fell behind and the engine dropped us. Refetching
       // the run LIST is not enough: the conversation lives in the run detail,

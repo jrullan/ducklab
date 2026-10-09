@@ -64,8 +64,15 @@ export function ConsultantPane({
   subject: ConsultantSubject | null;
 }) {
   const width = useConsultant((s) => s.width);
-  const activeRunId = useConsultant((s) => s.activeRunId);
-  const composing = useConsultant((s) => s.composing);
+  // The remembered conversation and a half-composed one belong to the
+  // project they were opened in; under any other project the pane shows
+  // that project's list instead (Codex on #166).
+  const scope = useConsultant((s) => s.scope);
+  const rememberedRunId = useConsultant((s) => s.activeRunId);
+  const rememberedComposing = useConsultant((s) => s.composing);
+  const inScope = !!projectId && scope === projectId;
+  const activeRunId = inScope ? rememberedRunId : null;
+  const composing = inScope ? rememberedComposing : null;
   const runs = useRuns((s) => s.runs);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   useEffect(() => {
@@ -75,8 +82,8 @@ export function ConsultantPane({
   }, [client]);
 
   const open = useMemo(
-    () => Object.values(runs).filter(isOpenChat).sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? "")),
-    [runs],
+    () => Object.values(runs).filter((r) => isOpenChat(r) && r.project_id === projectId).sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? "")),
+    [runs, projectId],
   );
   // What a new conversation can be about: what the person is looking at,
   // and always the project itself — the harness chat that used to live in
@@ -113,7 +120,7 @@ export function ConsultantPane({
             aria-label="switch conversation"
             data-testid="consultant-pane-switch"
             value={activeRunId}
-            onChange={(e) => useConsultant.getState().openChat(e.target.value)}
+            onChange={(e) => useConsultant.getState().openChat(e.target.value, projectId)}
             className="min-w-0 flex-1 truncate rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
           >
             {!open.some((r) => r.id === activeRunId) && <option value={activeRunId}>{activeRunId}</option>}
@@ -134,7 +141,7 @@ export function ConsultantPane({
         </button>
       </header>
       {activeRunId ? (
-        <ConsultantConversation key={activeRunId} client={client} runId={activeRunId} fleet={fleet} />
+        <ConsultantConversation key={`${projectId}:${activeRunId}`} client={client} projectId={projectId} runId={activeRunId} fleet={fleet} />
       ) : composing ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="consultant-pane-compose">
           <p className="mb-2 text-xs text-ink-muted">New conversation about {composing.label}</p>
@@ -161,7 +168,7 @@ export function ConsultantPane({
                 key={`${about.aboutKind}:${about.aboutId}`}
                 type="button"
                 data-testid={testId}
-                onClick={() => (live ? useConsultant.getState().openChat(live.id) : useConsultant.getState().compose(about))}
+                onClick={() => (live ? useConsultant.getState().openChat(live.id, projectId) : useConsultant.getState().compose(about, projectId))}
                 className="mb-2 w-full rounded border border-hairline px-2 py-1.5 text-left text-sm hover:bg-surface2"
               >
                 {live ? `Continue the conversation about ${about.label}` : `+ New conversation about ${about.label}`}
@@ -183,7 +190,7 @@ export function ConsultantPane({
                     <button
                       type="button"
                       data-testid={`consultant-conversation-${r.id}`}
-                      onClick={() => useConsultant.getState().openChat(r.id)}
+                      onClick={() => useConsultant.getState().openChat(r.id, projectId)}
                       className="w-full rounded border border-hairline px-2 py-1.5 text-left hover:bg-surface2"
                     >
                       <span className="block truncate text-sm text-ink">{chatSubjectLabel(r)}</span>
@@ -240,12 +247,21 @@ function ResizeHandle({ width }: { width: number }) {
 
 /** One conversation, full height: the transcript scrolls, the composer stays
  * pinned to the bottom. */
-function ConsultantConversation({ client, runId, fleet }: { client: EngineClient; runId: string; fleet: Duckling[] }) {
-  const run = useRuns((s) => s.runs[runId]);
+function ConsultantConversation({ client, projectId, runId, fleet }: { client: EngineClient; projectId: string; runId: string; fleet: Duckling[] }) {
+  // Only a run of this project is ever shown here — from the store or from
+  // the engine. A foreign run is dropped, never injected into this project's
+  // store, where its composer could send to it or end it (Codex on #166).
+  const stored = useRuns((s) => s.runs[runId]);
+  const run = stored && stored.project_id === projectId ? stored : undefined;
   const events = useRuns((s) => s.events[runId]);
   const deltas = useRuns((s) => s.deltas[runId]);
   const reasoning = useRuns((s) => s.reasoning[runId]);
   const [missing, setMissing] = useState(false);
+  // After an event-stream overflow (or a reconnect) the store's copy of this
+  // transcript can have a hole the stream will never fill, while status and
+  // pending stay the same. The epoch moves on every such resync, and this
+  // conversation refetches its whole record (Codex on #166).
+  const resyncEpoch = useRuns((s) => s.resyncEpoch);
   const status = run?.status ?? "";
   const pendingKind = run?.pending_kind ?? "";
   // The record comes from the engine: the store holds only what streamed
@@ -257,13 +273,17 @@ function ConsultantConversation({ client, runId, fleet }: { client: EngineClient
     client.run(runId)
       .then((d) => {
         if (cancelled) return;
+        if (d.run.project_id !== projectId) {
+          useConsultant.getState().showList();
+          return;
+        }
         setMissing(false);
         const current = useRuns.getState().runs[runId];
         useRuns.getState().resyncRun(d.run.next === undefined && current?.next ? { ...d.run, next: current.next } : d.run, d.events as DucklabEvent[]);
       })
-      .catch(() => { if (!cancelled && !useRuns.getState().runs[runId]) setMissing(true); });
+      .catch(() => { if (!cancelled && useRuns.getState().runs[runId]?.project_id !== projectId) setMissing(true); });
     return () => { cancelled = true; };
-  }, [client, runId, status, pendingKind]);
+  }, [client, projectId, runId, status, pendingKind, resyncEpoch]);
 
   const turns = useMemo(() => buildTurns(events ?? []), [events]);
   const colors = useMemo(() => assignDucklingColors(fleet), [fleet]);
