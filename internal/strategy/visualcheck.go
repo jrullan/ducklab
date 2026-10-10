@@ -3,9 +3,14 @@ package strategy
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/jrullan/ducklab/internal/agent"
 )
 
 // Harness-measured acceptance slices (B-505, B-506, B-507).
@@ -42,6 +47,11 @@ type VisualCheck struct {
 	// rendering first when the tree changed since the last one (nothing is
 	// rendered twice for the same tree). nil when none could be taken.
 	Measure func(ctx context.Context, round int, phase string) *VisualMeasurement
+
+	// mu guards seen: every mismatch figure a measurement of this run put in
+	// front of a seat, which the diagnostic guard's fallback matches (B-516).
+	mu   sync.Mutex
+	seen []float64
 }
 
 // VisualCompare is one capture held against one reference.
@@ -107,6 +117,98 @@ func VisualSlices(deliverables []string, compares []VisualCompare) map[int][]str
 	return out
 }
 
+// Who is shown the figure (B-516).
+//
+// TI-36X T-009 r-20261010-011504-4oml: "Interactive controls with
+// pressed-state feedback". Neither its body nor its slices cite
+// REF-IMG-6c63e390; the photo reached it through SPEC-002. #163 armed the
+// render for every task citing a reference anywhere in its chain, so every
+// T-009 review carried "32.4% of pixels differ (allowed 30.0%)" with no
+// mode. The reviewer made an invariant of the allowance ("INV-2: the
+// rendered device matches REF-IMG-6c63e390 within the 30% pixel-difference
+// allowance" — in no project document), filed it major three rounds running,
+// and the run FAILED on dissent over T-008's accepted appearance, which T-009
+// cannot and should not change.
+//
+// The rule: the figure, the capture, the diff — and the renders that produce
+// them — belong to a task whose OWN acceptance cites a reference a
+// [[render.compare]] covers. That task is the one responsible for the
+// appearance. A task reaching the reference only through the SPEC and REQ
+// sections it implements is shown the reference as context (B-504), and
+// nothing is rendered for it.
+//
+// "Own acceptance" is the task's acceptance slices. A task with no slice list
+// is held to its body — the implementer's work contract falls back to it
+// (ExtractDeliverables numbers the bare title) — so for such a task its own
+// title and body are its acceptance, and they decide. The SPEC/REQ chain
+// never does: it describes the product, which several tasks build.
+
+// OwnReferences lists, once each and normalised, the REF-IMG ids a task's own
+// acceptance cites under the rule above. listed says the task has an
+// acceptance slice list of its own; when it does not, ownText (its title and
+// body) is read instead.
+func OwnReferences(deliverables []string, listed bool, ownText string) []string {
+	texts := deliverables
+	if !listed {
+		texts = []string{ownText}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range texts {
+		for _, m := range refImageIDRe.FindAllString(t, -1) {
+			id := "REF-IMG-" + strings.ToLower(strings.TrimPrefix(m, "REF-IMG-"))
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// OwnsVisualCheck reports whether a task owns the visual check: its own
+// acceptance (OwnReferences) cites a reference one of compares covers.
+func OwnsVisualCheck(deliverables []string, listed bool, ownText string, compares []VisualCompare) bool {
+	covered := map[string]bool{}
+	for _, c := range compares {
+		covered[strings.ToLower(strings.TrimSpace(c.Reference))] = true
+	}
+	for _, id := range OwnReferences(deliverables, listed, ownText) {
+		if covered[strings.ToLower(id)] {
+			return true
+		}
+	}
+	return false
+}
+
+// VisualModeStatement is what every prompt showing a visual-check figure says
+// about the check's mode: the implementer's, reviewer's and advisor's
+// sections here, the service's "Visual check of the candidate" section on
+// every turn through the runner (retries, resumes, judges), and the figure
+// carried from a failed run. One renderer, so no two prompts can disagree
+// about what the figure means (B-516).
+func VisualModeStatement(required bool) string {
+	if required {
+		return "Mode: required. A capture over its tolerance fails the run like a red test: for a slice that cites the " +
+			"reference, the figure is an acceptance criterion and blocks approval."
+	}
+	return "Mode: diagnostic. This figure is NOT an acceptance criterion: it is a caveat shown to the person beside the " +
+		"images and never fails the run. It does not justify a major or critical finding by itself, and its tolerance is " +
+		"not an invariant of this task. A concrete appearance defect you can point to in the capture or the code is judged " +
+		"on its own, without the percentage."
+}
+
+// VisualFindingRule is the reviewer's half of the contract: a finding whose
+// basis is the figure says so, so the harness can tell it apart.
+func VisualFindingRule(required bool) string {
+	rule := `If a finding of yours rests on this figure, set "visual_check": true on it.`
+	if !required {
+		rule += " In diagnostic mode such a finding is recorded as an observation for the person and does not block your verdict; " +
+			"neither does a finding that cites the measured percentage or the allowance."
+	}
+	return rule
+}
+
 func (v *VisualCheck) armed() bool { return v != nil && v.Measure != nil }
 
 // ids are the harness-measured slice ids.
@@ -136,7 +238,17 @@ func (v *VisualCheck) measure(ctx context.Context, round int, phase string) *Vis
 	if !v.armed() {
 		return nil
 	}
-	return v.Measure(ctx, round, phase)
+	m := v.Measure(ctx, round, phase)
+	if m != nil {
+		v.mu.Lock()
+		for _, r := range m.Results {
+			if r.Error == "" {
+				v.seen = append(v.seen, r.Mismatch)
+			}
+		}
+		v.mu.Unlock()
+	}
+	return m
 }
 
 // sliceState is the measurement's verdict on slice id: passed when every
@@ -196,11 +308,7 @@ func (v *VisualCheck) contractLines() string {
 		"implementer, advisor and reviewer turn that follows a change to the tree, after each round's gate, and at the final gate. " +
 		"verify_run does NOT run it — verify_run runs the project's tests — and no tool a seat holds runs it; oracle_dispute is for " +
 		"oracle tests, not for this comparison.\n")
-	if v.Required {
-		b.WriteString("It is required: a mismatch over the tolerance fails the run like a red test.\n")
-	} else {
-		b.WriteString("It is diagnostic: a mismatch over the tolerance is reported to the person as a caveat beside the images; it does not fail the run.\n")
-	}
+	b.WriteString(VisualModeStatement(v.Required) + "\n")
 	return b.String()
 }
 
@@ -270,13 +378,14 @@ func (v *VisualCheck) forReviewer(m *VisualMeasurement) string {
 				fmt.Fprintf(&b, "- slice %d: FAILED — %s. The check is required: this blocks approval.\n", id, visualFigures(results))
 			} else {
 				fmt.Fprintf(&b, "- slice %d: over tolerance — %s. The check is diagnostic: the person sees this figure as a caveat, "+
-					"and it does not block your verdict by itself. Judge the appearance against the reference where you can see it, "+
+					"and it does not block your verdict. Judge the appearance against the reference where you can see it, "+
 					"and raise concrete appearance defects as findings.\n", id, visualFigures(results))
 			}
 		default:
 			fmt.Fprintf(&b, "- slice %d: not measured on the current tree (the render failed or none ran); the final gate measures it.\n", id)
 		}
 	}
+	b.WriteString("\n" + VisualModeStatement(v.Required) + " " + VisualFindingRule(v.Required) + "\n")
 	return b.String()
 }
 
@@ -314,4 +423,124 @@ func (v *VisualCheck) visualGap(m *VisualMeasurement) map[int][]VisualResult {
 		}
 	}
 	return out
+}
+
+// The diagnostic guard (B-516).
+//
+// The mode statement is advice; 4oml's reviewer had a figure and no mode,
+// and nothing in the harness stopped its invented invariant from failing the
+// run. Under a diagnostic check a reviewer finding whose basis is the figure
+// cannot block: it is taken out of the verdict, recorded as an observation
+// (visual_observation, shown on the reviewer's verdict in the desktop), and
+// the verdict is decided as if it had never blocked. A required check is
+// untouched: there the figure is an acceptance criterion.
+//
+// Detection is deterministic and has two arms:
+//   - the contract field: the reviewer marks a finding "visual_check": true
+//     (VisualFindingRule asks it to, wherever the figure is shown);
+//   - a conservative fallback for a model that ignores the field: the
+//     finding's issue, invariant or fix quotes a percentage equal (at the
+//     precision written) to a figure this run actually showed — a
+//     comparison's tolerance, or a mismatch a measurement produced — AND
+//     speaks of the comparison itself: pixels, the visual check or
+//     comparison, the difference image, or a REF-IMG id. A percentage alone
+//     never matches ("30% of 50 shows 0.15" is a calculator defect), and
+//     neither does pixel talk with another number.
+//
+// The verdict afterwards: request-changes with no critical or major finding
+// left becomes approve, keeping its minor findings. That is today's rule, not
+// a new one — the verdict contract rejects request-changes without a blocking
+// finding and tells the reviewer to "use approve to preserve minor
+// observations" (agent.parseVerdict) — applied to what remains.
+
+// VisualObservation is one reviewer finding the guard took out of a verdict.
+type VisualObservation struct {
+	Finding agent.Finding `json:"finding"`
+	// Basis is how the finding was recognised: "field" when the reviewer
+	// marked it visual_check, "figure" when it quotes the measured figure.
+	Basis string `json:"basis"`
+}
+
+var (
+	percentRe     = regexp.MustCompile(`(\d+(?:\.(\d+))?)\s*%`)
+	visualVocabRe = regexp.MustCompile(`(?i)\bpixels?\b|pixel[- ]difference|visual[- ](?:check|comparison)|difference image|\bdiff image\b|REF-IMG-[0-9a-f]{8}`)
+)
+
+// guards reports whether the diagnostic guard applies: a comparison is
+// configured and it is not required.
+func (v *VisualCheck) guards() bool { return v != nil && !v.Required && len(v.Compares) > 0 }
+
+// figures are the percentages this run put in front of a seat.
+func (v *VisualCheck) figures(m *VisualMeasurement) []float64 {
+	var out []float64
+	for _, c := range v.Compares {
+		out = append(out, c.Tolerance*100)
+	}
+	v.mu.Lock()
+	for _, x := range v.seen {
+		out = append(out, x*100)
+	}
+	v.mu.Unlock()
+	if m != nil {
+		for _, r := range m.Results {
+			if r.Error == "" {
+				out = append(out, r.Mismatch*100, r.Tolerance*100)
+			}
+		}
+	}
+	return out
+}
+
+// citesFigure reports whether a finding quotes one of figures while speaking
+// of the comparison.
+func citesFigure(f agent.Finding, figures []float64) bool {
+	text := f.Issue + "\n" + f.Invariant + "\n" + f.Fix
+	if !visualVocabRe.MatchString(text) {
+		return false
+	}
+	for _, m := range percentRe.FindAllStringSubmatch(text, -1) {
+		p, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			continue
+		}
+		// "30%" stands for anything that rounds to 30; "32.4%" for what
+		// rounds to 32.4 — the precision the reviewer wrote.
+		half := 0.5 / math.Pow(10, float64(len(m[2])))
+		for _, x := range figures {
+			if math.Abs(p-x) <= half+1e-9 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// demoteDiagnostic applies the guard to a reviewer's verdict in place and
+// returns what it took out, and the verdict as the reviewer gave it.
+func (v *VisualCheck) demoteDiagnostic(verdict *agent.Verdict, m *VisualMeasurement) ([]VisualObservation, string) {
+	if !v.guards() || verdict == nil {
+		return nil, ""
+	}
+	original := verdict.Verdict
+	figures := v.figures(m)
+	kept := []agent.Finding{}
+	var observed []VisualObservation
+	for _, f := range verdict.Findings {
+		switch {
+		case f.VisualCheck:
+			observed = append(observed, VisualObservation{Finding: f, Basis: "field"})
+		case citesFigure(f, figures):
+			observed = append(observed, VisualObservation{Finding: f, Basis: "figure"})
+		default:
+			kept = append(kept, f)
+		}
+	}
+	if len(observed) == 0 {
+		return nil, original
+	}
+	verdict.Findings = kept
+	if verdict.Verdict == "request-changes" && len(verdict.Blocking()) == 0 {
+		verdict.Verdict = "approve"
+	}
+	return observed, original
 }

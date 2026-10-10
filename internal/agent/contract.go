@@ -37,6 +37,12 @@ type Finding struct {
 	// the change must hold. Required for a class-level finding; welcome on an
 	// anchored one.
 	Invariant string `json:"invariant,omitempty"`
+	// VisualCheck is the reviewer's declaration that the finding rests on the
+	// harness's visual-check figure (a capture's pixel difference against a
+	// reference). Under a diagnostic check such a finding is the person's
+	// caveat, not a blocking defect, and the strategy records it as an
+	// observation instead of letting it decide the verdict (B-516).
+	VisualCheck bool `json:"visual_check,omitempty"`
 }
 
 // ClassLevel reports whether the finding names a pattern rather than a place.

@@ -41,7 +41,9 @@ import (
 // is shown the cited images when its seat can see, and is told it cannot
 // when it cannot — never silently dropped. In solo and pair builds with a
 // visual check configured, a seeing seat also gets the latest capture and its
-// diff. Every such turn records what it saw (turn_images).
+// diff — since B-516, only when the task's OWN acceptance cites a compared
+// reference; one inheriting it through its SPEC is shown it as context.
+// Every such turn records what it saw (turn_images).
 //
 // B-505 (TI-36X T-008, r-20261005-012549-uvns): #163 rendered only before a
 // seeing reviewer and at a round gate, so luna's two advisor retries inside
@@ -115,8 +117,16 @@ type taskVision struct {
 	// roles are the roles whose turns are shown images.
 	roles map[config.Role]bool
 	cited []string
+	// own are the cited ids the task's own acceptance cites (B-516); the
+	// rest reach it through the SPEC and REQ sections it implements, and are
+	// context for it, not its acceptance.
+	own   map[string]bool
 	refs  []turnImage
 	notes []string
+	// required is the comparison's enforcement, for the mode every shown
+	// figure states (B-516). The zero value is diagnostic, as is the
+	// contract's default.
+	required bool
 
 	// render captures the candidate and compares it with its references; nil
 	// when the run has no visual check or renders nothing between rounds.
@@ -220,6 +230,66 @@ func (s *Service) taskCitedRefImages(ctx context.Context, projectID, projectRoot
 	return ids
 }
 
+// taskAcceptance is a task's own acceptance as the B-516 rule reads it: its
+// numbered slices, whether it has a slice list at all (a promoted bug's
+// Acceptance block, or bullets in its body), and its own title and body.
+func (s *Service) taskAcceptance(ctx context.Context, projectID, taskID string) (slices []string, listed bool, own string, ok bool) {
+	task := s.findTask(ctx, projectID, taskID)
+	if task == nil {
+		return nil, false, "", false
+	}
+	listed = len(legacyPromotedAcceptance(task.Body)) > 0 || len(strategy.ExtractDeliverables("", task.Body)) > 0
+	return s.taskDeliverables(ctx, projectID, taskID), listed, task.Title + "\n" + task.Body, true
+}
+
+// taskOwnReferences lists the REF-IMG ids a task's OWN acceptance cites —
+// its acceptance slices, or its title and body when it has no slice list
+// (strategy.OwnReferences, B-516). The SPEC and REQ sections it implements
+// are not its own.
+func (s *Service) taskOwnReferences(ctx context.Context, projectID, taskID string) []string {
+	slices, listed, own, ok := s.taskAcceptance(ctx, projectID, taskID)
+	if !ok {
+		return nil
+	}
+	return strategy.OwnReferences(slices, listed, own)
+}
+
+// taskOwnsVisualCheck is the B-516 rule for one task
+// (strategy.OwnsVisualCheck): its own acceptance cites a reference the
+// project's comparison covers. Only such a task is rendered for and shown
+// the figure.
+func (s *Service) taskOwnsVisualCheck(ctx context.Context, projectID, taskID string, contract config.RenderContract) bool {
+	slices, listed, own, ok := s.taskAcceptance(ctx, projectID, taskID)
+	return ok && strategy.OwnsVisualCheck(slices, listed, own, visualCompares(contract))
+}
+
+// visualCompares is the comparison contract as the strategy reads it.
+func visualCompares(contract config.RenderContract) []strategy.VisualCompare {
+	var compares []strategy.VisualCompare
+	for _, c := range contract.Compare {
+		compares = append(compares, strategy.VisualCompare{
+			Capture: c.Capture, Reference: c.Reference,
+			Tolerance: c.EffectiveTolerance(), Threshold: c.EffectiveThreshold(),
+		})
+	}
+	return compares
+}
+
+// visualGuard is the comparison without a measurement: no slice is measured
+// and nothing renders, but under a diagnostic check the reviewer's findings
+// resting on a figure still cannot block (B-516). nil when the project
+// compares nothing.
+func visualGuard(projCfg *config.Project) *strategy.VisualCheck {
+	if projCfg == nil || !projCfg.RenderConfigured {
+		return nil
+	}
+	contract := effectiveRenderContract(projCfg)
+	if len(contract.Compare) == 0 {
+		return nil
+	}
+	return &strategy.VisualCheck{Compares: visualCompares(contract), Required: contract.Enforcement == "required"}
+}
+
 // newTaskVision loads the images a task cites and records them. It returns
 // nil when the task cites none and no visual feedback is wanted: such a run
 // is untouched. roots are where a reference may be stored, in order (the
@@ -242,6 +312,12 @@ func (s *Service) newTaskVision(ctx context.Context, projectID, taskID string, r
 		v.roles[r] = true
 	}
 	v.cited = s.taskCitedRefImages(ctx, projectID, docsRoot, taskID)
+	if len(v.cited) > 0 {
+		v.own = map[string]bool{}
+		for _, id := range s.taskOwnReferences(ctx, projectID, taskID) {
+			v.own[strings.ToLower(id)] = true
+		}
+	}
 	for _, id := range v.cited {
 		if len(v.refs) == maxTurnRefImages {
 			v.notes = append(v.notes, fmt.Sprintf("%s was not attached: at most %d reference images per turn", id, maxTurnRefImages))
@@ -291,7 +367,10 @@ func (s *Service) newTaskVision(ctx context.Context, projectID, taskID string, r
 func (v *taskVision) withFeedback(runDir string, tree func() (string, error), render func(ctx context.Context) (*runlog.VisualGate, []string, error)) *taskVision {
 	// Only a task that cites a reference is shown renders: a logic task in
 	// the same project would pay a render per review for images it has no
-	// use for.
+	// use for. B-516 narrows it further, in the caller: dispatchMode arms
+	// this only for a task whose OWN acceptance cites a compared reference
+	// (taskOwnsVisualCheck) — one that reaches the photo through its SPEC
+	// (T-009) is not responsible for the appearance.
 	if v == nil || render == nil || len(v.cited) == 0 {
 		return v
 	}
@@ -349,13 +428,10 @@ func (v *taskVision) visualCheck(deliverables []string, contract config.RenderCo
 	if v == nil || v.render == nil {
 		return nil
 	}
-	var compares []strategy.VisualCompare
-	for _, c := range contract.Compare {
-		compares = append(compares, strategy.VisualCompare{
-			Capture: c.Capture, Reference: c.Reference,
-			Tolerance: c.EffectiveTolerance(), Threshold: c.EffectiveThreshold(),
-		})
-	}
+	compares := visualCompares(contract)
+	v.mu.Lock()
+	v.required = contract.Enforcement == "required"
+	v.mu.Unlock()
 	return &strategy.VisualCheck{
 		Slices:   strategy.VisualSlices(deliverables, compares),
 		Compares: compares,
@@ -741,6 +817,7 @@ func (v *taskVision) forTurn(role config.Role, sees bool, blind string) ([]strin
 	v.mu.Lock()
 	fb := v.feedback
 	stale := v.stale
+	required := v.required
 	v.mu.Unlock()
 	if len(v.cited) == 0 && fb == nil {
 		return nil, "", nil, nil
@@ -775,9 +852,31 @@ func (v *taskVision) forTurn(role config.Role, sees bool, blind string) ([]strin
 	}
 
 	var b strings.Builder
+	inherited := 0
+	for _, id := range v.cited {
+		if !v.own[strings.ToLower(id)] {
+			inherited++
+		}
+	}
 	if len(v.cited) > 0 {
 		b.WriteString("\n\n## Reference images\n\n")
 		switch {
+		case inherited == len(v.cited):
+			// B-516: the photo reached this task through the SPEC and REQ
+			// sections it implements. It shows what the product should look
+			// like; it is not this task's acceptance, and this task is not
+			// rendered or measured against it.
+			b.WriteString("These reference images reach this task only through the specification it implements; none of its " +
+				"own acceptance slices cites them")
+			if sees {
+				b.WriteString(". They are attached to this message.")
+			} else {
+				b.WriteString(", and this seat cannot see images: they are not attached. Do not search for them or read them — " +
+					"fs_read shows an image's bytes, not the picture.")
+			}
+			b.WriteString(" They are context for how the product looks — what the parts this task changes must fit — not an " +
+				"acceptance criterion of this task, and this task's work is not measured against them. Do not fault the " +
+				"product's overall appearance against them: another task owns it.\n\n")
 		case sees && role == config.RoleAdvisor:
 			b.WriteString("This task cites these reference images, and they are attached to this message, with the latest capture of " +
 				"the candidate and its difference image when one was rendered. Advise toward what the reference shows, never toward " +
@@ -809,6 +908,9 @@ func (v *taskVision) forTurn(role config.Role, sees bool, blind string) ([]strin
 		}
 		for _, id := range v.cited {
 			line := "- " + id
+			if inherited > 0 && inherited < len(v.cited) && !v.own[strings.ToLower(id)] {
+				line += " (reaches this task through its specification: context, not its acceptance)"
+			}
 			for _, img := range v.refs {
 				if img.ID == id {
 					line += fmt.Sprintf(": stored at %s", img.File)
@@ -842,6 +944,12 @@ func (v *taskVision) forTurn(role config.Role, sees bool, blind string) ([]strin
 		if sees && len(fb.images) > 0 {
 			b.WriteString("\nThe capture and its difference image are attached after the references: in the difference image, " +
 				"red marks every pixel that differs from the reference, over a faded copy of the capture.\n")
+		}
+		// B-516: the figure never travels without its mode — on every turn
+		// through the runner, whatever its role, retry or resume.
+		b.WriteString("\n" + strategy.VisualModeStatement(required) + "\n")
+		if role == config.RoleReviewer {
+			b.WriteString(strategy.VisualFindingRule(required) + "\n")
 		}
 	}
 	if len(notes) > 0 {

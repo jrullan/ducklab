@@ -159,6 +159,38 @@ describe("a harness-measured slice", () => {
   });
 });
 
+// B-516 (TI-36X T-009 r-20261010-011504-4oml): a finding resting on a
+// diagnostic visual check's figure is set aside as an observation; the lane
+// shows it beside the verdict it no longer decides.
+describe("a diagnostic visual observation", () => {
+  it("is shown on the reviewer's verdict, with what the reviewer said", () => {
+    const finding = {
+      severity: "major",
+      file: "index.html",
+      issue: "The rendered device still differs on 32.4% of pixels against REF-IMG-6c63e390 (allowed 30.0%).",
+      fix: "Reconcile the geometry.",
+      invariant: "INV-2: the rendered device matches REF-IMG-6c63e390 within the 30% pixel-difference allowance.",
+    };
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_observation", 2, {
+        round: 1, turn: 1, original_verdict: "request-changes", effective_verdict: "approve",
+        observations: [{ finding, basis: "figure" }],
+      }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "approve", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.visualObservations?.findings).toHaveLength(1);
+    render(<ConversationTurn block={block} roster={["glm53flash"]} />);
+    const box = screen.getByTestId("visual-observations");
+    expect(box.textContent).toMatch(/recorded as observations: the visual check is diagnostic/);
+    expect(box.textContent).toMatch(/the reviewer said request-changes; decided approve/);
+    expect(screen.getByTestId("visual-observation").textContent).toMatch(/INV-2.*cites the visual check's figure/);
+    expect(screen.getByTestId("turn-verdict").getAttribute("data-verdict")).toBe("approve");
+  });
+});
+
 describe("an ask_advisor consult", () => {
   it("renders the duck's answer open, in the middle of the turn", () => {
     const events: DucklabEvent[] = [

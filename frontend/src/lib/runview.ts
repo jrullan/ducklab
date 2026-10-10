@@ -132,6 +132,10 @@ export interface TurnBlock {
   /** Harness-measured slices that failed a required visual check when this
    * reviewer approved (B-506), with the figure that decided it. */
   visualGap?: { id: number; figure: string }[];
+  /** Findings this reviewer based on a diagnostic visual check's figure
+   * (B-516): recorded as observations, they did not decide the verdict.
+   * originalVerdict is what the reviewer said before they were set aside. */
+  visualObservations?: { findings: VisualObservation[]; originalVerdict: string; effectiveVerdict: string };
   /** What images the engine showed this turn (B-504): reference ids, the
    * candidate's capture and diff — or that the seat could not see them. A
    * build that "matches REF-IMG" was once built and approved by seats that
@@ -154,6 +158,16 @@ export interface Finding {
   fix?: string;
   /** The rule the change must hold; required when file is "*". */
   invariant?: string;
+  /** The reviewer marked the finding as resting on the visual-check figure (B-516). */
+  visual_check?: boolean;
+}
+
+/** A reviewer finding a diagnostic visual check recorded as an observation:
+ * "field" when the reviewer marked it visual_check, "figure" when it quotes
+ * the measured percentage or the allowance (B-516). */
+export interface VisualObservation {
+  finding: Finding;
+  basis: string;
 }
 
 /** The implementer's deliverables report — the work contract, as filed. */
@@ -592,6 +606,27 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
             rb.deliverablesGap = ids;
             if (visual.length > 0) rb.visualGap = visual;
+            break;
+          }
+        }
+        break;
+      }
+      case "visual_observation": {
+        // B-516: belongs to the reviewer's verdict of that round, like
+        // deliverables_gap — it is emitted before the verdict is recorded.
+        const round = Number(d.round ?? 0);
+        const raw = Array.isArray(d.observations) ? d.observations : [];
+        const findings: VisualObservation[] = raw
+          .filter((o: unknown) => o && typeof o === "object" && (o as { finding?: unknown }).finding)
+          .map((o: { finding: Finding; basis?: unknown }) => ({ finding: o.finding, basis: String(o.basis ?? "") }));
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const rb = blocks[i]!;
+          if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
+            rb.visualObservations = {
+              findings,
+              originalVerdict: String(d.original_verdict ?? ""),
+              effectiveVerdict: String(d.effective_verdict ?? ""),
+            };
             break;
           }
         }

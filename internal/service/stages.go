@@ -2511,18 +2511,57 @@ func (s *Service) failedAttempts(ctx context.Context, projectID, taskID string) 
 		failed = failed[:3]
 	}
 
+	// B-516: a failed run's figure is a figure like any other. It reaches only
+	// a task that owns the visual check — whose own acceptance cites a
+	// reference that run compared, or the project compares now — and always
+	// with the check's mode. A task that inherits the photo through its SPEC
+	// (T-009) is not shown it: that final gate measured the whole product,
+	// whose appearance the task does not own.
+	own := map[string]bool{}
+	for _, id := range s.taskOwnReferences(ctx, projectID, taskID) {
+		own[strings.ToLower(id)] = true
+	}
+	var guard *strategy.VisualCheck
+	if projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); err == nil {
+		guard = visualGuard(projCfg)
+	}
 	out := make([]artifact.FailedAttempt, 0, len(failed))
 	for _, r := range failed {
 		gate, visual := splitVisualSummary(s.gateSummary(r))
 		if r.Visual != nil {
 			visual = visualGateSummary(r.Visual)
 		}
-		out = append(out, artifact.FailedAttempt{
+		owns := false
+		compared := refImageIDPattern.FindAllString(visual, -1)
+		if r.Visual != nil {
+			for _, c := range r.Visual.Results {
+				compared = append(compared, c.Reference)
+			}
+		}
+		if guard != nil {
+			for _, c := range guard.Compares {
+				compared = append(compared, c.Reference)
+			}
+		}
+		for _, id := range compared {
+			owns = owns || own[strings.ToLower(strings.TrimSpace(id))]
+		}
+		attempt := artifact.FailedAttempt{
 			RunID: r.ID, Mode: r.Mode,
 			Summary: s.runSummary(r),
 			Gate:    gate,
-			Visual:  visual,
-		})
+		}
+		if owns && visual != "" {
+			// The mode is the project's as it is now — what the figure means
+			// for this run — or, with no comparison configured any more, the
+			// one that run recorded.
+			required := r.Visual != nil && r.Visual.Enforcement == "required"
+			if guard != nil {
+				required = guard.Required
+			}
+			attempt.Visual, attempt.VisualMode = visual, strategy.VisualModeStatement(required)
+		}
+		out = append(out, attempt)
 	}
 	return out
 }

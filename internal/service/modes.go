@@ -831,9 +831,17 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	vision := s.newTaskVision(ctx, mc.rs.run.ProjectID, mc.req.TaskID, []string{mc.entry.Path, root}, mc.roster,
 		[]config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleJudge, config.RoleAdvisor},
 		func(kind string, data map[string]interface{}) { mc.rs.writer.AppendEvent(kind, data) })
+	// B-516 (TI-36X T-009 r-20261010-011504-4oml): the render, the figure and
+	// the measured slices belong only to a task whose OWN acceptance cites a
+	// compared reference (strategy.OwnsVisualCheck). Every other task in the
+	// project — one that inherits the photo through its SPEC, or cites none —
+	// still carries the guard: under a diagnostic check, a reviewer finding
+	// resting on a pixel figure cannot block its verdict.
+	base.Visual = visualGuard(mc.projCfg)
 	if m := mc.rs.run.Mode; m == "" || m == "solo" || m == "pair" {
 		contract := effectiveRenderContract(mc.projCfg)
-		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 {
+		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 &&
+			s.taskOwnsVisualCheck(ctx, mc.rs.run.ProjectID, mc.req.TaskID, contract) {
 			vision = vision.withFeedback(mc.rs.runDir, base.Diff, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
 				rendered, err := captureRender(ctx, root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
 				if len(rendered.Captures) == 0 {
@@ -844,7 +852,9 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 				}
 				return runVisualGate(mc.entry.Path, contract, mc.rs.writer, rendered.Captures, root), rendered.Captures, nil
 			})
-			base.Visual = vision.visualCheck(deliverables, contract)
+			if check := vision.visualCheck(deliverables, contract); check != nil {
+				base.Visual = check
+			}
 		}
 	}
 	base.Runner = vision.wrap(base.Runner, mc.roster)

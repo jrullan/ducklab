@@ -394,6 +394,28 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
           {block.visualGap.map((g) => `slice ${g.id}${g.figure ? ` (${g.figure})` : ""}`).join("; ")}
         </div>
       )}
+      {block.visualObservations && block.visualObservations.findings.length > 0 && (
+        <div className="mt-1 text-sm" data-testid="visual-observations" style={{ color: statusVar("warning") }}>
+          ⓘ {block.visualObservations.findings.length} finding(s) recorded as observations: the visual check is diagnostic,
+          so a finding resting on its figure does not block the verdict
+          {block.visualObservations.originalVerdict &&
+          block.visualObservations.originalVerdict !== block.visualObservations.effectiveVerdict
+            ? ` (the reviewer said ${block.visualObservations.originalVerdict}; decided ${block.visualObservations.effectiveVerdict})`
+            : ""}
+          .
+          <ul className="mt-1 space-y-1">
+            {block.visualObservations.findings.map((o, i) => (
+              <li key={i} data-testid="visual-observation" className="text-ink-secondary">
+                <span className="text-ink-muted">{o.finding.severity}</span> {o.finding.issue}
+                {o.finding.invariant && <div className="text-xs text-ink-muted">invariant: {o.finding.invariant}</div>}
+                <div className="text-xs text-ink-muted">
+                  {o.basis === "field" ? "the reviewer marked it as based on the visual check" : "it cites the visual check's figure"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {findings.length === 0 ? (
         approved ? null : (
           <span className="ml-2 text-sm text-ink-muted">no findings given</span>

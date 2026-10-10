@@ -382,6 +382,9 @@ export const KNOWN_EVENT_TYPES = [
   "deliverables_report",
   "deliverables_retry",
   "deliverables_gap",
+  // B-516: reviewer findings resting on a diagnostic visual check's figure,
+  // taken out of the verdict and kept as observations for the person.
+  "visual_observation",
   "skill_problems",
   "release_drafted",
   "pr_body_draft",

@@ -543,6 +543,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 			return vcs.New(projectRoot).DiffExcluding(runDiffExclusions(rs.run, projectRoot, rs.projectPath)...)
 		},
 		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		// B-516: nothing renders here, but the task prompt can carry a failed
+		// run's figure; under a diagnostic check a test review cannot block
+		// on it either.
+		Visual: visualGuard(projCfg),
 	}
 
 	// B-504: a test for a task that cites a REF-IMG is written and reviewed by
