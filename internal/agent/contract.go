@@ -685,6 +685,22 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 			return nil, fmt.Errorf("verdict contract: finding %d is class-level (file \"*\") but names no invariant", i)
 		}
 	}
+	// A blocking finding the reviewer marked visual_check is the harness's to
+	// decide: under a diagnostic visual check it is the person's caveat, under
+	// a required one it blocks (B-516). The parser does not know the mode, so
+	// an approval carrying only such findings is read as the request-changes
+	// it formally is, and the strategy's guard settles it by the mode — Codex
+	// on #170 reproduced the reviewer, told such a finding "does not block",
+	// approving with it and being rejected here before the guard could run.
+	if v.Approved() && len(v.Blocking()) > 0 {
+		visualOnly := true
+		for _, f := range v.Blocking() {
+			visualOnly = visualOnly && f.VisualCheck
+		}
+		if visualOnly {
+			v.Verdict = "request-changes"
+		}
+	}
 	// A reviewer cannot approve and simultaneously report blocking problems.
 	if v.Approved() && len(v.Blocking()) > 0 {
 		return nil, fmt.Errorf("verdict contract: approved while reporting %d blocking finding(s); approve or request changes, not both",

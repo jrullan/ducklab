@@ -201,9 +201,10 @@ func VisualModeStatement(required bool) string {
 // VisualFindingRule is the reviewer's half of the contract: a finding whose
 // basis is the figure says so, so the harness can tell it apart.
 func VisualFindingRule(required bool) string {
-	rule := `If a finding of yours rests on this figure, set "visual_check": true on it.`
+	rule := `If a finding of yours rests on this figure, set "visual_check": true on it. Choose your verdict by your other ` +
+		`findings: the harness decides by the check's mode what a visual_check finding does to the verdict.`
 	if !required {
-		rule += " In diagnostic mode such a finding is recorded as an observation for the person and does not block your verdict; " +
+		rule += " In diagnostic mode it is recorded as an observation for the person and does not block; " +
 			"neither does a finding that cites the measured percentage or the allowance."
 	}
 	return rule
@@ -442,10 +443,16 @@ func (v *VisualCheck) visualGap(m *VisualMeasurement) map[int][]VisualResult {
 //     finding's issue, invariant or fix quotes a percentage equal (at the
 //     precision written) to a figure this run actually showed — a
 //     comparison's tolerance, or a mismatch a measurement produced — AND
-//     speaks of the comparison itself: pixels, the visual check or
-//     comparison, the difference image, or a REF-IMG id. A percentage alone
-//     never matches ("30% of 50 shows 0.15" is a calculator defect), and
-//     neither does pixel talk with another number.
+//     that percentage is bound to the comparison where it is written: "of
+//     (the) pixels" right after it, or an allowance, tolerance, difference
+//     or mismatch word right beside it; AND the finding names the comparison
+//     itself: the visual check or comparison, a pixel difference, the
+//     difference image, a share "of pixels", or a REF-IMG id. A percentage
+//     alone never matches ("30% of 50 shows 0.15" is a calculator defect),
+//     and the bare word "pixels" is not a comparison: Codex on #170
+//     reproduced "At 30% viewport width, the keypad overflows its container
+//     by 12 pixels" — a real layout defect, under a 30% tolerance — being
+//     taken out of the verdict when "pixels" anywhere counted.
 //
 // The verdict afterwards: request-changes with no critical or major finding
 // left becomes approve, keeping its minor findings. That is today's rule, not
@@ -463,7 +470,13 @@ type VisualObservation struct {
 
 var (
 	percentRe     = regexp.MustCompile(`(\d+(?:\.(\d+))?)\s*%`)
-	visualVocabRe = regexp.MustCompile(`(?i)\bpixels?\b|pixel[- ]difference|visual[- ](?:check|comparison)|difference image|\bdiff image\b|REF-IMG-[0-9a-f]{8}`)
+	visualVocabRe = regexp.MustCompile(`(?i)pixel[- ]difference|\bpixels? differ|\bof (?:the )?pixels\b|visual[- ](?:check|comparison)|difference image|\bdiff image\b|REF-IMG-[0-9a-f]{8}`)
+	// figureAfterRe and figureNearRe bind one percentage to the comparison:
+	// "32.4% of pixels", "(allowed 30.0%)", "the 30% allowance", "differs
+	// by 33.5%". They are matched on the few words around that percentage
+	// only, never on the whole finding.
+	figureAfterRe = regexp.MustCompile(`(?i)^\s*(?:of (?:the |its |all )?pixels\b|pixels?\b|pixel[- ]difference|(?:pixel[- ])?(?:allowance|tolerance|mismatch|difference))`)
+	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?)\b`)
 )
 
 // guards reports whether the diagnostic guard applies: a comparison is
@@ -498,7 +511,14 @@ func citesFigure(f agent.Finding, figures []float64) bool {
 	if !visualVocabRe.MatchString(text) {
 		return false
 	}
-	for _, m := range percentRe.FindAllStringSubmatch(text, -1) {
+	for _, idx := range percentRe.FindAllStringSubmatchIndex(text, -1) {
+		if !figureBound(text, idx[0], idx[1]) {
+			continue
+		}
+		m := []string{text[idx[0]:idx[1]], text[idx[2]:idx[3]], ""}
+		if idx[4] >= 0 {
+			m[2] = text[idx[4]:idx[5]]
+		}
 		p, err := strconv.ParseFloat(m[1], 64)
 		if err != nil {
 			continue
@@ -513,6 +533,36 @@ func citesFigure(f agent.Finding, figures []float64) bool {
 		}
 	}
 	return false
+}
+
+// figureBound reports whether the percentage at text[start:end] is written as
+// the comparison's figure: "of pixels" (or a pixel/allowance word) right
+// after it, or an allowance/tolerance/difference/mismatch word within a few
+// words on either side, inside the same clause.
+func figureBound(text string, start, end int) bool {
+	after := text[end:]
+	if figureAfterRe.MatchString(after) {
+		return true
+	}
+	clause := func(s string) string {
+		if i := strings.IndexAny(s, ".;:\n"); i >= 0 {
+			return s[:i]
+		}
+		return s
+	}
+	lo := start - 28
+	if lo < 0 {
+		lo = 0
+	}
+	before := text[lo:start]
+	if i := strings.LastIndexAny(before, ".;:\n"); i >= 0 {
+		before = before[i+1:]
+	}
+	hi := 28
+	if hi > len(after) {
+		hi = len(after)
+	}
+	return figureNearRe.MatchString(before) || figureNearRe.MatchString(clause(after[:hi]))
 }
 
 // demoteDiagnostic applies the guard to a reviewer's verdict in place and

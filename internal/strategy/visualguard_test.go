@@ -138,6 +138,18 @@ func TestTheDiagnosticGuardMatrix(t *testing.T) {
 		{"diagnostic, marked visual_check, no figure quoted", false, []agent.Finding{field}, "approve", 0, []string{"field"}},
 		{"diagnostic, percent-key defect quoting 30%", false, []agent.Finding{percentKeyMajor()}, "request-changes", 1, nil},
 		{"diagnostic, pixel talk with another number", false, []agent.Finding{pixelGapMajor()}, "request-changes", 1, nil},
+		// Codex on #170: the tolerance's own number and the word "pixels" in a
+		// real responsive-layout defect are not the comparison.
+		{"diagnostic, layout defect quoting the tolerance's number and pixels", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 40,
+			Issue: "At 30% viewport width, the keypad overflows its container by 12 pixels.", Fix: "Let the grid shrink with the frame."}}, "request-changes", 1, nil},
+		{"diagnostic, layout defect naming the reference and the tolerance's number", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 40,
+			Issue: "The d-pad is 30% smaller than in REF-IMG-6c63e390 and overlaps the mode key.", Fix: "Size it to the reference."}}, "request-changes", 1, nil},
+		// A percentage bound to a difference word, plus the bare word "pixels",
+		// is still not the comparison: the finding has to name it.
+		{"diagnostic, a bound percentage without the comparison named", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 60,
+			Issue: "A 30% difference in key height leaves the grid 12 pixels short of the frame.", Fix: "Use one key height."}}, "request-changes", 1, nil},
+		{"diagnostic, the csjo wording (capture, of pixels, allowed)", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "Pre-review round-2 capture measures 32.4% of pixels differing against the allowed 30.0%.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, visual major beside a real critical", false, []agent.Finding{t009VisualMajor(), {Severity: "critical", File: "index.html", Line: 122, Issue: "dispatch is never reached", Fix: "import it"}}, "request-changes", 1, []string{"figure"}},
 		{"required, 4oml's finding", true, []agent.Finding{t009VisualMajor(), t009Minor()}, "request-changes", 2, nil},
 		{"required, marked visual_check", true, []agent.Finding{field}, "request-changes", 1, nil},
@@ -234,5 +246,35 @@ func TestTheGuardDecidesThePairVerdict(t *testing.T) {
 	res, kinds, observed := run(true)
 	if res.State.Verdict != "request-changes" || len(observed) != 0 || strings.Contains(strings.Join(kinds, ","), "visual_observation") {
 		t.Errorf("required: verdict %q, observations %v — the required check must be untouched", res.State.Verdict, observed)
+	}
+}
+
+// Codex on #170: told that a diagnostic visual_check finding does not block,
+// a compliant reviewer approves while carrying it as a major. The verdict
+// parser must hand that to the guard, not reject it; and in required mode
+// the same verdict must still block.
+func TestAnApprovalCarryingOnlyVisualCheckMajorsReachesTheGuard(t *testing.T) {
+	raw := `{"verdict":"approve","findings":[{"severity":"major","file":"index.html","line":27,` +
+		`"issue":"The title block sits 20px above the reference.","fix":"Lower it.","visual_check":true},` +
+		`{"severity":"minor","file":"logic.mjs","line":1516,"issue":"store menu never commits","fix":"Handle menu id store."}]}`
+	for _, required := range []bool{false, true} {
+		parsed, err := agent.ParseContract("verdict", raw)
+		if err != nil {
+			t.Fatalf("required=%v: approve + visual_check major rejected by the parser: %v", required, err)
+		}
+		v := parsed.(*agent.Verdict)
+		t009Check(required).demoteDiagnostic(v, failing324())
+		want := "approve"
+		if required {
+			want = "request-changes"
+		}
+		if v.Verdict != want {
+			t.Errorf("required=%v: verdict %s, want %s", required, v.Verdict, want)
+		}
+	}
+	// A real major without the field is still a contradiction the parser refuses.
+	bad := `{"verdict":"approve","findings":[{"severity":"major","file":"index.html","line":1,"issue":"dispatch is never reached","fix":"import it"}]}`
+	if _, err := agent.ParseContract("verdict", bad); err == nil {
+		t.Errorf("approve with a non-visual major was accepted")
 	}
 }
