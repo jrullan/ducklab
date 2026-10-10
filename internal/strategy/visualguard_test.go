@@ -148,6 +148,11 @@ func TestTheDiagnosticGuardMatrix(t *testing.T) {
 		// is still not the comparison: the finding has to name it.
 		{"diagnostic, a bound percentage without the comparison named", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 60,
 			Issue: "A 30% difference in key height leaves the grid 12 pixels short of the frame.", Fix: "Use one key height."}}, "request-changes", 1, nil},
+		// Codex on #170: a percentage attributed to the named comparison.
+		{"diagnostic, the visual comparison reports the figure against the reference", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "The visual comparison reports 32.4% against the reference.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
+		{"diagnostic, a size against the reference quoting the tolerance's number", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "The d-pad is 30% narrower against the reference in the visual comparison of shapes.", Fix: "Widen it."}}, "request-changes", 1, nil},
 		{"diagnostic, the csjo wording (capture, of pixels, allowed)", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
 			Issue: "Pre-review round-2 capture measures 32.4% of pixels differing against the allowed 30.0%.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, visual major beside a real critical", false, []agent.Finding{t009VisualMajor(), {Severity: "critical", File: "index.html", Line: 122, Issue: "dispatch is never reached", Fix: "import it"}}, "request-changes", 1, []string{"figure"}},
@@ -263,7 +268,13 @@ func TestAnApprovalCarryingOnlyVisualCheckMajorsReachesTheGuard(t *testing.T) {
 			t.Fatalf("required=%v: approve + visual_check major rejected by the parser: %v", required, err)
 		}
 		v := parsed.(*agent.Verdict)
-		t009Check(required).demoteDiagnostic(v, failing324())
+		if v.Returned != "approve" {
+			t.Errorf("required=%v: the reviewer's own verdict was not kept: %q", required, v.Returned)
+		}
+		observed, original := t009Check(required).demoteDiagnostic(v, failing324())
+		if !required && (len(observed) != 1 || original != "approve") {
+			t.Errorf("diagnostic: observed %v, original %q; want one observation and the reviewer's own approve", observed, original)
+		}
 		want := "approve"
 		if required {
 			want = "request-changes"
@@ -276,5 +287,46 @@ func TestAnApprovalCarryingOnlyVisualCheckMajorsReachesTheGuard(t *testing.T) {
 	bad := `{"verdict":"approve","findings":[{"severity":"major","file":"index.html","line":1,"issue":"dispatch is never reached","fix":"import it"}]}`
 	if _, err := agent.ParseContract("verdict", bad); err == nil {
 		t.Errorf("approve with a non-visual major was accepted")
+	}
+}
+
+// Codex on #170: the record keeps the reviewer's own word. An approval read
+// as request-changes is reported as "approve" by the observation under a
+// diagnostic check, and under a required check — where nothing demotes it —
+// its override is an event of its own.
+func TestAnOverriddenApprovalIsRecordedWithTheReviewersOwnVerdict(t *testing.T) {
+	marked := t009VisualMajor()
+	marked.VisualCheck = true
+	approved := func() *agent.Outcome {
+		return &agent.Outcome{Text: `{"verdict":"approve"}`,
+			Parsed: &agent.Verdict{Verdict: "request-changes", Returned: "approve", Findings: []agent.Finding{marked}}}
+	}
+	run := func(required bool) (*ExecuteResult, map[string][]map[string]interface{}) {
+		rec := &recorder{}
+		events := map[string][]map[string]interface{}{}
+		impl := &agent.Outcome{Text: "Wired the keys."}
+		params := pairParams(rec, "green", impl, approved(), impl, approved(), impl, approved())
+		params.Rounds = 3
+		check := t009Check(required)
+		check.Measure = func(context.Context, int, string) *VisualMeasurement { return failing324() }
+		params.Visual = check
+		params.OnEvent = func(kind string, data map[string]interface{}) { events[kind] = append(events[kind], data) }
+		res, err := ExecuteScript(context.Background(), PairScript(), params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, events
+	}
+	res, events := run(false)
+	if res.State.Verdict != "approve" || len(events["visual_observation"]) != 1 ||
+		events["visual_observation"][0]["original_verdict"] != "approve" || len(events["visual_verdict_override"]) != 0 {
+		t.Errorf("diagnostic: verdict %q, observation %v, override %v", res.State.Verdict, events["visual_observation"], events["visual_verdict_override"])
+	}
+	res, events = run(true)
+	if res.State.Verdict != "request-changes" || len(events["visual_observation"]) != 0 || len(events["visual_verdict_override"]) == 0 {
+		t.Fatalf("required: verdict %q, observation %v, override %v", res.State.Verdict, events["visual_observation"], events["visual_verdict_override"])
+	}
+	if o := events["visual_verdict_override"][0]; o["original_verdict"] != "approve" || o["effective_verdict"] != "request-changes" {
+		t.Errorf("required: override = %v", o)
 	}
 }

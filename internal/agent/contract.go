@@ -57,6 +57,11 @@ type Verdict struct {
 	NativeChecks       *NativeReviewChecks  `json:"native_checks,omitempty"`
 	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
 	ManifestAudit      *ManifestAudit       `json:"manifest_audit,omitempty"`
+	// Returned is the verdict the reviewer actually wrote, kept when the
+	// parser read it as something else: an approval carrying only blocking
+	// findings marked visual_check is read as request-changes for the
+	// mode-aware guard to settle (B-516). Empty when the parser kept it.
+	Returned string `json:"-"`
 }
 
 // ManifestAudit makes a pre-freeze review accountable for the whole object.
@@ -698,6 +703,7 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 			visualOnly = visualOnly && f.VisualCheck
 		}
 		if visualOnly {
+			v.Returned = v.Verdict
 			v.Verdict = "request-changes"
 		}
 	}

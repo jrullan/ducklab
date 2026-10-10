@@ -385,6 +385,9 @@ export const KNOWN_EVENT_TYPES = [
   // B-516: reviewer findings resting on a diagnostic visual check's figure,
   // taken out of the verdict and kept as observations for the person.
   "visual_observation",
+  // An approval carrying only visual_check blocking findings, overridden
+  // because nothing demoted them (a required check).
+  "visual_verdict_override",
   "skill_problems",
   "release_drafted",
   "pr_body_draft",

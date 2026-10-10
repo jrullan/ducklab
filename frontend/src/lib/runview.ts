@@ -136,6 +136,9 @@ export interface TurnBlock {
    * (B-516): recorded as observations, they did not decide the verdict.
    * originalVerdict is what the reviewer said before they were set aside. */
   visualObservations?: { findings: VisualObservation[]; originalVerdict: string; effectiveVerdict: string };
+  /** The reviewer approved while raising blocking findings it marked
+   * visual_check, and the check is required: the approval was overridden. */
+  visualOverride?: { originalVerdict: string; effectiveVerdict: string };
   /** What images the engine showed this turn (B-504): reference ids, the
    * candidate's capture and diff — or that the seat could not see them. A
    * build that "matches REF-IMG" was once built and approved by seats that
@@ -624,6 +627,20 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
             rb.visualObservations = {
               findings,
+              originalVerdict: String(d.original_verdict ?? ""),
+              effectiveVerdict: String(d.effective_verdict ?? ""),
+            };
+            break;
+          }
+        }
+        break;
+      }
+      case "visual_verdict_override": {
+        const round = Number(d.round ?? 0);
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const rb = blocks[i]!;
+          if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
+            rb.visualOverride = {
               originalVerdict: String(d.original_verdict ?? ""),
               effectiveVerdict: String(d.effective_verdict ?? ""),
             };

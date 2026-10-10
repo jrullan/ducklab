@@ -394,6 +394,12 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
           {block.visualGap.map((g) => `slice ${g.id}${g.figure ? ` (${g.figure})` : ""}`).join("; ")}
         </div>
       )}
+      {block.visualOverride && (
+        <div className="mt-1 text-sm" data-testid="visual-override" style={{ color: statusVar("warning") }}>
+          ⓘ The reviewer said {block.visualOverride.originalVerdict} while raising blocking findings it based on the visual check;
+          the check is required, so they block: decided {block.visualOverride.effectiveVerdict}.
+        </div>
+      )}
       {block.visualObservations && block.visualObservations.findings.length > 0 && (
         <div className="mt-1 text-sm" data-testid="visual-observations" style={{ color: statusVar("warning") }}>
           ⓘ {block.visualObservations.findings.length} finding(s) recorded as observations: the visual check is diagnostic,

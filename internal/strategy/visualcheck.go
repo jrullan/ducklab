@@ -475,8 +475,11 @@ var (
 	// "32.4% of pixels", "(allowed 30.0%)", "the 30% allowance", "differs
 	// by 33.5%". They are matched on the few words around that percentage
 	// only, never on the whole finding.
-	figureAfterRe = regexp.MustCompile(`(?i)^\s*(?:of (?:the |its |all )?pixels\b|pixels?\b|pixel[- ]difference|(?:pixel[- ])?(?:allowance|tolerance|mismatch|difference))`)
-	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?)\b`)
+	// "reports 32.4% against the reference" binds too (Codex on #170), but
+	// only when "against" follows the figure at once: "30% narrower than the
+	// reference" is a size, not the comparison's figure.
+	figureAfterRe = regexp.MustCompile(`(?i)^\s*(?:of (?:the |its |all )?pixels\b|pixels?\b|pixel[- ]difference|(?:pixel[- ])?(?:allowance|tolerance|mismatch|difference)|against (?:the |its )?(?:reference|photo|REF-IMG-[0-9a-f]{8}))`)
+	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?|visual[- ](?:check|comparison))\b`)
 )
 
 // guards reports whether the diagnostic guard applies: a comparison is
@@ -572,6 +575,10 @@ func (v *VisualCheck) demoteDiagnostic(verdict *agent.Verdict, m *VisualMeasurem
 		return nil, ""
 	}
 	original := verdict.Verdict
+	if verdict.Returned != "" {
+		// The reviewer's own word, not the parser's reading of it (Codex on #170).
+		original = verdict.Returned
+	}
 	figures := v.figures(m)
 	kept := []agent.Finding{}
 	var observed []VisualObservation

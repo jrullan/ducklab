@@ -191,6 +191,23 @@ describe("a diagnostic visual observation", () => {
   });
 });
 
+// Codex on #170: under a required check, an approval carrying only
+// visual_check blocking findings is overridden — and the lane says so.
+describe("a required visual check overriding an approval", () => {
+  it("shows what the reviewer said and what was decided", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes" }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "request-changes", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.visualOverride).toEqual({ originalVerdict: "approve", effectiveVerdict: "request-changes" });
+    render(<ConversationTurn block={block} roster={["glm53flash"]} />);
+    expect(screen.getByTestId("visual-override").textContent).toMatch(/said approve.*required.*decided request-changes/);
+  });
+});
+
 describe("an ask_advisor consult", () => {
   it("renders the duck's answer open, in the middle of the turn", () => {
     const events: DucklabEvent[] = [

@@ -1071,11 +1071,22 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// as decided. See demoteDiagnostic.
 			if turn.Role == config.RoleReviewer {
 				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil {
-					if observed, original := params.Visual.demoteDiagnostic(v, visual); len(observed) > 0 {
+					observed, original := params.Visual.demoteDiagnostic(v, visual)
+					if len(observed) > 0 {
 						emit(params, "visual_observation", map[string]interface{}{
 							"round": round, "turn": i, "observations": observed,
 							"original_verdict": original, "effective_verdict": v.Verdict,
 							"detail": "the visual check is diagnostic: findings resting on its figure are recorded as observations and do not block the verdict",
+						})
+					} else if v.Returned != "" && v.Returned != v.Verdict {
+						// The reviewer approved while raising blocking findings it
+						// marked visual_check, and nothing demoted them (a required
+						// check, or no comparison configured): the approval was
+						// overridden, and the record says so (Codex on #170).
+						emit(params, "visual_verdict_override", map[string]interface{}{
+							"round": round, "turn": i,
+							"original_verdict": v.Returned, "effective_verdict": v.Verdict,
+							"detail": "the reviewer approved while raising blocking findings it marked visual_check; they block here, so the verdict is request-changes",
 						})
 					}
 				}
