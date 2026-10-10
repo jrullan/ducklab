@@ -34,22 +34,52 @@ import (
 // pair and tournament use several ducklings in one run, so a single loop is
 // not enough. Loops are cached because building one probes capabilities, and
 // probing once per turn would cost a request per turn.
+//
+// observedProvider is every agent loop's provider, so it sees every request a
+// run makes — and every request that carries images: stage architect turns,
+// build, test-first and review turns (taskVision, advisor consults included),
+// the triager's screenshots and the consultant chat all reach a provider only
+// through an agent.Loop built by buildLoop. That makes it the one place image
+// evidence is recorded (B-515), instead of a hook at each call site that
+// attaches images and could be missed by the next one.
 type observedProvider struct {
 	provider.Provider
 	id       config.DucklingID
 	registry *duckling.Registry
+	// emit records a change of the duckling's recorded vision on the run
+	// (vision_evidence), which is also what tells the desktop to refetch
+	// the fleet. nil outside a run log.
+	emit func(kind string, data map[string]interface{}) error
 }
 
 func (p observedProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
 	resp, err := p.Provider.Chat(ctx, req)
-	p.registry.RecordProviderResult(p.id, err)
+	p.observe(req, err)
 	return resp, err
 }
 
 func (p observedProvider) ChatStream(ctx context.Context, req provider.ChatRequest, ch chan<- provider.Delta) (provider.ChatResponse, error) {
 	resp, err := p.Provider.ChatStream(ctx, req, ch)
-	p.registry.RecordProviderResult(p.id, err)
+	p.observe(req, err)
 	return resp, err
+}
+
+// observe folds one result into the duckling's health, and — when the request
+// carried images — into its recorded vision.
+func (p observedProvider) observe(req provider.ChatRequest, err error) {
+	p.registry.RecordProviderResult(p.id, err)
+	if !agent.RequestCarriesImages(req) {
+		return
+	}
+	outcome, changed := p.registry.RecordImageEvidence(p.id, err)
+	if !changed || p.emit == nil {
+		return
+	}
+	data := map[string]interface{}{"duckling": string(p.id), "vision": outcome}
+	if err != nil {
+		data["error"] = err.Error()
+	}
+	_ = p.emit("vision_evidence", data)
 }
 
 type loopCache struct {
@@ -172,7 +202,11 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 	if err != nil {
 		return nil, fmt.Errorf("duckling %q provider: %w", id, err)
 	}
-	p = observedProvider{Provider: p, id: id, registry: s.ducklings}
+	observed := observedProvider{Provider: p, id: id, registry: s.ducklings}
+	if adapter, ok := writer.(*runLogAdapter); ok && adapter != nil && adapter.w != nil {
+		observed.emit = adapter.w.AppendEvent
+	}
+	p = observed
 
 	caps := s.effectiveCaps(ctx, id, true)
 
@@ -190,6 +224,10 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 		NonStreamingTimeout:   time.Duration(s.cfg.Defaults.HTTPTimeoutS) * time.Second,
 		NarratedToolLimit:     s.cfg.Defaults.NarratedToolLimit,
 		RunWriter:             writer,
+		// A seat whose endpoint refused images — in this run or recorded
+		// before it — gets none: the turn is told why instead of failing on
+		// the same 400 again (B-515).
+		SeesImages: func() bool { return s.seatCanSee(id) },
 	}
 	return loop, nil
 }

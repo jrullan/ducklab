@@ -278,6 +278,12 @@ export const KNOWN_EVENT_TYPES = [
   // not see), and the candidate rendered between rounds for seeing seats.
   "turn_images",
   "visual_feedback",
+  // B-515: a real image request changed a duckling's recorded vision
+  // (verified or refuted) — the fleet's vision_status is stale until
+  // refetched — and a turn whose images were refused or withheld.
+  "vision_evidence",
+  "images_refused",
+  "images_withheld",
   // An accept whose commit did not reproduce from a clean checkout takes
   // the commit back; the diff stays in the tree, uncommitted (B-069).
   "commit_withdrawn",

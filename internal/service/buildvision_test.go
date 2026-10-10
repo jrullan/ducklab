@@ -17,6 +17,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -67,11 +68,22 @@ func setVision(s *Service, id string, see bool) {
 	duck.Caps.NativeTools = &native
 	s.cfg.Ducklings[config.DucklingID(id)] = duck
 	s.cfgMu.Unlock()
+	// The registry's entry too, as a config edit does: the listing's
+	// vision_status reads the registered declaration (B-515).
+	_ = s.ducklings.Replace(duckling.FromConfig(config.DucklingID(id), duck))
 }
 
 // visionPairBuild runs the real build of T-001 (pair, or the mode given) through the fake provider
 // and returns every request and the run's events.
 func visionPairBuild(t *testing.T, mode string, reviewerSees, render bool) ([]provider.ChatRequest, []*runlog.Event, string) {
+	t.Helper()
+	reqs, events, ref, _ := visionBuild(t, mode, reviewerSees, render, nil)
+	return reqs, events, ref
+}
+
+// visionBuild is visionPairBuild with a hook that runs just before the run
+// starts (B-515 wraps the provider there), returning the service too.
+func visionBuild(t *testing.T, mode string, reviewerSees, render bool, hook func(*Service)) ([]provider.ChatRequest, []*runlog.Event, string, *Service) {
 	t.Helper()
 	s := serviceWithDucklings(t, "luna", "glm52")
 	setVision(s, "luna", true)
@@ -127,6 +139,9 @@ func visionPairBuild(t *testing.T, mode string, reviewerSees, render bool) ([]pr
 		}
 		return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: `Built it. {"deliverables":[{"id":1,"status":"done"}]}`}, FinishReason: provider.FinishStop}}}
 	}
+	if hook != nil {
+		hook(s)
+	}
 	run, err := s.RunStart(context.Background(), projectID, RunRequest{TaskID: "T-001", Mode: mode,
 		Seats: map[string]string{"implementer": "luna", "reviewer": "glm52"}})
 	if err != nil {
@@ -145,7 +160,7 @@ func visionPairBuild(t *testing.T, mode string, reviewerSees, render bool) ([]pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fake.Requests(), events, ref
+	return fake.Requests(), events, ref, s
 }
 
 func fakeToolCall(name, args string) provider.ToolCall {
@@ -503,7 +518,7 @@ func TestB504ReferencesAreBoundedInCountAndSize(t *testing.T) {
 	roster := map[config.Role]config.DucklingID{config.RoleImplementer: "luna"}
 	v := s.newTaskVision(context.Background(), projectID, "T-001", []string{dir}, roster,
 		[]config.Role{config.RoleImplementer}, nil)
-	urls, section, shown, notes := v.forTurn(config.RoleImplementer, true)
+	urls, section, shown, notes := v.forTurn(config.RoleImplementer, true, "")
 	if len(urls) != maxTurnRefImages || len(shown) != maxTurnRefImages {
 		t.Fatalf("attached %d references, want %d", len(urls), maxTurnRefImages)
 	}
@@ -531,7 +546,7 @@ func TestB504ATurnsImagesAreBoundedInTotal(t *testing.T) {
 		refs: []turnImage{ref("REF-IMG-aaaaaaaa", 2<<20), ref("REF-IMG-bbbbbbbb", 2<<20),
 			ref("REF-IMG-cccccccc", 2<<20), ref("REF-IMG-dddddddd", 2<<20)},
 	}
-	urls, section, _, notes := v.forTurn(config.RoleImplementer, true)
+	urls, section, _, notes := v.forTurn(config.RoleImplementer, true, "")
 	if len(urls) != 3 || !strings.Contains(strings.Join(notes, "\n"), "REF-IMG-dddddddd (reference) was not attached: the turn's images would exceed 6 MB") {
 		t.Errorf("total bound: %d attached, notes %v", len(urls), notes)
 	}
@@ -547,7 +562,7 @@ func TestB504ATurnsImagesAreBoundedInTotal(t *testing.T) {
 		feedback: &visualFeedback{Round: 1, Phase: "before review", images: []turnImage{
 			small("a.png", "capture"), small("a.png vs REF-IMG-aaaaaaaa", "diff"), small("b.png", "capture")}},
 	}
-	urls, _, _, notes = v.forTurn(config.RoleReviewer, true)
+	urls, _, _, notes = v.forTurn(config.RoleReviewer, true, "")
 	if len(urls) != maxTurnImages || !strings.Contains(strings.Join(notes, "\n"), "b.png (capture) was not attached: at most 6 images per turn") {
 		t.Errorf("count bound: %d attached, notes %v", len(urls), notes)
 	}
@@ -744,7 +759,7 @@ func TestB504TheRoundGateRendersForTheNextImplementer(t *testing.T) {
 	// A resumed run restores the latest feedback from the record.
 	again := (&taskVision{svc: v.svc, roles: v.roles, cited: v.cited, refs: v.refs}).withFeedback(writer.RunDir(), nil,
 		func(context.Context) (*runlog.VisualGate, []string, error) { return nil, nil, nil })
-	urls, section, _, _ := again.forTurn(config.RoleImplementer, true)
+	urls, section, _, _ := again.forTurn(config.RoleImplementer, true, "")
 	if len(urls) != 3 || !strings.Contains(section, "100.0% of pixels differ") {
 		t.Errorf("resumed feedback: %d images, section:\n%s", len(urls), section)
 	}

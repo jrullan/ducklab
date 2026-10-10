@@ -55,6 +55,10 @@ export interface RunsState {
    * (the consultant pane) missed it and kept a transcript with a permanent
    * hole (Codex on #166). Such surfaces refetch when this number changes. */
   resyncEpoch: number;
+  /** Moves on every vision_evidence event (B-515): a run's image request
+   * verified or refuted a duckling's vision, so every surface holding the
+   * fleet's vision_status refetches it. */
+  fleetEpoch: number;
 
   applyEvent: (e: DucklabEvent) => void;
   /** Applies a frame's worth of streamed text in one update (AC-33). */
@@ -119,6 +123,7 @@ export const useRuns = create<RunsState>((set) => ({
   acceptState: {},
   needsResync: false,
   resyncEpoch: 0,
+  fleetEpoch: 0,
 
   applyEvent: (e) =>
     set((state) => {
@@ -275,6 +280,7 @@ export const useRuns = create<RunsState>((set) => ({
         ...state,
         events: { ...state.events, [runId]: trimmed },
         runs,
+        fleetEpoch: e.type === "vision_evidence" ? state.fleetEpoch + 1 : state.fleetEpoch,
         // The durable message event is in events; streamed answer/thinking are
         // only live display buffers and must not survive a completed turn.
         deltas: key ? discardTurn(state.deltas, runId, key) : state.deltas,
