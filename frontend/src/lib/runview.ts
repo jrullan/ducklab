@@ -138,7 +138,7 @@ export interface TurnBlock {
   visualObservations?: { findings: VisualObservation[]; originalVerdict: string; effectiveVerdict: string };
   /** The reviewer approved while raising blocking findings it marked
    * visual_check, and the check is required: the approval was overridden. */
-  visualOverride?: { originalVerdict: string; effectiveVerdict: string };
+  visualOverride?: { originalVerdict: string; effectiveVerdict: string; reason: string };
   /** What images the engine showed this turn (B-504): reference ids, the
    * candidate's capture and diff — or that the seat could not see them. A
    * build that "matches REF-IMG" was once built and approved by seats that
@@ -643,6 +643,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
             rb.visualOverride = {
               originalVerdict: String(d.original_verdict ?? ""),
               effectiveVerdict: String(d.effective_verdict ?? ""),
+              reason: String(d.reason ?? ""),
             };
             break;
           }

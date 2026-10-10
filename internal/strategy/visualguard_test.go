@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -153,6 +154,14 @@ func TestTheDiagnosticGuardMatrix(t *testing.T) {
 			Issue: "The visual comparison reports 32.4% against the reference.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, a size against the reference quoting the tolerance's number", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
 			Issue: "The d-pad is 30% narrower against the reference in the visual comparison of shapes.", Fix: "Widen it."}}, "request-changes", 1, nil},
+		// Codex on #170 (a4d58250): the comparison named beside a percentage
+		// that measures a thing does not make it the figure.
+		{"diagnostic, the visual comparison shows a 30% narrower d-pad", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "The visual comparison shows a 30% narrower d-pad than the reference.", Fix: "Widen it."}}, "request-changes", 1, nil},
+		{"diagnostic, a standalone percentage measuring a thing, the comparison named elsewhere", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "Pressed keys shrink by 30%. The visual comparison cannot show it, but the keys jump on every press.", Fix: "Scale them by 4% at most."}}, "request-changes", 1, nil},
+		{"diagnostic, the figure standing alone after the comparison", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "The capture still differs from REF-IMG-6c63e390 by 32.4%, over the 30% allowance.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, the csjo wording (capture, of pixels, allowed)", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
 			Issue: "Pre-review round-2 capture measures 32.4% of pixels differing against the allowed 30.0%.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, visual major beside a real critical", false, []agent.Finding{t009VisualMajor(), {Severity: "critical", File: "index.html", Line: 122, Issue: "dispatch is never reached", Fix: "import it"}}, "request-changes", 1, []string{"figure"}},
@@ -326,7 +335,21 @@ func TestAnOverriddenApprovalIsRecordedWithTheReviewersOwnVerdict(t *testing.T) 
 	if res.State.Verdict != "request-changes" || len(events["visual_observation"]) != 0 || len(events["visual_verdict_override"]) == 0 {
 		t.Fatalf("required: verdict %q, observation %v, override %v", res.State.Verdict, events["visual_observation"], events["visual_verdict_override"])
 	}
-	if o := events["visual_verdict_override"][0]; o["original_verdict"] != "approve" || o["effective_verdict"] != "request-changes" {
+	if o := events["visual_verdict_override"][0]; o["original_verdict"] != "approve" || o["effective_verdict"] != "request-changes" || o["reason"] != "required" {
 		t.Errorf("required: override = %v", o)
+	}
+	// Codex on #170 (a4d58250): no comparison configured is its own reason.
+	rec := &recorder{}
+	got := map[string][]map[string]interface{}{}
+	impl := &agent.Outcome{Text: "Wired the keys."}
+	params := pairParams(rec, "green", impl, approved(), impl, approved(), impl, approved())
+	params.Rounds = 3
+	params.OnEvent = func(kind string, data map[string]interface{}) { got[kind] = append(got[kind], data) }
+	if _, err := ExecuteScript(context.Background(), PairScript(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(got["visual_verdict_override"]) == 0 || got["visual_verdict_override"][0]["reason"] != "no_comparison" ||
+		strings.Contains(fmt.Sprint(got["visual_verdict_override"][0]["detail"]), "required") {
+		t.Errorf("no comparison: override = %v", got["visual_verdict_override"])
 	}
 }

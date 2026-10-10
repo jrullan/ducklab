@@ -396,8 +396,13 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
       )}
       {block.visualOverride && (
         <div className="mt-1 text-sm" data-testid="visual-override" style={{ color: statusVar("warning") }}>
-          ⓘ The reviewer said {block.visualOverride.originalVerdict} while raising blocking findings it based on the visual check;
-          the check is required, so they block: decided {block.visualOverride.effectiveVerdict}.
+          ⓘ The reviewer said {block.visualOverride.originalVerdict} while raising blocking findings it based on the visual check;{" "}
+          {block.visualOverride.reason === "required"
+            ? "the check is required, so they block"
+            : block.visualOverride.reason === "no_comparison"
+              ? "no visual comparison is configured, so they block as written"
+              : "they block"}
+          : decided {block.visualOverride.effectiveVerdict}.
         </div>
       )}
       {block.visualObservations && block.visualObservations.findings.length > 0 && (

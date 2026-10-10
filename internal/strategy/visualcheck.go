@@ -479,7 +479,9 @@ var (
 	// only when "against" follows the figure at once: "30% narrower than the
 	// reference" is a size, not the comparison's figure.
 	figureAfterRe = regexp.MustCompile(`(?i)^\s*(?:of (?:the |its |all )?pixels\b|pixels?\b|pixel[- ]difference|(?:pixel[- ])?(?:allowance|tolerance|mismatch|difference)|against (?:the |its )?(?:reference|photo|REF-IMG-[0-9a-f]{8}))`)
-	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?|visual[- ](?:check|comparison))\b`)
+	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?|visual[- ](?:check|comparison)|reports|measures)\b`)
+	// figureAloneRe: nothing the percentage could be quantifying follows it.
+	figureAloneRe = regexp.MustCompile(`(?i)^\s*(?:$|[.,;:)(\]]|(?:and|but|while|which|above|over|below|under|versus|vs)\b)`)
 )
 
 // guards reports whether the diagnostic guard applies: a comparison is
@@ -539,21 +541,28 @@ func citesFigure(f agent.Finding, figures []float64) bool {
 }
 
 // figureBound reports whether the percentage at text[start:end] is written as
-// the comparison's figure: "of pixels" (or a pixel/allowance word) right
-// after it, or an allowance/tolerance/difference/mismatch word within a few
-// words on either side, inside the same clause.
+// the comparison's aggregate figure, not as a measure of something else.
+//
+// Strong: what follows names the comparison — "32.4% of pixels", "the 30%
+// allowance", "33.6% mismatch", "reports 32.4% against the reference".
+// Otherwise the percentage must stand alone — the clause ends, or a bracket
+// or a conjunction follows ("differs by 33.5%.", "(allowed 30.0%)") — AND a
+// comparison word precedes it in the same clause (allowed, tolerance,
+// differs, mismatch, the visual check or comparison, reports, measures).
+//
+// Codex on #170 twice: a percentage quantifying a thing is a measurement of
+// that thing, not the figure — "At 30% viewport width, the keypad overflows"
+// and "The visual comparison shows a 30% narrower d-pad than the reference"
+// are appearance defects to judge on their own, whatever words sit nearby.
 func figureBound(text string, start, end int) bool {
 	after := text[end:]
 	if figureAfterRe.MatchString(after) {
 		return true
 	}
-	clause := func(s string) string {
-		if i := strings.IndexAny(s, ".;:\n"); i >= 0 {
-			return s[:i]
-		}
-		return s
+	if !figureAloneRe.MatchString(after) {
+		return false
 	}
-	lo := start - 28
+	lo := start - 40
 	if lo < 0 {
 		lo = 0
 	}
@@ -561,11 +570,7 @@ func figureBound(text string, start, end int) bool {
 	if i := strings.LastIndexAny(before, ".;:\n"); i >= 0 {
 		before = before[i+1:]
 	}
-	hi := 28
-	if hi > len(after) {
-		hi = len(after)
-	}
-	return figureNearRe.MatchString(before) || figureNearRe.MatchString(clause(after[:hi]))
+	return figureNearRe.MatchString(before)
 }
 
 // demoteDiagnostic applies the guard to a reviewer's verdict in place and

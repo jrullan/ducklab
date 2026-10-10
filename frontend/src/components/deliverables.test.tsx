@@ -197,14 +197,29 @@ describe("a required visual check overriding an approval", () => {
   it("shows what the reviewer said and what was decided", () => {
     const events: DucklabEvent[] = [
       ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
-      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes" }),
+      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes", reason: "required" }),
       ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "request-changes", findings: [] }),
       ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
     ];
     const block = buildTurns(events)[0]!;
-    expect(block.visualOverride).toEqual({ originalVerdict: "approve", effectiveVerdict: "request-changes" });
+    expect(block.visualOverride).toEqual({ originalVerdict: "approve", effectiveVerdict: "request-changes", reason: "required" });
     render(<ConversationTurn block={block} roster={["glm53flash"]} />);
-    expect(screen.getByTestId("visual-override").textContent).toMatch(/said approve.*required.*decided request-changes/);
+    expect(screen.getByTestId("visual-override").textContent).toMatch(/said approve.*the check is required.*decided request-changes/);
+  });
+
+  // Codex on #170 (a4d58250): with no comparison configured the copy must
+  // not claim a required check.
+  it("says no comparison is configured when that is the reason", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes", reason: "no_comparison" }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "request-changes", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    render(<ConversationTurn block={buildTurns(events)[0]!} roster={["glm53flash"]} />);
+    const text = screen.getByTestId("visual-override").textContent ?? "";
+    expect(text).toMatch(/no visual comparison is configured/);
+    expect(text).not.toMatch(/required/);
   });
 });
 

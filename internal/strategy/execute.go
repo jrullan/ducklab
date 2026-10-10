@@ -1083,10 +1083,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						// marked visual_check, and nothing demoted them (a required
 						// check, or no comparison configured): the approval was
 						// overridden, and the record says so (Codex on #170).
+						reason, why := "no_comparison", "no visual comparison is configured, so the findings block as written"
+						if params.Visual != nil && params.Visual.Required && len(params.Visual.Compares) > 0 {
+							reason, why = "required", "the visual check is required, so they block"
+						}
 						emit(params, "visual_verdict_override", map[string]interface{}{
 							"round": round, "turn": i,
-							"original_verdict": v.Returned, "effective_verdict": v.Verdict,
-							"detail": "the reviewer approved while raising blocking findings it marked visual_check; they block here, so the verdict is request-changes",
+							"original_verdict": v.Returned, "effective_verdict": v.Verdict, "reason": reason,
+							"detail": "the reviewer approved while raising blocking findings it marked visual_check; " + why,
 						})
 					}
 				}
