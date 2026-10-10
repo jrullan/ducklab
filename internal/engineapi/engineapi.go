@@ -1706,6 +1706,12 @@ func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 	}
 	run, err := s.svc.RunStart(r.Context(), projectID, req)
 	if err != nil {
+		// A refused request is the caller's to fix, and its message is
+		// written to be shown as-is (B-517).
+		if errors.Is(err, service.ErrLaunchRefused) {
+			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}

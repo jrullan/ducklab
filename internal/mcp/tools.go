@@ -201,7 +201,9 @@ func toolList() []map[string]interface{} {
 			"description": "Build a task WITHOUT the test-first discipline — an exception, not the " +
 				"ordinary path. When the human says to run, start or build a task, they mean " +
 				"test_build (the TDD chain); use run_start only when they explicitly ask to skip " +
-				"the test. Mode defaults to the project's habit; solo|pair|tournament|split.",
+				"the test. Mode defaults to the project's habit; solo|pair|tournament|split. " +
+				"Builds a TASK only: to redo an intake, spec or plan run with a note, use " +
+				"decide request_changes on its gate or stage_start with revise — never run_start.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id":  str("the project id"),
 				"task_id":     str("a task whose next includes run"),
@@ -225,6 +227,7 @@ func toolList() []map[string]interface{} {
 				"mode":        str("optional mode: solo | council | sectioned"),
 				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
+				"revise":      str("optional: what to change about the stage's current draft — the retry of a failed or rejected intake/spec/plan run, with its redo note"),
 				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "absolute paths: .md/.txt documents or directories (loaded bounded into the prompt), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
 			}, "project_id", "stage"),
 		},
@@ -840,6 +843,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		if adopt, _ := a["adopt"].(bool); adopt {
 			req["adopt"] = true
+		}
+		// B-517: the retry of a document stage is a revision of that stage.
+		// Without this field an operator holding a failed intake's redo note
+		// had only run_start, which builds a task.
+		if r := strings.TrimSpace(a.str("revise")); r != "" {
+			req["revise"] = r
 		}
 		if refs, ok := a["refs"].([]interface{}); ok && len(refs) > 0 {
 			req["refs"] = refs

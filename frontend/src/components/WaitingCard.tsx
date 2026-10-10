@@ -70,6 +70,7 @@ export function WaitingCard({
   const [changesOpen, setChangesOpen] = useState(false);
   const [changes, setChanges] = useState("");
   const [changesBusy, setChangesBusy] = useState(false);
+  const [changesError, setChangesError] = useState<string | null>(null);
   // B-501: the objections are offered for filing where the decision is,
   // through the same engine door the run view's decision card uses.
   const dissent = gateDissent(run);
@@ -265,7 +266,12 @@ export function WaitingCard({
             event.preventDefault();
             if (!changes.trim() || !onRequestChanges) return;
             setChangesBusy(true);
-            void onRequestChanges(changes.trim()).finally(() => setChangesBusy(false));
+            setChangesError(null);
+            // The engine's refusal is the answer; dropping it left the card
+            // looking as if the revision had started (B-517).
+            void onRequestChanges(changes.trim())
+              .catch((e) => setChangesError(e instanceof Error ? e.message : String(e)))
+              .finally(() => setChangesBusy(false));
           }}
         >
           <input
@@ -279,6 +285,11 @@ export function WaitingCard({
             {changesBusy ? "Starting revision…" : "Start revision"}
           </button>
         </form>
+      )}
+      {changesError && (
+        <p className="mt-1 text-xs text-critical" role="alert" data-testid="now-request-changes-error">
+          revision not started: {changesError}
+        </p>
       )}
       {acceptError && (
         <p className="mt-1 text-xs text-critical" data-testid="now-accept-error">

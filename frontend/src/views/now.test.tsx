@@ -545,6 +545,29 @@ describe("Now — the inbox", () => {
     await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "plan", { revise: "split the last acceptance slice" }));
   });
 
+  // B-517: Now's note on a waiting document goes through the same revision
+  // RunView sends — the intake through its stage, never a build — and the
+  // engine's refusal is shown on the card instead of being dropped.
+  it("revises a failed intake through its stage and shows a refusal", async () => {
+    const intake: Run = {
+      ...base, id: "r-20261010-115519-tpfn", stage: "intake", mode: "council", task_id: "",
+      verdict: "FAILED", next: ["request_changes", "reject"],
+    };
+    seed([intake]);
+    const client = clientWith({
+      stageStart: vi.fn(() => Promise.reject(new Error("no intake draft to revise"))),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-build" })),
+    } as unknown as Partial<EngineClient>);
+
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-request-changes"));
+    fireEvent.change(screen.getByLabelText("requested changes"), { target: { value: "REQ-008 invents behavior" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start revision" }));
+    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "intake", { revise: "REQ-008 invents behavior" }));
+    expect(client.runStart).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("now-request-changes-error")).toHaveTextContent("no intake draft to revise");
+  });
+
   it("does not resurrect a consumed plan from an older artifact response", async () => {
     let resolveOld!: (artifact: Artifact) => void;
     const old = new Promise<Artifact>((resolve) => { resolveOld = resolve; });
