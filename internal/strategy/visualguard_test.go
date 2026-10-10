@@ -160,6 +160,12 @@ func TestTheDiagnosticGuardMatrix(t *testing.T) {
 			Issue: "The visual comparison shows a 30% narrower d-pad than the reference.", Fix: "Widen it."}}, "request-changes", 1, nil},
 		{"diagnostic, a standalone percentage measuring a thing, the comparison named elsewhere", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
 			Issue: "Pressed keys shrink by 30%. The visual comparison cannot show it, but the keys jump on every press.", Fix: "Scale them by 4% at most."}}, "request-changes", 1, nil},
+		// Codex on #170 (0c7809dd): a measured verb before the number, and a
+		// generic "difference" after it, are measurements, not the figure.
+		{"diagnostic, the visual comparison shows keys shrink 30%", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "Visual comparison shows keys shrink 30%.", Fix: "Keep the key size."}}, "request-changes", 1, nil},
+		{"diagnostic, the visual comparison shows a 30% difference in key width", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
+			Issue: "The visual comparison shows a 30% difference in key width.", Fix: "Use one key width."}}, "request-changes", 1, nil},
 		{"diagnostic, the figure standing alone after the comparison", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
 			Issue: "The capture still differs from REF-IMG-6c63e390 by 32.4%, over the 30% allowance.", Fix: "Match the reference."}}, "approve", 0, []string{"figure"}},
 		{"diagnostic, the csjo wording (capture, of pixels, allowed)", false, []agent.Finding{{Severity: "major", File: "index.html", Line: 22,
@@ -351,5 +357,36 @@ func TestAnOverriddenApprovalIsRecordedWithTheReviewersOwnVerdict(t *testing.T) 
 	if len(got["visual_verdict_override"]) == 0 || got["visual_verdict_override"][0]["reason"] != "no_comparison" ||
 		strings.Contains(fmt.Sprint(got["visual_verdict_override"][0]["detail"]), "required") {
 		t.Errorf("no comparison: override = %v", got["visual_verdict_override"])
+	}
+}
+
+// Each unambiguous form binds on its own, and nothing else does (Codex on
+// #170, four rounds of natural phrasings that measured something else).
+func TestOnlyTheUnambiguousFormsQuoteTheFigure(t *testing.T) {
+	figures := []float64{32.4, 30}
+	bound := []string{
+		"The visual check: 32.4% of pixels differ.",
+		"The visual comparison gives a 32.4% pixel difference.",
+		"The visual comparison is over: allowed 30% only.",
+		"The visual check misses the 30% allowance.",
+		"The visual check fails its tolerance of 30%.",
+		"The visual comparison measures 32.4% against REF-IMG-6c63e390.",
+	}
+	for _, issue := range bound {
+		if !citesFigure(agent.Finding{Issue: issue, Fix: "fix"}, figures) {
+			t.Errorf("not recognised as the figure: %q", issue)
+		}
+	}
+	unbound := []string{
+		"At 30% viewport width, the keypad overflows its container by 12 pixels.",
+		"The visual comparison shows a 30% narrower d-pad than the reference.",
+		"Visual comparison shows keys shrink 30%.",
+		"The visual comparison shows a 30% difference in key width.",
+		"The capture differs from REF-IMG-6c63e390 by 32.4%.",
+	}
+	for _, issue := range unbound {
+		if citesFigure(agent.Finding{Issue: issue, Fix: "fix"}, figures) {
+			t.Errorf("taken for the figure: %q", issue)
+		}
 	}
 }

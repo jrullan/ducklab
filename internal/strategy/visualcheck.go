@@ -440,19 +440,23 @@ func (v *VisualCheck) visualGap(m *VisualMeasurement) map[int][]VisualResult {
 //   - the contract field: the reviewer marks a finding "visual_check": true
 //     (VisualFindingRule asks it to, wherever the figure is shown);
 //   - a conservative fallback for a model that ignores the field: the
-//     finding's issue, invariant or fix quotes a percentage equal (at the
-//     precision written) to a figure this run actually showed — a
-//     comparison's tolerance, or a mismatch a measurement produced — AND
-//     that percentage is bound to the comparison where it is written: "of
-//     (the) pixels" right after it, or an allowance, tolerance, difference
-//     or mismatch word right beside it; AND the finding names the comparison
-//     itself: the visual check or comparison, a pixel difference, the
-//     difference image, a share "of pixels", or a REF-IMG id. A percentage
-//     alone never matches ("30% of 50 shows 0.15" is a calculator defect),
-//     and the bare word "pixels" is not a comparison: Codex on #170
-//     reproduced "At 30% viewport width, the keypad overflows its container
-//     by 12 pixels" — a real layout defect, under a 30% tolerance — being
-//     taken out of the verdict when "pixels" anywhere counted.
+//     finding names the comparison (the visual check or comparison, a pixel
+//     difference, the difference image, a share "of pixels", a REF-IMG id)
+//     AND quotes, in one of a few unambiguous forms, a figure this run
+//     actually showed (a measured mismatch, or a comparison's tolerance, at
+//     the precision written):
+//       "32.4% of pixels"           — the aggregate share itself;
+//       "32.4% pixel difference"    — idem, with "pixel" saying so;
+//       "allowed 30%", "the 30% allowance/tolerance", "a tolerance of 30%";
+//       "reports/measures 32.4% against the reference/REF-IMG".
+//     Nothing else binds — no proximity, no "difference" alone, no bare
+//     "pixels". Codex on #170 showed four rounds of natural phrasings in
+//     which a percentage near comparison words measured something else
+//     ("At 30% viewport width … 12 pixels", "shows a 30% narrower d-pad",
+//     "shows keys shrink 30%.", "a 30% difference in key width"); each was a
+//     real defect the guard silently approved. A false match approves; a
+//     missed one only leaves a finding blocking as the reviewer wrote it, so
+//     the fallback is narrow on purpose and the field is the way.
 //
 // The verdict afterwards: request-changes with no critical or major finding
 // left becomes approve, keeping its minor findings. That is today's rule, not
@@ -469,19 +473,17 @@ type VisualObservation struct {
 }
 
 var (
-	percentRe     = regexp.MustCompile(`(\d+(?:\.(\d+))?)\s*%`)
 	visualVocabRe = regexp.MustCompile(`(?i)pixel[- ]difference|\bpixels? differ|\bof (?:the )?pixels\b|visual[- ](?:check|comparison)|difference image|\bdiff image\b|REF-IMG-[0-9a-f]{8}`)
-	// figureAfterRe and figureNearRe bind one percentage to the comparison:
-	// "32.4% of pixels", "(allowed 30.0%)", "the 30% allowance", "differs
-	// by 33.5%". They are matched on the few words around that percentage
-	// only, never on the whole finding.
-	// "reports 32.4% against the reference" binds too (Codex on #170), but
-	// only when "against" follows the figure at once: "30% narrower than the
-	// reference" is a size, not the comparison's figure.
-	figureAfterRe = regexp.MustCompile(`(?i)^\s*(?:of (?:the |its |all )?pixels\b|pixels?\b|pixel[- ]difference|(?:pixel[- ])?(?:allowance|tolerance|mismatch|difference)|against (?:the |its )?(?:reference|photo|REF-IMG-[0-9a-f]{8}))`)
-	figureNearRe  = regexp.MustCompile(`(?i)\b(?:allowed|allowance|tolerance|mismatch|differ(?:s|ing|ence)?|visual[- ](?:check|comparison)|reports|measures)\b`)
-	// figureAloneRe: nothing the percentage could be quantifying follows it.
-	figureAloneRe = regexp.MustCompile(`(?i)^\s*(?:$|[.,;:)(\]]|(?:and|but|while|which|above|over|below|under|versus|vs)\b)`)
+	// figureForms are the only ways a quoted percentage counts as the
+	// comparison's figure. Each captures the number (1) and its decimals (2).
+	figureForms = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(\d+(?:\.(\d+))?)\s*%\s+of\s+(?:the\s+|its\s+|all\s+)?pixels\b`),
+		regexp.MustCompile(`(?i)(\d+(?:\.(\d+))?)\s*%\s+pixel[- ](?:difference|mismatch)\b`),
+		regexp.MustCompile(`(?i)\ballowed\s+(\d+(?:\.(\d+))?)\s*%`),
+		regexp.MustCompile(`(?i)(\d+(?:\.(\d+))?)\s*%\s+(?:pixel[- ])?(?:allowance|tolerance)\b`),
+		regexp.MustCompile(`(?i)\b(?:tolerance|allowance)\s+(?:of\s+|is\s+)?(\d+(?:\.(\d+))?)\s*%`),
+		regexp.MustCompile(`(?i)\b(?:reports|measures)\s+(\d+(?:\.(\d+))?)\s*%\s+against\s+(?:the\s+|its\s+)?(?:reference|photo|REF-IMG-[0-9a-f]{8})`),
+	}
 )
 
 // guards reports whether the diagnostic guard applies: a comparison is
@@ -516,61 +518,23 @@ func citesFigure(f agent.Finding, figures []float64) bool {
 	if !visualVocabRe.MatchString(text) {
 		return false
 	}
-	for _, idx := range percentRe.FindAllStringSubmatchIndex(text, -1) {
-		if !figureBound(text, idx[0], idx[1]) {
-			continue
-		}
-		m := []string{text[idx[0]:idx[1]], text[idx[2]:idx[3]], ""}
-		if idx[4] >= 0 {
-			m[2] = text[idx[4]:idx[5]]
-		}
-		p, err := strconv.ParseFloat(m[1], 64)
-		if err != nil {
-			continue
-		}
-		// "30%" stands for anything that rounds to 30; "32.4%" for what
-		// rounds to 32.4 — the precision the reviewer wrote.
-		half := 0.5 / math.Pow(10, float64(len(m[2])))
-		for _, x := range figures {
-			if math.Abs(p-x) <= half+1e-9 {
-				return true
+	for _, form := range figureForms {
+		for _, m := range form.FindAllStringSubmatch(text, -1) {
+			p, err := strconv.ParseFloat(m[1], 64)
+			if err != nil {
+				continue
+			}
+			// "30%" stands for anything that rounds to 30; "32.4%" for what
+			// rounds to 32.4 — the precision the reviewer wrote.
+			half := 0.5 / math.Pow(10, float64(len(m[2])))
+			for _, x := range figures {
+				if math.Abs(p-x) <= half+1e-9 {
+					return true
+				}
 			}
 		}
 	}
 	return false
-}
-
-// figureBound reports whether the percentage at text[start:end] is written as
-// the comparison's aggregate figure, not as a measure of something else.
-//
-// Strong: what follows names the comparison — "32.4% of pixels", "the 30%
-// allowance", "33.6% mismatch", "reports 32.4% against the reference".
-// Otherwise the percentage must stand alone — the clause ends, or a bracket
-// or a conjunction follows ("differs by 33.5%.", "(allowed 30.0%)") — AND a
-// comparison word precedes it in the same clause (allowed, tolerance,
-// differs, mismatch, the visual check or comparison, reports, measures).
-//
-// Codex on #170 twice: a percentage quantifying a thing is a measurement of
-// that thing, not the figure — "At 30% viewport width, the keypad overflows"
-// and "The visual comparison shows a 30% narrower d-pad than the reference"
-// are appearance defects to judge on their own, whatever words sit nearby.
-func figureBound(text string, start, end int) bool {
-	after := text[end:]
-	if figureAfterRe.MatchString(after) {
-		return true
-	}
-	if !figureAloneRe.MatchString(after) {
-		return false
-	}
-	lo := start - 40
-	if lo < 0 {
-		lo = 0
-	}
-	before := text[lo:start]
-	if i := strings.LastIndexAny(before, ".;:\n"); i >= 0 {
-		before = before[i+1:]
-	}
-	return figureNearRe.MatchString(before)
 }
 
 // demoteDiagnostic applies the guard to a reviewer's verdict in place and
