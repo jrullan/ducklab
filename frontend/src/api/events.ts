@@ -337,6 +337,13 @@ export const KNOWN_EVENT_TYPES = [
   "composition_mechanical_check",
   "composition_review_started",
   "composition_review_completed",
+  // B-518: an amendment's removal check and its post-composition repair.
+  "removal_justified",
+  "removal_unresolved",
+  "removal_verdict_lowered",
+  "composition_repair_started",
+  "composition_repair_exhausted",
+  "composition_repair_skipped",
   "reviewer_dissent",
   "critic_findings_filtered",
   "proposal_review_blocked",

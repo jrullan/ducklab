@@ -138,6 +138,32 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		}
 	}
 	pass := completed + 1
+	// The longest section pass is what the amendment's round budget is
+	// charged (composition_repair.go): passes are independent conversations,
+	// each with the same per-section budget.
+	maxUsed, unknownUsed := 0, false
+	var budget *roundBudget
+	charge := func(script *strategy.Script) {
+		if budget == nil {
+			budget = newRoundBudget(script)
+		}
+		if script.RoundsUsed <= 0 {
+			unknownUsed = true // never a licence to repair
+		} else if script.RoundsUsed > maxUsed {
+			maxUsed = script.RoundsUsed
+		}
+	}
+	settle := func() {
+		if unknownUsed {
+			budget.charge(0)
+		} else {
+			budget.charge(maxUsed)
+		}
+		maxUsed, unknownUsed = 0, false
+	}
+	// A split moves concerns to NEW passes this pass cannot see; there the
+	// deterministic removal check would flag the move itself.
+	checkRemovals := !requestsSectionSplit(ask)
 
 	// One section, one fresh conversation.
 	for index, id := range ids {
@@ -157,11 +183,14 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		prompt := buildSectionPassPrompt(kind, ask, sec)
 		enforceV2 := kind == artifact.KindPlan && (strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") ||
 			(strings.Contains(strings.ToLower(sec.Body), "**work unit:**") && strings.Contains(strings.ToLower(sec.Body), "**acceptance slices:**")))
-		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2), prompt)
+		script := sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2)
+		script.Amendment = sectionGuard(base, &proposed, kind, sec.ID, ask, checkRemovals)
+		reply, err := p.Execute(ctx, script, prompt)
 		pass++
 		if err != nil {
 			return nil, err
 		}
+		charge(script)
 		if strings.Contains(strings.ToUpper(reply), "UNCHANGED") && !strings.Contains(reply, "## ") {
 			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, index+1, &proposed); err != nil {
 				return nil, err
@@ -202,11 +231,14 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			// and isolation boundary as replacements.
 			assigned = &artifact.Section{ID: "T-900", Title: title}
 		}
-		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, assigned, kind == artifact.KindPlan), prompt)
+		script := sectionPass(prefix, pass, p.Mode, p.Critics, assigned, kind == artifact.KindPlan)
+		script.Amendment = sectionGuard(base, &proposed, kind, "", ask, checkRemovals)
+		reply, err := p.Execute(ctx, script, prompt)
 		pass++
 		if err != nil {
 			return nil, err
 		}
+		charge(script)
 		sec, ok := parseSectionReply(reply, kind, "")
 		if !ok {
 			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, ordinal+1, &proposed); err != nil {
@@ -234,9 +266,76 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 	proposed.Front.Kind = kind
 	proposed.Front.Project = base.Front.Project
 	proposed.Front.Origin = base.Front.Origin
+	if budget == nil {
+		// Restored after every pass completed: no conversation ran here, so
+		// the budget is unknown and a blocked composition stops at the gate.
+		budget = &roundBudget{}
+		unknownUsed = true
+	}
+	settle()
 	mechanical, semantic, err := reviewComposition(ctx, p, kind, ask, base, &proposed)
 	if err != nil {
 		return nil, err
+	}
+	for {
+		// A section-wise repair can revisit only the sections the findings
+		// name; the rest of the composition is not this repair's to touch.
+		targets := sectionIDsInFindings(&proposed, compositionFindingLines(mechanical, semantic))
+		if compositionBlocked(mechanical, semantic) && len(targets) == 0 {
+			if budget.known && budget.left > 0 && p.OnEvent != nil {
+				p.OnEvent("composition_repair_skipped", map[string]interface{}{
+					"findings": compositionFindingLines(mechanical, semantic),
+					"detail":   "the post-composition findings name no section of the candidate; a section-wise repair has nothing to revisit, so the proposal stops at the gate",
+				})
+			}
+			break
+		}
+		left, repair := budget.decide(p, &proposed, mechanical, semantic)
+		if !repair {
+			break
+		}
+		for _, id := range targets {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			sec := findSection(&proposed, id)
+			enforceV2 := kind == artifact.KindPlan && (strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") ||
+				(strings.Contains(strings.ToLower(sec.Body), "**work unit:**") && strings.Contains(strings.ToLower(sec.Body), "**acceptance slices:**")))
+			script := sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2)
+			script.MaxRounds = left
+			script.Amendment = sectionGuard(base, &proposed, kind, sec.ID, ask, checkRemovals)
+			prompt := buildSectionPassPrompt(kind, ask, sec) +
+				compositionRepairContext(script.Amendment, renderSectionMarkdown(*sec), mechanical, semantic,
+					"Only section `"+sec.ID+"` is yours in this pass; findings about other sections are repaired in their own passes. "+
+						"The section above is its current candidate text. If no finding concerns this section, answer UNCHANGED.")
+			reply, err := p.Execute(ctx, script, prompt)
+			pass++
+			if err != nil {
+				return nil, err
+			}
+			charge(script)
+			if strings.Contains(strings.ToUpper(reply), "UNCHANGED") && !strings.Contains(reply, "## ") {
+				continue
+			}
+			repl, ok := parseSectionReply(reply, kind, sec.ID)
+			if !ok {
+				continue
+			}
+			repl.ID = sec.ID
+			if kind == artifact.KindPlan {
+				repl.Body = stripMilestoneField(repl.Body)
+				repl.Children = sec.Children
+			}
+			*sec = repl
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, len(ids)+len(adds), &proposed); err != nil {
+				return nil, err
+			}
+		}
+		settle()
+		mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, &proposed)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := writeProposal(p, kind, &proposed); err != nil {
 		return nil, err
