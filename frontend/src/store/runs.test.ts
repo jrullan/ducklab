@@ -12,6 +12,19 @@ beforeEach(() => {
 });
 
 describe("event application", () => {
+  // B-515: a run's image request changed a duckling's recorded vision; every
+  // surface holding the fleet refetches on this epoch.
+  it("moves the fleet epoch on vision_evidence only", () => {
+    useRuns.setState({ fleetEpoch: 0 });
+    const s = useRuns.getState();
+    s.applyEvent({ type: "turn_images", run_id: "r-1", seq: 1, data: { can_see: false } });
+    expect(useRuns.getState().fleetEpoch).toBe(0);
+    s.applyEvent({ type: "vision_evidence", run_id: "r-1", seq: 2, data: { duckling: "luna", vision: "refuted" } });
+    expect(useRuns.getState().fleetEpoch).toBe(1);
+    s.applyEvent({ type: "vision_evidence", run_id: "r-1", seq: 2, data: { duckling: "luna", vision: "refuted" } });
+    expect(useRuns.getState().fleetEpoch).toBe(1);
+  });
+
   it("appends persisted events", () => {
     const s = useRuns.getState();
     s.applyEvent({ type: "turn_start", run_id: "r-1", seq: 1 });

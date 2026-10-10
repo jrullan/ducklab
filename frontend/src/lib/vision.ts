@@ -5,7 +5,7 @@ import type { Duckling } from "../api/client";
  * only a hover title for a reason, and a person found out a duckling was blind
  * by being refused.
  *
- * - verified: declared, and an image test passed on its server;
+ * - verified: declared, and its server answered an image (a test, or a real turn);
  * - declared: declared, not yet tested — the first screenshot tests it;
  * - refuted:  declared, but its server rejected an image (no vision projector);
  * - none:     text only;
@@ -35,7 +35,7 @@ export function knownBlind(duckling: Duckling | undefined): boolean {
 
 /** The marker beside a duckling's name in a picker: the eye for a duckling
  * that can see images, nothing otherwise. Jose asked for the eye alone — the
- * words made every option long. A duckling whose server rejected a test image
+ * words made every option long. A duckling whose server rejected an image
  * cannot see, so it gets no eye; the composer says why when it is picked. */
 export function visionMark(duckling: Duckling | undefined): string {
   return canSeeImages(duckling) ? "👁" : "";
@@ -57,7 +57,7 @@ export function visionSentence(duckling: Duckling | undefined, id: string): stri
     case "none":
       return `${id} can't see images — it reads text only, so screenshots won't reach it.`;
     case "refuted":
-      return `${id} can't see images — its settings say it can, but its server rejected a test image (no vision support loaded).`;
+      return `${id} can't see images — its settings say it can, but its server rejected an image (no vision support loaded).`;
     default:
       return "";
   }

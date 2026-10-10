@@ -364,6 +364,35 @@ describe("the pane after the event stream fell behind (Codex on #166)", () => {
   });
 });
 
+describe("the pane's fleet follows recorded image evidence (B-515)", () => {
+  it("refetches the fleet when a run verifies or refutes a duckling's vision", async () => {
+    useRuns.setState({ fleetEpoch: 0, resyncEpoch: 0 });
+    let fleetFetches = 0;
+    const client = new EngineClient({
+      baseUrl: "http://engine.test", token: "t",
+      fetchFn: (async (url: string) => {
+        if (url.endsWith("/v1/ducklings")) fleetFetches++;
+        return engineFetch(url);
+      }) as never,
+    });
+    render(<ConsultantPane client={client} projectId="p" subject={null} />);
+    await waitFor(() => expect(fleetFetches).toBe(1));
+    act(() => {
+      useRuns.getState().applyEvent({ type: "turn_images", run_id: "r-build", seq: 1, data: { can_see: true } });
+    });
+    act(() => {
+      useRuns.getState().applyEvent({ type: "vision_evidence", run_id: "r-build", seq: 2, data: { duckling: "seer", vision: "verified" } });
+    });
+    await waitFor(() => expect(fleetFetches).toBe(2));
+    // The same frame again (a reconnect's overlap) is not new evidence.
+    act(() => {
+      useRuns.getState().applyEvent({ type: "vision_evidence", run_id: "r-build", seq: 2, data: { duckling: "seer", vision: "verified" } });
+    });
+    act(() => { useRuns.getState().requestResync(); });
+    await waitFor(() => expect(fleetFetches).toBe(3));
+  });
+});
+
 describe("a reconnect asks run-holding surfaces to resync", () => {
   it("moves the resync epoch when the stream comes back", async () => {
     const sources: { onopen: ((e: unknown) => void) | null; onerror: ((e: unknown) => void) | null }[] = [];

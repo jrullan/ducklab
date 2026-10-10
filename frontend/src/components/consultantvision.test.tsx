@@ -88,7 +88,7 @@ describe("the chat start form", () => {
   it("takes a dropped screenshot the same way", async () => {
     render(<ChatAbout client={startClient([])} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={fleet} startOpen />);
     fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "no-projector" } });
-    expect(screen.getByTestId("chat-vision-note")).toHaveTextContent("rejected a test image");
+    expect(screen.getByTestId("chat-vision-note")).toHaveTextContent("rejected an image");
     fireEvent.drop(screen.getByTestId("chat-about-form"), { dataTransfer: { files: [png()], types: ["Files"] } });
     await waitFor(() => expect(screen.getByTestId("chat-image-chip")).toBeInTheDocument());
     expect(screen.getByTestId("chat-switch-offer")).toBeInTheDocument();

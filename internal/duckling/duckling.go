@@ -66,6 +66,9 @@ type Capabilities struct {
 	ThinkingControl     string `json:"thinking_control,omitempty"`
 	ThinkingControlNote string `json:"thinking_control_note,omitempty"`
 	ProbedAt            string `json:"probed_at,omitempty"` // RFC3339; empty means never probed
+	// VisionOnly marks a cache record that holds only image evidence from
+	// run traffic (B-515), not a probe: its other fields are not answers.
+	VisionOnly bool `json:"vision_only,omitempty"`
 }
 
 // HealthStatus is the health of a duckling.
@@ -91,6 +94,7 @@ type Registry struct {
 	ducklings     map[config.DucklingID]*Duckling
 	providers     map[config.ProviderID]provider.Provider
 	caps          *CapsCache
+	capsMu        sync.Mutex
 	probeMu       sync.RWMutex
 	probeFailures map[config.DucklingID]string
 }
@@ -251,11 +255,11 @@ func (r *Registry) List() []*Duckling {
 	result := make([]*Duckling, 0, len(r.ducklings))
 	for _, d := range r.ducklings {
 		copy := *d
-		cached, probed := r.CachedCaps(d.ID)
-		if probed {
+		if cached, probed := r.CachedCaps(d.ID); probed {
 			copy.Caps = *cached
 		}
-		copy.VisionStatus = visionStatus(d.Caps.Vision, cached, probed)
+		vision, _, known := r.CachedVision(d.ID)
+		copy.VisionStatus = visionStatus(d.Caps.Vision, vision, known)
 		result = append(result, &copy)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -263,14 +267,15 @@ func (r *Registry) List() []*Duckling {
 }
 
 // visionStatus applies the same two-step rule the chat enforces before it
-// sends an image: the declaration, then the probe's answer when there is one.
-func visionStatus(declared bool, cached *Capabilities, probed bool) string {
+// sends an image: the declaration, then the recorded answer when there is one
+// — a probe's, or a real image request's (B-515).
+func visionStatus(declared, vision, known bool) string {
 	switch {
 	case !declared:
 		return VisionNone
-	case !probed:
+	case !known:
 		return VisionDeclared
-	case cached.Vision:
+	case vision:
 		return VisionVerified
 	default:
 		return VisionRefuted
@@ -314,16 +319,16 @@ func (r *Registry) VerifyVision(ctx context.Context, id config.DucklingID) (bool
 	if !d.Caps.Vision {
 		return false, nil
 	}
-	if cached, ok := r.CachedCaps(id); ok {
-		return cached.Vision, nil
+	if vision, _, ok := r.CachedVision(id); ok {
+		return vision, nil
 	}
 	// Probe records the whole capability answer, including vision, and keeps
 	// existing successful endpoints from paying a second image request.
 	if _, err := r.Probe(ctx, id); err != nil {
 		return false, err
 	}
-	if cached, ok := r.CachedCaps(id); ok {
-		return cached.Vision, nil
+	if vision, _, ok := r.CachedVision(id); ok {
+		return vision, nil
 	}
 	p, err := r.Provider(id)
 	if err != nil {
@@ -344,22 +349,77 @@ func (r *Registry) VerifyVision(ctx context.Context, id config.DucklingID) (bool
 		return true, nil
 	}
 	vision := err == nil
-	if r.caps == nil {
-		r.caps = LoadCapsCache()
-	}
-	caps := d.Caps
-	caps.Vision = vision
-	_ = r.caps.Put(d.Provider, capabilityCacheModel(d), &caps)
+	_, _ = r.capsCache().RecordVision(d.Provider, capabilityCacheModel(d), vision)
 	return vision, nil
 }
 
-// CachedCaps returns a cached record without probing, for listings.
+// capsCache is the registry's capability cache, loaded on first use. Every
+// reader loads it too: List used to read a nil cache until something probed,
+// so after an engine restart every duckling read "declared" — even one
+// whose vision was verified the day before. The mutex makes the lazy load
+// safe for concurrent runs.
+func (r *Registry) capsCache() *CapsCache {
+	r.capsMu.Lock()
+	defer r.capsMu.Unlock()
+	if r.caps == nil {
+		r.caps = LoadCapsCache()
+	}
+	return r.caps
+}
+
+// CachedCaps returns a cached probe record without probing, for listings.
 func (r *Registry) CachedCaps(id config.DucklingID) (*Capabilities, bool) {
 	d, err := r.Get(id)
-	if err != nil || r.caps == nil {
+	if err != nil {
 		return nil, false
 	}
-	return r.caps.Get(d.Provider, capabilityCacheModel(d))
+	return r.capsCache().Get(d.Provider, capabilityCacheModel(d))
+}
+
+// CachedVision returns the recorded vision answer for a duckling's endpoint
+// and when it was recorded: a probe's, or the last real image request's.
+// ok is false when nothing fresh is recorded.
+func (r *Registry) CachedVision(id config.DucklingID) (vision bool, at string, ok bool) {
+	d, err := r.Get(id)
+	if err != nil {
+		return false, "", false
+	}
+	return r.capsCache().Vision(d.Provider, capabilityCacheModel(d))
+}
+
+// Image evidence outcomes reported by RecordImageEvidence.
+const (
+	ImageEvidenceNone     = ""         // the result says nothing about vision
+	ImageEvidenceVerified = "verified" // the endpoint answered a request carrying images
+	ImageEvidenceRefuted  = "refuted"  // the endpoint rejected the images
+)
+
+// RecordImageEvidence folds the result of one real request that carried
+// images into the capability cache (B-515), under the same provider/model
+// key and freshness as a probe: a success verifies the duckling's vision, an
+// explicit image rejection (provider.IsVisionUnsupported) refutes it, and
+// anything else — rate limits, timeouts, 5xx, a malformed reply — is
+// provider weather and records nothing. It returns the outcome and whether
+// the recorded answer changed.
+//
+// Builds, reviews and test-first turns sent luna reference images, captures
+// and diffs that it answered normally, and the consultant picker still said
+// "not yet tested": only the consultant chat's probe ever wrote the answer.
+func (r *Registry) RecordImageEvidence(id config.DucklingID, err error) (outcome string, changed bool) {
+	switch {
+	case err == nil:
+		outcome = ImageEvidenceVerified
+	case provider.IsVisionUnsupported(err):
+		outcome = ImageEvidenceRefuted
+	default:
+		return ImageEvidenceNone, false
+	}
+	d, gerr := r.Get(id)
+	if gerr != nil {
+		return ImageEvidenceNone, false
+	}
+	changed, _ = r.capsCache().RecordVision(d.Provider, capabilityCacheModel(d), outcome == ImageEvidenceVerified)
+	return outcome, changed
 }
 
 func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) (*Capabilities, error) {
@@ -367,11 +427,9 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 	if err != nil {
 		return nil, err
 	}
-	if r.caps == nil {
-		r.caps = LoadCapsCache()
-	}
+	cache := r.capsCache()
 	if !force {
-		if cached, ok := r.caps.Get(d.Provider, capabilityCacheModel(d)); ok {
+		if cached, ok := cache.Get(d.Provider, capabilityCacheModel(d)); ok {
 			return cached, nil
 		}
 	}
@@ -507,7 +565,7 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 	// Cache the result so the next run does not pay for these calls again.
 	// A cache write failure must not fail the probe: the answer is correct,
 	// it just will not be remembered.
-	_ = r.caps.Put(d.Provider, capabilityCacheModel(d), caps)
+	_ = cache.Put(d.Provider, capabilityCacheModel(d), caps)
 	caps.ProbedAt = time.Now().UTC().Format(time.RFC3339)
 
 	return caps, nil

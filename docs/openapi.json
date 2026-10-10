@@ -847,6 +847,9 @@
           },
           "vision": {
             "type": "boolean"
+          },
+          "vision_only": {
+            "type": "boolean"
           }
         },
         "required": [

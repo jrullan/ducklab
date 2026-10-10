@@ -385,8 +385,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		// The report's screenshots, shown to a triager that can see. Gated on
 		// the declared vision cap: a text-only model sent an image array gets
 		// a 400 from most endpoints, and a triage that dies on evidence it
-		// cannot read helps nobody.
-		if cfg, ok := s.cfg.Ducklings[duckling]; ok && cfg.Caps.Vision != nil && *cfg.Caps.Vision {
+		// cannot read helps nobody. A declared seat whose endpoint already
+		// rejected an image is not sent one again (B-515).
+		if s.seatCanSee(duckling) {
 			turn.Images = attachmentDataURLs(rs.projectPath, b.ID, 6<<20)
 			if len(turn.Images) > 0 {
 				rs.writer.AppendEvent("warning", map[string]interface{}{

@@ -75,11 +75,17 @@ export function ConsultantPane({
   const composing = inScope ? rememberedComposing : null;
   const runs = useRuns((s) => s.runs);
   const [fleet, setFleet] = useState<Duckling[]>([]);
+  // The pane lives as long as the app, so a fleet fetched once went stale:
+  // a run's image request that verified or refuted a duckling's vision left
+  // the picker saying "not yet tested" (B-515). Refetch when one does, and
+  // after a resync (an overflow may have dropped that event).
+  const fleetEpoch = useRuns((s) => s.fleetEpoch);
+  const fleetResync = useRuns((s) => s.resyncEpoch);
   useEffect(() => {
     let cancelled = false;
     client.ducklings().then((ds) => { if (!cancelled) setFleet(ds); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [client]);
+  }, [client, fleetEpoch, fleetResync]);
 
   const open = useMemo(
     () => Object.values(runs).filter((r) => isOpenChat(r) && r.project_id === projectId).sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? "")),

@@ -143,12 +143,34 @@ type taskVision struct {
 	renders    int
 }
 
-// seatCanSee reads the duckling's declared vision capability, the same
-// declaration effectiveCaps and the document stages read (B-457).
+// seatCanSee reports whether a seat is shown images: it declares vision (the
+// same declaration effectiveCaps and the document stages read, B-457), and
+// its endpoint has not refused an image (B-515).
 func (s *Service) seatCanSee(id config.DucklingID) bool {
-	dcfg, ok := s.cfg.Ducklings[id]
-	return ok && dcfg.Caps.Vision != nil && *dcfg.Caps.Vision
+	sees, _ := s.seatVision(id)
+	return sees
 }
+
+// seatVision is seatCanSee with the reason a seat is blind, for the record
+// and the prompt. A declared seat whose endpoint rejected an image — a probe,
+// or a real turn earlier in this run — is blind until that answer expires or
+// a probe says otherwise: sending it images again only fails again.
+func (s *Service) seatVision(id config.DucklingID) (bool, string) {
+	dcfg, ok := s.cfg.Ducklings[id]
+	if !ok || dcfg.Caps.Vision == nil || !*dcfg.Caps.Vision {
+		return false, blindUndeclared
+	}
+	if vision, at, known := s.ducklings.CachedVision(id); known && !vision {
+		return false, fmt.Sprintf(blindRefutedFormat, at)
+	}
+	return true, ""
+}
+
+const (
+	blindUndeclared = "seat cannot see images; none attached"
+	// blindRefutedFormat takes when the rejection was recorded.
+	blindRefutedFormat = "seat declares vision, but its endpoint rejected image input (recorded %s); none attached"
+)
 
 // taskCitedRefImages lists, in order and once each, the REF-IMG ids a task
 // cites: in its title and body, in the SPEC sections it implements, and in
@@ -447,7 +469,7 @@ func (v *taskVision) wrap(inner strategy.TurnRunner, roster map[config.Role]conf
 		if seat == "" {
 			seat = roster[t.Role]
 		}
-		sees := v.svc.seatCanSee(seat)
+		sees, blind := v.svc.seatVision(seat)
 		v.mu.Lock()
 		v.lastRound = tc.Round
 		v.mu.Unlock()
@@ -459,7 +481,7 @@ func (v *taskVision) wrap(inner strategy.TurnRunner, roster map[config.Role]conf
 		if v.hasOwnFeedback() {
 			prompt = artifact.SupersedeCarriedVisual(prompt)
 		}
-		images, section, record, notes := v.forTurn(t.Role, sees)
+		images, section, record, notes := v.forTurn(t.Role, sees, blind)
 		if section == "" {
 			return inner(ctx, t, d, prompt, belt, tc)
 		}
@@ -474,6 +496,9 @@ func (v *taskVision) wrap(inner strategy.TurnRunner, roster map[config.Role]conf
 			}
 			if len(notes) > 0 {
 				data["notes"] = notes
+			}
+			if !sees {
+				data["reason"] = blind
 			}
 			v.emit("turn_images", data)
 		}
@@ -712,7 +737,7 @@ func feedbackFiles(seq int, renamed map[string]string, results []runlog.VisualCo
 // Feedback exists only where render is armed — solo and pair, whose seats all
 // work in the run's own tree — so no tournament judge or contestant is ever
 // shown a render of a tree it is not judging.
-func (v *taskVision) forTurn(role config.Role, sees bool) ([]string, string, []turnImage, []string) {
+func (v *taskVision) forTurn(role config.Role, sees bool, blind string) ([]string, string, []turnImage, []string) {
 	v.mu.Lock()
 	fb := v.feedback
 	stale := v.stale
@@ -822,8 +847,16 @@ func (v *taskVision) forTurn(role config.Role, sees bool) ([]string, string, []t
 	if len(notes) > 0 {
 		b.WriteString("\nNot shown: " + strings.Join(notes, "; ") + "\n")
 	}
+	if !sees && blind != "" && blind != blindUndeclared {
+		// A seat configured to see is told why it is not seeing, so it does
+		// not go looking for images it was promised.
+		b.WriteString("\nNo image is attached to this turn: " + blind + ".\n")
+	}
 	if !sees {
-		notes = append(notes, "seat cannot see images; none attached")
+		if blind == "" {
+			blind = blindUndeclared
+		}
+		notes = append(notes, blind)
 	}
 	return urls, b.String(), shown, notes
 }

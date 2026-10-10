@@ -219,6 +219,40 @@ type Loop struct {
 	// reviewer once died on exactly its hundredth call, and the only remedy
 	// was resuming into the same ceiling. The budget still guards.
 	CapLift func() bool
+	// SeesImages, if set, is consulted before a turn's images are attached:
+	// false withholds them, with a note in the prompt and an
+	// images_withheld recovery event. It is how a seat whose endpoint
+	// refused an image earlier in the run is treated as blind for its
+	// following turns instead of failing on the same rejection (B-515).
+	// nil attaches whatever the turn carries.
+	SeesImages func() bool
+}
+
+// imagesWithheldNote and imagesRefusedNote replace the images a turn could
+// not show, in the message that carried them: the prompt around them was
+// written for a seat that sees, and without the note the seat would look for
+// the pictures or claim to have seen them.
+const (
+	imagesWithheldNote = "[Ducklab: no image is attached to this message — this seat's endpoint rejected image input earlier " +
+		"(no vision support loaded). Work from the text alone; do not look for the images or claim to have seen them.]"
+	imagesRefusedNote = "[Ducklab: the images for this message were removed — the endpoint rejected image input " +
+		"(no vision support loaded). Work from the text alone; do not look for the images or claim to have seen them.]"
+)
+
+// withoutImages returns msgs with every image removed and note appended to
+// each message that carried one. msgs itself is not modified.
+func withoutImages(msgs []provider.Message, note string) ([]provider.Message, int) {
+	out := make([]provider.Message, len(msgs))
+	removed := 0
+	for i, m := range msgs {
+		if len(m.Images) > 0 {
+			removed += len(m.Images)
+			m.Images = nil
+			m.Content = strings.TrimRight(m.Content, "\n") + "\n\n" + note
+		}
+		out[i] = m
+	}
+	return out, removed
 }
 
 // RunLogWriter is the interface for writing LLM call records.
@@ -288,6 +322,17 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		messageContext = &copy
 	}
 	messages := BuildMessages(turn, messageContext, useNative)
+	// A seat known not to see is not sent images it would only be refused.
+	if len(turn.Images) > 0 && loop.SeesImages != nil && !loop.SeesImages() {
+		var withheld int
+		messages, withheld = withoutImages(messages, imagesWithheldNote)
+		if loop.OnRecovery != nil {
+			loop.OnRecovery(turn, "images_withheld", map[string]interface{}{
+				"images": withheld,
+				"reason": "the seat's endpoint rejected image input; the turn continues without images",
+			})
+		}
+	}
 
 	// Build tool definitions for native dialect
 	var nativeTools []provider.Tool
@@ -424,6 +469,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		var salvagedReasoningCall *TextToolCall
 		emptyCompletionAttempts := 0
 		reasoningOnlyAttempts := 0
+		imagesRefused := false
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req, slowestCallLatency)
@@ -457,6 +503,39 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					}
 					return rerr
 				})
+			}
+			// The endpoint rejected the images (B-515): the seat cannot see,
+			// whatever its configuration says. The turn's text is still worth
+			// answering, so the same call is retried ONCE without any image and
+			// with a note saying why; the rejection itself stays on the record.
+			// Only an image-bearing request qualifies, and only once per call,
+			// so a second rejection is an ordinary failure, never a loop.
+			if err != nil && provider.IsVisionUnsupported(err) && !imagesRefused && RequestCarriesImages(req) {
+				imagesRefused = true
+				if loop.RunWriter != nil {
+					loop.RunWriter.AppendLLM(&LLMCallRecord{
+						Duckling:     string(loop.Duckling.ID),
+						Provider:     string(loop.Duckling.Provider),
+						Model:        loop.Duckling.Model,
+						Role:         string(turn.Role),
+						Request:      requestMap(req),
+						Response:     map[string]interface{}{"error": err.Error()},
+						LatencyMs:    time.Since(start).Milliseconds(),
+						Attempt:      attempt,
+						FinishReason: "error",
+					})
+				}
+				var removed int
+				req.Messages, removed = withoutImages(req.Messages, imagesRefusedNote)
+				conversation, _ = withoutImages(conversation, imagesRefusedNote)
+				if loop.OnRecovery != nil {
+					loop.OnRecovery(turn, "images_refused", map[string]interface{}{
+						"images": removed,
+						"error":  err.Error(),
+						"reason": "the endpoint rejected image input; retrying this call once without images",
+					})
+				}
+				continue
 			}
 			if err != nil {
 				callErr := providerCallError(loop.Budget, err)
@@ -1510,6 +1589,16 @@ func main() {}
 	// This is filled in by the conversation engine
 
 	return messages
+}
+
+// RequestCarriesImages reports whether any message of req carries an image.
+func RequestCarriesImages(req provider.ChatRequest) bool {
+	for _, m := range req.Messages {
+		if len(m.Images) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // gateDescFor tells the seat what ducklab does after its turn. A document

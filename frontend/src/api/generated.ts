@@ -237,6 +237,7 @@ export interface DucklingCapabilities {
   thinking_control?: string;
   thinking_control_note?: string;
   vision?: boolean;
+  vision_only?: boolean;
 }
 
 export interface DucklingDuckling {

@@ -877,9 +877,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	if len(images) > 0 {
 		arch := roster[config.RoleArchitect]
-		if !s.seatCanSee(arch) {
+		if sees, blind := s.seatVision(arch); !sees {
 			rs.writer.AppendEvent("warning", map[string]interface{}{
-				"detail": fmt.Sprintf("%d image(s) dropped: architect %s has no vision capability", len(images), arch),
+				"detail": fmt.Sprintf("%d image(s) dropped for architect %s: %s", len(images), arch, blind),
 			})
 			images = nil
 		} else {

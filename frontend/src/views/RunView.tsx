@@ -411,8 +411,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // accepted.
   const [stageBusy, setStageBusy] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
+  // Refetched when a run records image evidence (B-515): the chat composer
+  // reads each duckling's vision_status from this list.
+  const fleetEpoch = useRuns((s) => s.fleetEpoch);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
+  }, [client, fleetEpoch]);
+  useEffect(() => {
     client
       .modeDefaults()
       .then((d) => setPreferred(d.ducklings ?? {}))
