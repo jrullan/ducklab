@@ -340,6 +340,9 @@ func validatePlanManifestSupportProfile(manifest *agent.PlanManifest, small bool
 
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{Transcript: &conv.Transcript{}}
+	// The rounds this conversation spent, for a stage that may spend the
+	// rest of its budget on a post-composition repair (B-518).
+	defer func() { script.RoundsUsed = result.Rounds }()
 
 	registry := registryFrom(params)
 	if err := script.Validate(registry); err != nil {
@@ -398,6 +401,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var pendingRepairBase *agent.Outcome
 	var pendingRepairSections []string
 	identicalRevision := false
+	// B-518: the amendment's removal check. Justifications accumulate across
+	// rounds (a quote stays true); attempts reset per round like structure's.
+	var removalJustifications []RemovalJustification
+	var justifiedRemovals, unresolvedRemovals []string
+	removalAttempts := 0
+	previousRemovalSignature := ""
+	var removalFold *agent.Outcome
 	stuck := map[int]int{}
 	redGateStreak := 0
 	var evidence escalationEvidence
@@ -470,6 +480,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		previousStructureSignature = ""
 		pendingRepairBase = nil
 		pendingRepairSections = nil
+		removalAttempts = 0
+		previousRemovalSignature = ""
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
@@ -711,6 +723,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					prompt += " The authoritative candidate is already POST-MERGE: a section deleted with `**Delete:** yes` is correctly absent, and the tombstone itself must not persist. Never request a tombstone merely because the deleted section is absent here."
 				}
 			}
+			// B-518: the critic of an amendment sees what each touched section
+			// said before, and what the engine found removed. Without it the
+			// eett critic approved a deleted paragraph it had no way to see.
+			if turn.Persona == PersonaCritic && script.Amendment != nil && lastArchitect != nil {
+				prompt += amendmentCriticContext(script.Amendment, lastArchitect.Text, justifiedRemovals, unresolvedRemovals)
+			}
 			// The draft a critic is about to judge is served by artifact_read
 			// too: told "spec does not exist yet", a small seat asked nineteen
 			// times (benchmark run 4).
@@ -820,6 +838,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 			turnContext := TurnContext{Round: round, Index: script.TurnIndexBase + i}
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, turnContext)
+			if err == nil && outcome != nil && script.Amendment != nil && turn.Role == config.RoleArchitect && turn.Persona != PersonaPlanManifest {
+				// A removal justification is protocol, never document text.
+				if quoted := ParseRemovalJustifications(outcome.Text); len(quoted) > 0 {
+					removalJustifications = mergeJustifications(removalJustifications, quoted)
+					stripped := *outcome
+					stripped.Text = StripRemovalJustifications(outcome.Text)
+					outcome = &stripped
+				}
+			}
 			if turn.Role == config.RoleImplementer && outcome != nil {
 				lastImplementer = outcome
 			}
@@ -1063,6 +1090,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 				}
 			}
+			if turn.Persona == PersonaCritic && len(unresolvedRemovals) > 0 {
+				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil {
+					original := v.Verdict
+					lowerVerdictForRemovals(v, unresolvedRemovals)
+					emit(params, "removal_verdict_lowered", map[string]interface{}{
+						"round": round, "turn": i, "original_verdict": original, "findings": unresolvedRemovals,
+						"detail": "unauthorized removals the architect did not repair block this critic's approval",
+					})
+				}
+			}
 			// B-516 (TI-36X T-009 r-20261010-011504-4oml): under a diagnostic
 			// visual check, a finding whose basis is the figure is the person's
 			// caveat, not dissent. It leaves the verdict here — before the
@@ -1210,6 +1247,53 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					lastArchitect = materializeFragment(lastArchitect, outcome, script.FragmentPrefix)
 				} else {
 					lastArchitect = outcome
+				}
+			}
+			// B-518: before any critic reads it, an amendment's candidate is
+			// checked for approved content that disappeared without the
+			// request's authority. Same family as the structure check: the
+			// architect goes again with the exact passages, bounded per round.
+			if turn.Role == config.RoleArchitect && turn.Persona != PersonaPlanManifest &&
+				script.Amendment != nil && script.Amendment.Removals != nil {
+				candidate := outcome.Text
+				switch {
+				case script.FragmentPrefix != "":
+					// Every patch of this conversation, folded; the guard
+					// composes it onto the base the stage merges into.
+					removalFold = materializeFragment(removalFold, outcome, script.FragmentPrefix)
+					candidate = removalFold.Text
+				case strings.HasPrefix(turn.Contract, "markdown_sections:") && lastArchitect != nil:
+					candidate = lastArchitect.Text
+				}
+				report := script.Amendment.Removals(candidate, removalJustifications)
+				justifiedRemovals = report.Justified
+				if len(report.Justified) > 0 {
+					emit(params, "removal_justified", map[string]interface{}{
+						"round": round, "turn": i, "removals": report.Justified,
+						"detail": "the architect quoted the request as authority for these removals; critics verify the quote",
+					})
+				}
+				if len(report.Findings) == 0 {
+					unresolvedRemovals = nil
+				} else {
+					removalAttempts++
+					signature := removalSignature(report.Findings)
+					emit(params, "structure_check", map[string]interface{}{
+						"round": round, "turn": i, "category": "removal", "findings": report.Findings,
+						"attempt": removalAttempts, "max_attempts": maxRemovalRepairs,
+					})
+					if removalAttempts <= maxRemovalRepairs && signature != previousRemovalSignature {
+						previousRemovalSignature = signature
+						pendingStructureNote = removalRepairNote(report.Findings)
+						emitMessage(params, round, i, turn.Role, duckling, outcome)
+						i-- // the architect goes again, the removed passages in hand
+						continue
+					}
+					unresolvedRemovals = report.Findings
+					emit(params, "removal_unresolved", map[string]interface{}{
+						"round": round, "turn": i, "findings": report.Findings,
+						"detail": "the architect neither restored nor justified these removals; critics receive them as blocking engine findings",
+					})
 				}
 			}
 			result.Outcome = outcome
@@ -1627,7 +1711,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// what they are being asked to accept.
 	if script.RevisionOpensNextRound && result.Rounds == maxRounds &&
 		result.State.Verdict == "request-changes" && lastArchitect != nil {
-		if err := finalDocumentReview(ctx, script, params, runner, registry, lastArchitect, findings, result); err != nil {
+		if err := finalDocumentReview(ctx, script, params, runner, registry, lastArchitect, findings, result,
+			amendmentCriticContext(script.Amendment, lastArchitect.Text, justifiedRemovals, unresolvedRemovals), unresolvedRemovals); err != nil {
 			result.Error = err
 			return result, err
 		}
@@ -1673,7 +1758,7 @@ func outcomeVerifiedAfterMutation(outcome *agent.Outcome) bool {
 	return verifyGreen && lastVerify > lastMutation
 }
 
-func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, openFindings []conv.Finding, result *ExecuteResult) error {
+func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, openFindings []conv.Finding, result *ExecuteResult, amendment string, unresolvedRemovals []string) error {
 	digest := documentCandidateDigest(candidate.Text)
 	result.CandidateDigest = digest
 	emit(params, "final_review_started", map[string]interface{}{
@@ -1709,6 +1794,7 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if script.FragmentPrefix != "" {
 			prompt += " The candidate is already POST-MERGE: explicit deletion tombstones have been applied and consumed. A deleted section's absence is correct; do not demand that `**Delete:** yes` appear in this persisted body."
 		}
+		prompt += amendment
 		if rendered := conv.RenderFindings(openFindings); rendered != "" {
 			prompt += "\n\n## Open finding ledger from the preceding review\n\n" + rendered +
 				"\nRe-check EACH ledger item against the exact candidate above. Approve only if every item is now resolved. " +
@@ -1750,6 +1836,12 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		v, ok := outcome.Parsed.(*agent.Verdict)
 		if !ok || v == nil {
 			return fmt.Errorf("final document reviewer returned no verdict")
+		}
+		if lowerVerdictForRemovals(v, unresolvedRemovals) {
+			emit(params, "removal_verdict_lowered", map[string]interface{}{
+				"round": result.Rounds, "turn": index, "findings": unresolvedRemovals, "final_review": true,
+				"detail": "unauthorized removals the architect did not repair block the final review's approval",
+			})
 		}
 		if v.Verdict != "approve" {
 			verdict = v.Verdict

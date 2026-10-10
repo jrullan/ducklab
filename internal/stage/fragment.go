@@ -36,113 +36,156 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	// candidate. Keep their effect for the lifetime of the amendment so a
 	// later round cannot re-merge the approved base and resurrect a section.
 	deletedSections := map[string]bool{}
+	// mergeBase is what an architect fragment is folded onto: the approved
+	// base, and after a post-composition repair the composed candidate that
+	// repair revises — a repair that re-emits one section must not drop the
+	// others. Every review still compares against the approved base.
+	mergeBase := base
+	compose := func(text string, deleted map[string]bool) (*artifact.Document, error) {
+		if kind == artifact.KindPlan {
+			items, real := parsePlanItems(text)
+			if real == 0 {
+				return nil, fmt.Errorf("materialize plan fragment: no task or milestone sections")
+			}
+			return mergePlanFragment(mergeBase, items), nil
+		}
+		produced, err := artifact.Parse(text, kind)
+		if err != nil || len(produced.Sections) == 0 {
+			return nil, fmt.Errorf("materialize %s fragment: no sections", kind)
+		}
+		rememberFragmentDeletes(produced.Sections, deleted)
+		proposed := mergeFragment(mergeBase, produced.Sections, prefix)
+		applyFragmentDeletes(proposed, deleted)
+		return proposed, nil
+	}
+	// The guard composes over a copy of the tombstone ledger: reading a
+	// candidate must not change what the amendment deletes.
+	guardCompose := func(text string) (*artifact.Document, error) {
+		deleted := make(map[string]bool, len(deletedSections))
+		for id := range deletedSections {
+			deleted[id] = true
+		}
+		return compose(text, deleted)
+	}
+	newScript := func(rounds int) *strategy.Script {
+		script := artifactUpdateScript(prefix, p.Mode, p.Critics)
+		script.FragmentPrefix = prefix
+		script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+			if candidate == nil {
+				return nil, fmt.Errorf("materialize %s fragment: no architect outcome", kind)
+			}
+			proposed, err := compose(candidate.Text, deletedSections)
+			if err != nil {
+				return nil, err
+			}
+			if p.Stage == Intake && !p.Adopt {
+				intentID, err := artifact.IntentIDForRun(p.ProjectRoot, p.RunID)
+				if err != nil {
+					return nil, err
+				}
+				artifact.LinkRequirementsDocument(base, proposed, intentID)
+			}
+			out := *candidate
+			out.Text = artifact.RenderBody(proposed)
+			out.Parsed = nil // fragment architect turns intentionally use freeform
+			return &out, nil
+		}
+		script.Amendment = newAmendmentGuard(base, ask, guardCompose, true)
+		if rounds > 0 {
+			script.MaxRounds = rounds
+		}
+		// The architect's document contract demands a full document's shape; the
+		// fragment contract in the prompt is the only law for AUTHOR turns. A
+		// reviewer verdict remains a contract: an approve rendered as JSON but
+		// parsed as freeform bought a needless second council round in Neocapture.
+		for i := range script.Turns {
+			if script.Turns[i].Role == config.RoleArchitect && strings.HasPrefix(script.Turns[i].Contract, "markdown_sections:") {
+				script.Turns[i].Contract = ""
+			}
+		}
+		if len(p.Images) > 0 {
+			for i := range script.Turns {
+				if script.Turns[i].Role == config.RoleArchitect {
+					script.Turns[i].Images = p.Images
+					break
+				}
+			}
+		}
+		return script
+	}
 
 	prompt, err := buildFragmentPrompt(p.ProjectRoot, kind, base, ask)
 	if err != nil {
 		return nil, err
 	}
-	script := artifactUpdateScript(prefix, p.Mode, p.Critics)
-	script.FragmentPrefix = prefix
-	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
-		if candidate == nil {
-			return nil, fmt.Errorf("materialize %s fragment: no architect outcome", kind)
+	script := newScript(p.Rounds)
+	budget := newRoundBudget(script)
+	var raw string
+	var proposed *artifact.Document
+	var mechanical []string
+	var semantic *agent.Verdict
+	for {
+		raw, err = p.Execute(ctx, script, prompt)
+		if err != nil {
+			return nil, err
 		}
-		var proposed *artifact.Document
 		if kind == artifact.KindPlan {
-			items, real := parsePlanItems(candidate.Text)
+			items, real := parsePlanItems(raw)
 			if real == 0 {
-				return nil, fmt.Errorf("materialize plan fragment: no task or milestone sections")
+				// The revise stood pat: fall back through the architect's own
+				// earlier drafts before declaring nothing happened. The draft
+				// the critique verified IS the proposal.
+				for _, draft := range drafts(p) {
+					if items2, real2 := parsePlanItems(draft); real2 > 0 {
+						items, real = items2, real2
+						break
+					}
+				}
 			}
-			proposed = mergePlanFragment(base, items)
+			if real == 0 {
+				return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
+			}
+			proposed = mergePlanFragment(mergeBase, items)
 		} else {
-			produced, err := artifact.Parse(candidate.Text, kind)
-			if err != nil || len(produced.Sections) == 0 {
-				return nil, fmt.Errorf("materialize %s fragment: no sections", kind)
+			produced, perr := artifact.Parse(raw, kind)
+			if perr != nil || len(produced.Sections) == 0 {
+				for _, draft := range drafts(p) {
+					if d2, e2 := artifact.Parse(draft, kind); e2 == nil && len(d2.Sections) > 0 {
+						produced, perr = d2, nil
+						break
+					}
+				}
+			}
+			if perr != nil || len(produced.Sections) == 0 {
+				return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
 			}
 			rememberFragmentDeletes(produced.Sections, deletedSections)
-			proposed = mergeFragment(base, produced.Sections, prefix)
+			proposed = mergeFragment(mergeBase, produced.Sections, prefix)
 			applyFragmentDeletes(proposed, deletedSections)
 		}
-		if p.Stage == Intake && !p.Adopt {
-			intentID, err := artifact.IntentIDForRun(p.ProjectRoot, p.RunID)
-			if err != nil {
-				return nil, err
-			}
-			artifact.LinkRequirementsDocument(base, proposed, intentID)
+		proposed.Front.Kind = kind
+		proposed.Front.Project = base.Front.Project
+		// A surveyed origin survives an update: the document still describes a
+		// built system.
+		proposed.Front.Origin = base.Front.Origin
+		mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, proposed)
+		if err != nil {
+			return nil, err
 		}
-		out := *candidate
-		out.Text = artifact.RenderBody(proposed)
-		out.Parsed = nil // fragment architect turns intentionally use freeform
-		return &out, nil
-	}
-	if p.Rounds > 0 {
-		script.MaxRounds = p.Rounds
-	}
-	// The architect's document contract demands a full document's shape; the
-	// fragment contract in the prompt is the only law for AUTHOR turns. A
-	// reviewer verdict remains a contract: an approve rendered as JSON but
-	// parsed as freeform bought a needless second council round in Neocapture.
-	for i := range script.Turns {
-		if script.Turns[i].Role == config.RoleArchitect && strings.HasPrefix(script.Turns[i].Contract, "markdown_sections:") {
-			script.Turns[i].Contract = ""
+		left, repair := budget.spend(p, script, proposed, mechanical, semantic)
+		if !repair {
+			break
 		}
-	}
-	if len(p.Images) > 0 {
-		for i := range script.Turns {
-			if script.Turns[i].Role == config.RoleArchitect {
-				script.Turns[i].Images = p.Images
-				break
-			}
+		// The repair revises the composed candidate, with the reviewer's
+		// findings and the per-section delta it was judged on.
+		mergeBase = proposed
+		prompt, err = buildFragmentPrompt(p.ProjectRoot, kind, mergeBase, ask)
+		if err != nil {
+			return nil, err
 		}
-	}
-	raw, err := p.Execute(ctx, script, prompt)
-	if err != nil {
-		return nil, err
-	}
-
-	var proposed *artifact.Document
-	if kind == artifact.KindPlan {
-		items, real := parsePlanItems(raw)
-		if real == 0 {
-			// The revise stood pat: fall back through the architect's own
-			// earlier drafts before declaring nothing happened. The draft
-			// the critique verified IS the proposal.
-			for _, draft := range drafts(p) {
-				if items2, real2 := parsePlanItems(draft); real2 > 0 {
-					items, real = items2, real2
-					break
-				}
-			}
-		}
-		if real == 0 {
-			return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
-		}
-		proposed = mergePlanFragment(base, items)
-	} else {
-		produced, perr := artifact.Parse(raw, kind)
-		if perr != nil || len(produced.Sections) == 0 {
-			for _, draft := range drafts(p) {
-				if d2, e2 := artifact.Parse(draft, kind); e2 == nil && len(d2.Sections) > 0 {
-					produced, perr = d2, nil
-					break
-				}
-			}
-		}
-		if perr != nil || len(produced.Sections) == 0 {
-			return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
-		}
-		rememberFragmentDeletes(produced.Sections, deletedSections)
-		proposed = mergeFragment(base, produced.Sections, prefix)
-		applyFragmentDeletes(proposed, deletedSections)
-	}
-	proposed.Front.Kind = kind
-	proposed.Front.Project = base.Front.Project
-	// A surveyed origin survives an update: the document still describes a
-	// built system.
-	proposed.Front.Origin = base.Front.Origin
-	mechanical, semantic, err := reviewComposition(ctx, p, kind, ask, base, proposed)
-	if err != nil {
-		return nil, err
+		prompt += compositionRepairContext(script.Amendment, artifact.RenderBody(proposed), mechanical, semantic,
+			"The outline above is your current candidate: sections you already changed and do not re-emit keep their current candidate text.")
+		script = newScript(left)
 	}
 	if err := writeProposal(p, kind, proposed); err != nil {
 		return nil, err
@@ -337,7 +380,12 @@ func applyFragmentDeletes(doc *artifact.Document, deleted map[string]bool) {
 func mergePlanFragment(base *artifact.Document, items []artifact.Section) *artifact.Document {
 	out := *base
 	out.Sections = make([]artifact.Section, len(base.Sections))
-	copy(out.Sections, base.Sections)
+	// Deep-copied: a shallow copy aliased each milestone's Children, so a task
+	// replaced here rewrote the APPROVED base too — the before-image every
+	// composition review and amendment delta compares against (B-518).
+	for i := range base.Sections {
+		out.Sections[i] = clonePlanSection(base.Sections[i])
+	}
 
 	var appendix []artifact.Section
 	for _, it := range items {

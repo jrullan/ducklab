@@ -7,8 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/strategy"
 )
 
 // The plan amendment: Review's light exit, executed light.
@@ -48,55 +50,110 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	// manifest persona gives the amendment turn two incompatible jobs: return a
 	// JSON topology and return only new Markdown task fragments. Use the same
 	// update script as sectioned and fragment revisions.
-	script := artifactUpdateScript(kind.Prefix(), p.Mode, p.Critics)
-	if p.Rounds > 0 {
-		script.MaxRounds = p.Rounds
-	}
-	// No document contract on an amendment. ArtifactScript demands
-	// markdown_sections:M — a full plan's shape — while the amendment prompt
-	// demands a T-900 fragment: two contradictory contracts in one turn.
-	// Models split between them: one fused its task into an M- heading to
-	// satisfy the validator (the phantom-task shape), another obeyed the
-	// fragment and was executed by the M contract — "no sections matching M
-	// found". The fragment contract in the prompt is the only one that
-	// speaks; runExtend's own parse and refusal handling judge the reply.
-	for i := range script.Turns {
-		script.Turns[i].Contract = ""
-	}
-	// The evidence rides the architect's own turn, like a bug's screenshots
-	// ride the triager's.
-	if len(p.Images) > 0 {
+	guard := newAmendmentGuard(current, effectiveChange, func(text string) (*artifact.Document, error) {
+		proposed, _, _, err := composeExtension(p, current, text)
+		return proposed, err
+	}, true)
+	newScript := func(rounds int) *strategy.Script {
+		script := artifactUpdateScript(kind.Prefix(), p.Mode, p.Critics)
+		if rounds > 0 {
+			script.MaxRounds = rounds
+		}
+		script.Amendment = guard
+		// No document contract on an amendment. ArtifactScript demands
+		// markdown_sections:M — a full plan's shape — while the amendment prompt
+		// demands a T-900 fragment: two contradictory contracts in one turn.
+		// Models split between them: one fused its task into an M- heading to
+		// satisfy the validator (the phantom-task shape), another obeyed the
+		// fragment and was executed by the M contract — "no sections matching M
+		// found". The fragment contract in the prompt is the only one that
+		// speaks; runExtend's own parse and refusal handling judge the reply.
 		for i := range script.Turns {
-			if script.Turns[i].Role == config.RoleArchitect {
-				script.Turns[i].Images = p.Images
-				break
+			script.Turns[i].Contract = ""
+		}
+		// The evidence rides the architect's own turn, like a bug's screenshots
+		// ride the triager's.
+		if len(p.Images) > 0 {
+			for i := range script.Turns {
+				if script.Turns[i].Role == config.RoleArchitect {
+					script.Turns[i].Images = p.Images
+					break
+				}
 			}
 		}
+		return script
 	}
-	raw, err := p.Execute(ctx, script, prompt)
-	if err != nil {
+	script := newScript(p.Rounds)
+	budget := newRoundBudget(script)
+	var raw string
+	var proposed *artifact.Document
+	var mechanical []string
+	var semantic *agent.Verdict
+	for {
+		raw, err = p.Execute(ctx, script, prompt)
+		if err != nil {
+			return nil, err
+		}
+		var taskAmendments []planTaskAmendment
+		var namedReplacements []namedPlanReplacement
+		var superseded []string
+		proposed, taskAmendments, namedReplacements, superseded, err = composeExtensionWithFallback(p, current, raw)
+		if err != nil {
+			return nil, err
+		}
+		if len(superseded) > 0 && p.OnEvent != nil {
+			p.OnEvent("superseded_tasks_consumed", map[string]interface{}{
+				"tasks": superseded, "detail": "superseded amendment tombstones were removed before composition",
+			})
+		}
+		proposed.Front.Kind = kind
+		proposed.Front.Project = current.Front.Project
+		if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
+			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+		}
+		reviewAsk := extensionReviewAsk(effectiveChange, taskAmendments, namedReplacements)
+		mechanical, semantic, err = reviewComposition(ctx, p, kind, reviewAsk, current, proposed)
+		if err != nil {
+			return nil, err
+		}
+		left, repair := budget.spend(p, script, proposed, mechanical, semantic)
+		if !repair {
+			break
+		}
+		// The repair revises the architect's own fragment, which the prompt
+		// carries in full; the response replaces it.
+		prompt, err = buildExtendPrompt(p.ProjectRoot, current, effectiveChange, raw)
+		if err != nil {
+			return nil, err
+		}
+		prompt += compositionRepairContext(guard, raw, mechanical, semantic,
+			"Your previous amendment fragment is shown above; your response replaces it in full, so re-emit every section that should survive, repaired.")
+		script = newScript(left)
+	}
+	if err := writeProposal(p, kind, proposed); err != nil {
 		return nil, err
 	}
+	return &Result{Kind: kind, Proposed: proposed, Raw: raw,
+		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
+}
 
+// composeExtensionWithFallback composes the architect's reply, falling back
+// through its earlier drafts when the final revise stood pat in prose.
+func composeExtensionWithFallback(p Params, current *artifact.Document, raw string) (*artifact.Document, []planTaskAmendment, []namedPlanReplacement, []string, error) {
 	taskFragment, namedReplacements, err := extractNamedPlanReplacements(raw, current)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
 	tasks, _ := parsePlanItems(taskFragment)
 	var superseded []string
 	tasks, superseded = dropSupersededPlanTasks(tasks)
-	if len(superseded) > 0 && p.OnEvent != nil {
-		p.OnEvent("superseded_tasks_consumed", map[string]interface{}{
-			"tasks": superseded, "detail": "superseded amendment tombstones were removed before composition",
-		})
-	}
 	if len(tasks) == 0 && len(namedReplacements) == 0 {
 		// A council revise that stood pat replies in prose; the draft it
 		// stood on is still the amendment. Fall back before refusing.
 		for _, draft := range drafts(p) {
 			fragment, replacements, extractErr := extractNamedPlanReplacements(draft, current)
 			if extractErr != nil {
-				return nil, extractErr
+				return nil, nil, nil, nil, extractErr
 			}
 			if t2, r2 := parsePlanItems(fragment); r2 > 0 || len(replacements) > 0 {
 				t2, _ = dropSupersededPlanTasks(t2)
@@ -108,48 +165,55 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if len(tasks) == 0 && len(namedReplacements) == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
-		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
+		return nil, nil, nil, nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
+	proposed, taskAmendments, err := mergeExtensionParts(p, current, tasks, namedReplacements)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return proposed, taskAmendments, namedReplacements, superseded, nil
+}
 
-	var proposed *artifact.Document
-	var taskAmendments []planTaskAmendment
+// composeExtension is the side-effect-free composition of one reply, for the
+// amendment guard: what this fragment would make of the approved plan.
+func composeExtension(p Params, current *artifact.Document, raw string) (*artifact.Document, []planTaskAmendment, []namedPlanReplacement, error) {
+	taskFragment, namedReplacements, err := extractNamedPlanReplacements(raw, current)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tasks, _ := parsePlanItems(taskFragment)
+	tasks, _ = dropSupersededPlanTasks(tasks)
+	if len(tasks) == 0 && len(namedReplacements) == 0 {
+		return nil, nil, nil, fmt.Errorf("the architect added no tasks")
+	}
+	proposed, taskAmendments, err := mergeExtensionParts(p, current, tasks, namedReplacements)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dedupeSections(proposed)
+	return proposed, taskAmendments, namedReplacements, nil
+}
+
+func mergeExtensionParts(p Params, current *artifact.Document, tasks []artifact.Section, namedReplacements []namedPlanReplacement) (*artifact.Document, []planTaskAmendment, error) {
 	if p.SplitTask != "" {
 		if len(namedReplacements) > 0 {
-			return nil, fmt.Errorf("a task split cannot also replace named plan sections")
+			return nil, nil, fmt.Errorf("a task split cannot also replace named plan sections")
 		}
-		proposed, err = mergeSplit(current, p.SplitTask, tasks)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var additions []artifact.Section
-		additions, taskAmendments, err = partitionExtensionTasks(current, tasks, p.MutablePlanTasks)
-		if err != nil {
-			return nil, err
-		}
-		proposed = mergeExtension(current, additions)
-		if err = applyPlanTaskAmendments(current, proposed, additions, taskAmendments); err != nil {
-			return nil, err
-		}
-		if proposed, err = applyNamedPlanReplacements(proposed, namedReplacements); err != nil {
-			return nil, err
-		}
+		proposed, err := mergeSplit(current, p.SplitTask, tasks)
+		return proposed, nil, err
 	}
-	proposed.Front.Kind = kind
-	proposed.Front.Project = current.Front.Project
-	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
-		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
-	}
-	reviewAsk := extensionReviewAsk(effectiveChange, taskAmendments, namedReplacements)
-	mechanical, semantic, err := reviewComposition(ctx, p, kind, reviewAsk, current, proposed)
+	additions, taskAmendments, err := partitionExtensionTasks(current, tasks, p.MutablePlanTasks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := writeProposal(p, kind, proposed); err != nil {
-		return nil, err
+	proposed := mergeExtension(current, additions)
+	if err = applyPlanTaskAmendments(current, proposed, additions, taskAmendments); err != nil {
+		return nil, nil, err
 	}
-	return &Result{Kind: kind, Proposed: proposed, Raw: raw,
-		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
+	if proposed, err = applyNamedPlanReplacements(proposed, namedReplacements); err != nil {
+		return nil, nil, err
+	}
+	return proposed, taskAmendments, nil
 }
 
 type planTaskAmendment struct {

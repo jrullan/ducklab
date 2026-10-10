@@ -272,26 +272,91 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		return nil, err
 	}
 
-	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
-	// Freeze the same folded, id-assigned body before a bounded final review
-	// that this function will later persist as the proposal. The callback
-	// lives on the script to keep stage semantics out of the scheduler.
-	script.MaterializeCandidate = func(texts []string, candidate *agent.Outcome) (*agent.Outcome, error) {
-		materialized, _, kept, dropped, err := materializeCandidate(current, texts, candidate, kind)
+	amending := base != nil && len(base.Sections) > 0
+	ask := strings.TrimSpace(p.Revision)
+	if ask == "" {
+		ask = strings.TrimSpace(p.Seed)
+	}
+	newScript := func(rounds int) *strategy.Script {
+		script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
+		// Freeze the same folded, id-assigned body before a bounded final review
+		// that this function will later persist as the proposal. The callback
+		// lives on the script to keep stage semantics out of the scheduler.
+		script.MaterializeCandidate = func(texts []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+			materialized, _, kept, dropped, err := materializeCandidate(current, texts, candidate, kind)
+			if err != nil {
+				return nil, err
+			}
+			// Structured-reference metadata is engine-owned, so it must be present
+			// before the final reviewer fingerprints and judges the candidate. This
+			// keeps the reviewed-candidate identity guard meaningful: reviewer,
+			// digest, and persisted proposal all see the same bytes.
+			if kind == artifact.KindSpec && len(p.ReferenceContracts) > 0 {
+				doc, parseErr := artifact.Parse(materialized.Text, kind)
+				if parseErr != nil {
+					return nil, parseErr
+				}
+				materializeReferenceContracts(kind, doc, p.ReferenceContracts)
+				materialized.Text = artifact.RenderBody(doc)
+			}
+			if p.Stage == Intake && !p.Adopt {
+				var linkedDropped []string
+				materialized, linkedDropped, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+				if err != nil {
+					return nil, err
+				}
+				dropped = append(dropped, linkedDropped...)
+			}
+			if p.OnEvent != nil && len(kept) > 0 {
+				p.OnEvent("sections_folded", map[string]interface{}{
+					"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
+				})
+			}
+			if p.OnEvent != nil && len(dropped) > 0 {
+				p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+			}
+			return materialized, nil
+		}
+		if amending {
+			// A whole-document redraft over an existing base (an adoption
+			// re-survey) gives its critics the same before/after as a fragment
+			// amendment. The deterministic removal check stays off: a survey's
+			// authority over what to drop is the tree, not the request, so a
+			// request-based rule would flag every correction the code demands.
+			script.Amendment = newAmendmentGuard(base, ask, func(text string) (*artifact.Document, error) {
+				return artifact.Parse(text, kind)
+			}, false)
+		}
+		if rounds > 0 {
+			script.MaxRounds = rounds
+		}
+		return script
+	}
+	script := newScript(p.Rounds)
+	if inventoryTurn(p, current) && p.Inventory != nil {
+		var checklist strings.Builder
+		checklist.WriteString("\n## Survey inventory checklist\nEvery inventoried item must be covered by a section or named in the document as deliberately out of scope.\n")
+		for _, item := range p.Inventory.Items {
+			fmt.Fprintf(&checklist, "- %s (%s) [%s]\n", item.Name, item.Kind, item.EvidencePath)
+		}
+		prompt += checklist.String()
+	}
+	budget := newRoundBudget(script)
+	basePrompt := prompt
+	var raw string
+	var remap map[string]string
+	var produced *artifact.Document
+	var mechanical []string
+	var semantic *agent.Verdict
+	for {
+		raw, err = p.Execute(ctx, script, prompt)
 		if err != nil {
 			return nil, err
 		}
-		// Structured-reference metadata is engine-owned, so it must be present
-		// before the final reviewer fingerprints and judges the candidate. This
-		// keeps the reviewed-candidate identity guard meaningful: reviewer,
-		// digest, and persisted proposal all see the same bytes.
-		if kind == artifact.KindSpec && len(p.ReferenceContracts) > 0 {
-			doc, parseErr := artifact.Parse(materialized.Text, kind)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			materializeReferenceContracts(kind, doc, p.ReferenceContracts)
-			materialized.Text = artifact.RenderBody(doc)
+
+		materialized, remapped, _, dropped, err := materializeCandidate(current, []string{raw}, &agent.Outcome{Text: raw}, kind)
+		if err != nil {
+			return nil, err
 		}
 		if p.Stage == Intake && !p.Adopt {
 			var linkedDropped []string
@@ -301,95 +366,63 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			}
 			dropped = append(dropped, linkedDropped...)
 		}
-		if p.OnEvent != nil && len(kept) > 0 {
-			p.OnEvent("sections_folded", map[string]interface{}{
-				"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
-			})
-		}
-		if p.OnEvent != nil && len(dropped) > 0 {
-			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
-		}
-		return materialized, nil
-	}
-	if inventoryTurn(p, current) && p.Inventory != nil {
-		var checklist strings.Builder
-		checklist.WriteString("\n## Survey inventory checklist\nEvery inventoried item must be covered by a section or named in the document as deliberately out of scope.\n")
-		for _, item := range p.Inventory.Items {
-			fmt.Fprintf(&checklist, "- %s (%s) [%s]\n", item.Name, item.Kind, item.EvidencePath)
-		}
-		prompt += checklist.String()
-	}
-	if p.Rounds > 0 {
-		script.MaxRounds = p.Rounds
-	}
-	raw, err := p.Execute(ctx, script, prompt)
-	if err != nil {
-		return nil, err
-	}
-
-	materialized, remap, _, dropped, err := materializeCandidate(current, []string{raw}, &agent.Outcome{Text: raw}, kind)
-	if err != nil {
-		return nil, err
-	}
-	if p.Stage == Intake && !p.Adopt {
-		var linkedDropped []string
-		materialized, linkedDropped, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+		remap = remapped
+		produced, err = artifact.Parse(materialized.Text, kind)
 		if err != nil {
 			return nil, err
 		}
-		dropped = append(dropped, linkedDropped...)
-	}
-	produced, err := artifact.Parse(materialized.Text, kind)
-	if err != nil {
-		return nil, err
-	}
-	produced.Front.Kind = kind
-	produced.Front.Project = current.Front.Project
+		produced.Front.Kind = kind
+		produced.Front.Project = current.Front.Project
 
-	// A surveyed document says so on its face: these sections were DERIVED
-	// from the tree by a model, not decided by a person — the approval gate
-	// is the same, but a reader auditing a requirement's origin deserves the
-	// distinction.
-	if p.Adopt {
-		produced.Front.Origin = "adopted"
-	}
-	// A first spec drafted from adopted requirements is a survey too: it
-	// describes the same built system, and its reader deserves the same
-	// provenance note the requirements carry.
-	if p.Stage == Spec && len(current.Sections) == 0 {
-		if reqs, rErr := artifact.Load(p.ProjectRoot, artifact.KindRequirements); rErr == nil && reqs.Front.Origin == "adopted" {
+		// A surveyed document says so on its face: these sections were DERIVED
+		// from the tree by a model, not decided by a person — the approval gate
+		// is the same, but a reader auditing a requirement's origin deserves the
+		// distinction.
+		if p.Adopt {
 			produced.Front.Origin = "adopted"
 		}
-	}
-	if len(dropped) > 0 {
-		raw = materialized.Text
-		if p.OnEvent != nil {
-			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+		// A first spec drafted from adopted requirements is a survey too: it
+		// describes the same built system, and its reader deserves the same
+		// provenance note the requirements carry.
+		if p.Stage == Spec && len(current.Sections) == 0 {
+			if reqs, rErr := artifact.Load(p.ProjectRoot, artifact.KindRequirements); rErr == nil && reqs.Front.Origin == "adopted" {
+				produced.Front.Origin = "adopted"
+			}
 		}
-	}
-	var mechanical []string
-	var semantic *agent.Verdict
-	if base != nil && len(base.Sections) > 0 {
-		ask := strings.TrimSpace(p.Revision)
-		if ask == "" {
-			ask = strings.TrimSpace(p.Seed)
+		if len(dropped) > 0 {
+			raw = materialized.Text
+			if p.OnEvent != nil {
+				p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+			}
 		}
-		mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, produced)
-		if err != nil {
-			return nil, err
+		mechanical, semantic = nil, nil
+		if amending {
+			mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, produced)
+			if err != nil {
+				return nil, err
+			}
+			left, repair := budget.spend(p, script, produced, mechanical, semantic)
+			if repair {
+				prompt = basePrompt + "\n\n## Your current candidate\n\n" + artifact.RenderBody(produced) +
+					compositionRepairContext(script.Amendment, artifact.RenderBody(produced), mechanical, semantic,
+						"Your current candidate is shown above: return the whole document again with every finding repaired.")
+				script = newScript(left)
+				continue
+			}
+		} else if len(p.ReferenceContracts) > 0 {
+			// A first draft already received the council's whole-document review,
+			// so it needs only machine-owned reference materialization and the
+			// executable check here. Amendments take the additional semantic
+			// composition pass above.
+			materializeReferenceContracts(kind, produced, p.ReferenceContracts)
+			mechanical = referenceContractFindings(kind, produced, p.ReferenceContracts)
+			if p.OnEvent != nil {
+				p.OnEvent("composition_mechanical_check", map[string]interface{}{
+					"findings": mechanical, "contract_findings": mechanical, "count": len(mechanical),
+				})
+			}
 		}
-	} else if len(p.ReferenceContracts) > 0 {
-		// A first draft already received the council's whole-document review,
-		// so it needs only machine-owned reference materialization and the
-		// executable check here. Amendments take the additional semantic
-		// composition pass above.
-		materializeReferenceContracts(kind, produced, p.ReferenceContracts)
-		mechanical = referenceContractFindings(kind, produced, p.ReferenceContracts)
-		if p.OnEvent != nil {
-			p.OnEvent("composition_mechanical_check", map[string]interface{}{
-				"findings": mechanical, "contract_findings": mechanical, "count": len(mechanical),
-			})
-		}
+		break
 	}
 	if err := writeProposal(p, kind, produced); err != nil {
 		return nil, err

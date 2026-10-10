@@ -147,6 +147,18 @@ type Script struct {
 	// placeholder. A small architect may ignore T-900 and emit several proposed
 	// ids; one unambiguous assigned title can still be isolated safely.
 	ArchitectScopeTitle string
+	// Amendment is the approved base a document run edits (B-518): critics
+	// see every touched section's previous text, and content removed without
+	// the request's authority is a finding before any critic runs. Nil for a
+	// first draft.
+	Amendment *AmendmentGuard
+	// RoundsUsed is written by ExecuteScript when it returns: how many rounds
+	// of MaxRounds the conversation consumed. A stage that runs a repair
+	// round after its post-composition review spends the remainder, so the
+	// whole amendment never exceeds the budget its mode promised. Zero means
+	// the script was not executed by the scheduler (a test double); callers
+	// treat that as exhausted.
+	RoundsUsed int
 }
 
 // Turn is a script turn.
