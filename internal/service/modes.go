@@ -876,7 +876,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		return s.runSplit(ctx, mc, base)
 
 	default:
-		return fmt.Errorf("unknown mode %q (available: solo, pair, tournament, split)", mc.rs.run.Mode)
+		return fmt.Errorf("unknown mode %q (available: %s)", mc.rs.run.Mode, strings.Join(BuildModes, ", "))
 	}
 }
 

@@ -91,6 +91,14 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	if strings.TrimSpace(req.TaskID) == "" {
 		return nil, fmt.Errorf("test: no task given")
 	}
+	// The promised build is checked at the promise, not when the red test
+	// lands: a chain carrying a document-stage mode used to write and commit
+	// the test, then record a build that died on "unknown mode" (B-517).
+	if req.ThenBuild {
+		if err := checkBuildLaunch(req.TaskID, req.Build.Mode, "request"); err != nil {
+			return nil, err
+		}
+	}
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err

@@ -32,6 +32,7 @@ import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { documentLabel, runLabel } from "../lib/runview";
+import { retryRoute, reviseRun, revisesDocument } from "../lib/retry";
 import { VisualCheck } from "../components/VisualCheck";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
@@ -974,6 +975,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     ? relaunchDucklings.map((id, i) => (i === 0 ? escalationCandidate : id === escalationCandidate ? "" : id))
     : relaunchDucklings;
 
+  const retryTo = retryRoute(run);
   const relaunch = async (opts: LaunchOpts) => {
     setActionError(null);
     setRelaunchBusy(true);
@@ -1027,10 +1029,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     try {
       // A release's draft revises through its own door; the document stages
       // through theirs. Same button, same meaning: "almost".
-      const started =
-        run.stage === "release"
-          ? await client.releasePlan(run.project_id, "", text)
-          : await client.stageStart(run.project_id, stageToRevise, { revise: text });
+      const started = await reviseRun(client, run, text);
       setRevisionRun(started.id);
     } catch (e) {
       useRuns.getState().failAccept(runId, e instanceof Error ? e.message : String(e));
@@ -1199,7 +1198,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         resumeNote={["error", "budget", "provider"].includes(run.pending_kind ?? "") && (run.stage === "build" || run.stage === "test")}
         revisionRun={revisionRun}
         redoNote={run.redo_note}
-        onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
+        // B-517: a document stage's retry revises that stage; only a code
+        // run with a task relaunches as code. No route, no button.
+        onRetry={retryTo === null ? undefined : revisesDocument(run)
+          ? (note) => void requestChanges(note)
+          : (note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
         documentGate={!!(documentProposal || run.stage === "release")}
         landedAs={landedAs}
         dissent={codeRun ? dissent : null}

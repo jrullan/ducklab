@@ -37,6 +37,11 @@ func (s *Service) ReviewStart(ctx context.Context, projectID string, req ReviewR
 	if strings.TrimSpace(req.TaskID) == "" {
 		return nil, fmt.Errorf("review: no task given")
 	}
+	// Any other mode silently ran as solo while the record named the mode
+	// asked for; refused before a run exists, as builds are (B-517).
+	if req.Mode != "" && req.Mode != "solo" && req.Mode != "council" {
+		return nil, refuseLaunch("%q is not a review mode; a review runs solo or council", req.Mode)
+	}
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err

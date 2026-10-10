@@ -15,6 +15,7 @@ import { LifecycleStrip } from "../components/LifecycleStrip";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
+import { reviseRun, revisesDocument } from "../lib/retry";
 import { WaitingCard } from "../components/WaitingCard";
 import { PlanCard } from "../components/PlanCard";
 import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
@@ -304,9 +305,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 }}
                 onReject={() => void client.reject(r.id).catch(() => {})}
                 onAbort={() => void client.abort(r.id).catch(() => {})}
-                onRequestChanges={r.stage === "intake" || r.stage === "spec" || r.stage === "plan"
+                // The same revision RunView sends (B-517): one module decides
+                // which door a document's note goes through.
+                onRequestChanges={revisesDocument(r)
                   ? async (note) => {
-                    await client.stageStart(projectId, r.stage, { revise: note });
+                    await reviseRun(client, r, note);
                   }
                   : undefined}
                 acceptError={(() => {

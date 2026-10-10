@@ -665,8 +665,19 @@ func (s *Service) draftRedoNote(ctx context.Context, rs *runState, run *runlog.R
 	if len(parts) == 0 {
 		return nil
 	}
-	note := "Retry the task after addressing the failure.\n\n" + strings.Join(parts, "\n\n")
+	note := redoLead(run.Stage) + "\n\n" + strings.Join(parts, "\n\n")
 	return &runlog.RedoNote{Draft: firstN(note, 12000), Origin: runlog.RedoOriginDucklab, Reason: reason, Editable: true}
+}
+
+// redoLead opens the note with what the retry does. A document stage's retry
+// is a revision of its draft, not a task: the intake's note said "Retry the
+// task" and travelled, word for word, into three task-less builds (B-517).
+func redoLead(stage string) string {
+	switch stage {
+	case "intake", "spec", "plan", "release":
+		return "Revise the " + stage + " draft to address the failure."
+	}
+	return "Retry the task after addressing the failure."
 }
 
 // redoReason says why the run failed, in the words the engine and the

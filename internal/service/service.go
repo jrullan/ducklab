@@ -1362,8 +1362,58 @@ func (s *Service) originatingBugID(projectID, taskID string) (string, error) {
 	return "", nil
 }
 
+// BuildModes are the modes a build executes (executeModes' switch). The
+// document stages' modes — council, sectioned — are not among them: a build
+// launched with one used to be recorded, started, and failed a second later
+// with "unknown mode" (B-517).
+var BuildModes = []string{"solo", "pair", "tournament", "split"}
+
+// ErrLaunchRefused marks a launch request the engine refuses before creating
+// any run: the request itself is wrong, so nothing is recorded and the
+// caller is told why in plain words.
+var ErrLaunchRefused = errors.New("launch refused")
+
+// launchRefusal is a refused launch: its message is the plain reason, and it
+// matches ErrLaunchRefused so transports answer 400 rather than 500.
+type launchRefusal struct{ msg string }
+
+func (e *launchRefusal) Error() string        { return e.msg }
+func (e *launchRefusal) Is(target error) bool { return target == ErrLaunchRefused }
+
+func refuseLaunch(format string, args ...interface{}) error {
+	return &launchRefusal{msg: fmt.Sprintf(format, args...)}
+}
+
+// checkBuildLaunch is the build's own door, shared by every way a build is
+// requested — directly, or promised by a test-first chain. B-517: the
+// desktop's "Retry with this note" on a failed INTAKE sent a build with no
+// task and the intake's council mode; the engine recorded three builds
+// (TI-36X r-20261010-120758-gjs4 and two more) that each died at once on
+// "unknown mode council". A build implements one task in a build mode;
+// anything else is refused before a run exists.
+func checkBuildLaunch(taskID, mode, modeSource string) error {
+	if strings.TrimSpace(taskID) == "" {
+		return refuseLaunch("a build needs a task: name the task to build. " +
+			"To redo a document stage (intake, spec, plan), revise that stage with the note instead — " +
+			"a build cannot rewrite a document")
+	}
+	if mode != "" && !slices.Contains(BuildModes, mode) {
+		from := ""
+		if modeSource != "" && modeSource != "request" {
+			from = " (from " + modeSource + ")"
+		}
+		return refuseLaunch("%q is not a build mode%s; a build runs %s", mode, from, strings.Join(BuildModes, ", "))
+	}
+	return nil
+}
+
 // RunStart starts a run. Returns immediately with the run in running status.
 func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest) (*runlog.Run, error) {
+	// Refused before anything is touched: no gate settled, no worktree, no
+	// run record (B-517).
+	if err := checkBuildLaunch(req.TaskID, req.Mode, "request"); err != nil {
+		return nil, err
+	}
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
@@ -1453,6 +1503,11 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	}
 	if run.Mode == "" {
 		run.Mode, run.ModeSource = s.resolveBuildMode(entry.Path)
+		// A saved default can name a mode no build runs; refused here, naming
+		// where it came from, rather than recorded as a run that fails.
+		if err := checkBuildLaunch(run.TaskID, run.Mode, run.ModeSource); err != nil {
+			return nil, err
+		}
 	}
 	// Validate cardinality at the launch boundary as well as when defaults are edited.
 	if run.Mode == "council" || run.Mode == "split" || run.Mode == "tournament" {
