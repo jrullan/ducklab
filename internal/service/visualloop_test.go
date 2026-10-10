@@ -49,6 +49,10 @@ type visualLoop struct {
 	// priorFailure records a FAILED run on the task whose visual check
 	// measured other code (B-508).
 	priorFailure bool
+	// plan replaces visualLoopPlan (B-516: a task that inherits the photo).
+	plan string
+	// tolerance replaces the comparison's default tolerance when non-zero.
+	tolerance float64
 }
 
 type visualLoopRequest struct {
@@ -64,8 +68,12 @@ func runVisualLoop(t *testing.T, o visualLoop) ([]visualLoopRequest, []*runlog.E
 	setVision(s, "luna", true)
 	setVision(s, "glm52", false)
 	setVision(s, "glm53flash", false)
+	plan := visualLoopPlan
+	if o.plan != "" {
+		plan = o.plan
+	}
 	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{
-		artifact.KindPlan: visualLoopPlan, artifact.KindSpec: visionSpecDoc, artifact.KindRequirements: visionReqDoc,
+		artifact.KindPlan: plan, artifact.KindSpec: visionSpecDoc, artifact.KindRequirements: visionReqDoc,
 	})
 	dark := color.RGBA{R: 40, G: 40, B: 40, A: 255}
 	storeRefImage(t, dir, visionRefFile, solidPNG(t, 8, 16, dark))
@@ -89,6 +97,10 @@ func runVisualLoop(t *testing.T, o visualLoop) ([]visualLoopRequest, []*runlog.E
 	}
 	if o.required {
 		cfg.Render.Enforcement = "required"
+	}
+	if o.tolerance > 0 {
+		tol := o.tolerance
+		cfg.Render.Compare[0].Tolerance = &tol
 	}
 	if err := writeProjectTOML(path, cfg); err != nil {
 		t.Fatal(err)
@@ -318,7 +330,7 @@ func TestB505B507TheAdvisorAndItsRetryWorkFromTheMeasurement(t *testing.T) {
 		"capture `calculator.png` against " + visionRefID + ": at most 2.0% of its pixels may differ",
 		"before every implementer, advisor and reviewer turn that follows a change to the tree",
 		"verify_run does NOT run it",
-		"It is diagnostic",
+		"Mode: diagnostic. This figure is NOT an acceptance criterion",
 		"calculator.png against " + visionRefID + ": 100.0% of pixels differ (allowed 2.0%)",
 		"Slice 1 is measured by this comparison",
 		"The implementer itself reports [2] undelivered",

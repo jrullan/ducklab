@@ -33,6 +33,19 @@ const (
 	visionSpecDoc = "## SPEC-001 — Replica composition\n\n**Implements:** REQ-001\n\nCompose the device as the photo shows.\n"
 )
 
+// visionOwnPlanDoc is the plan for a build that renders: since B-516 only a
+// task whose OWN acceptance cites a compared reference is rendered for. This
+// T-001 has no slice list, so its body is its acceptance, and the body names
+// the photo (it reaches it through SPEC-001 too).
+const visionOwnPlanDoc = `## M-01 — Face
+
+### T-001 — Replica composition
+
+**Implements:** SPEC-001
+
+Compose the device as REF-IMG-6c63e390 shows.
+`
+
 func solidPNG(t *testing.T, w, h int, c color.Color) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -88,8 +101,12 @@ func visionBuild(t *testing.T, mode string, reviewerSees, render bool, hook func
 	s := serviceWithDucklings(t, "luna", "glm52")
 	setVision(s, "luna", true)
 	setVision(s, "glm52", reviewerSees)
+	plan := planDoc
+	if render {
+		plan = visionOwnPlanDoc
+	}
 	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{
-		artifact.KindPlan: planDoc, artifact.KindSpec: visionSpecDoc, artifact.KindRequirements: visionReqDoc,
+		artifact.KindPlan: plan, artifact.KindSpec: visionSpecDoc, artifact.KindRequirements: visionReqDoc,
 	})
 	ref := storeRefImage(t, dir, visionRefFile, solidPNG(t, 8, 16, color.RGBA{R: 40, G: 40, B: 40, A: 255}))
 	if render {

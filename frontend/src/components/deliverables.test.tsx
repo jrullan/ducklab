@@ -159,6 +159,70 @@ describe("a harness-measured slice", () => {
   });
 });
 
+// B-516 (TI-36X T-009 r-20261010-011504-4oml): a finding resting on a
+// diagnostic visual check's figure is set aside as an observation; the lane
+// shows it beside the verdict it no longer decides.
+describe("a diagnostic visual observation", () => {
+  it("is shown on the reviewer's verdict, with what the reviewer said", () => {
+    const finding = {
+      severity: "major",
+      file: "index.html",
+      issue: "The rendered device still differs on 32.4% of pixels against REF-IMG-6c63e390 (allowed 30.0%).",
+      fix: "Reconcile the geometry.",
+      invariant: "INV-2: the rendered device matches REF-IMG-6c63e390 within the 30% pixel-difference allowance.",
+    };
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_observation", 2, {
+        round: 1, turn: 1, original_verdict: "request-changes", effective_verdict: "approve",
+        observations: [{ finding, basis: "figure" }],
+      }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "approve", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.visualObservations?.findings).toHaveLength(1);
+    render(<ConversationTurn block={block} roster={["glm53flash"]} />);
+    const box = screen.getByTestId("visual-observations");
+    expect(box.textContent).toMatch(/recorded as observations: the visual check is diagnostic/);
+    expect(box.textContent).toMatch(/the reviewer said request-changes; decided approve/);
+    expect(screen.getByTestId("visual-observation").textContent).toMatch(/INV-2.*cites the visual check's figure/);
+    expect(screen.getByTestId("turn-verdict").getAttribute("data-verdict")).toBe("approve");
+  });
+});
+
+// Codex on #170: under a required check, an approval carrying only
+// visual_check blocking findings is overridden — and the lane says so.
+describe("a required visual check overriding an approval", () => {
+  it("shows what the reviewer said and what was decided", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes", reason: "required" }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "request-changes", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.visualOverride).toEqual({ originalVerdict: "approve", effectiveVerdict: "request-changes", reason: "required" });
+    render(<ConversationTurn block={block} roster={["glm53flash"]} />);
+    expect(screen.getByTestId("visual-override").textContent).toMatch(/said approve.*the check is required.*decided request-changes/);
+  });
+
+  // Codex on #170 (a4d58250): with no comparison configured the copy must
+  // not claim a required check.
+  it("says no comparison is configured when that is the reason", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash" }),
+      ev("visual_verdict_override", 2, { round: 1, turn: 1, original_verdict: "approve", effective_verdict: "request-changes", reason: "no_comparison" }),
+      ev("message", 3, { round: 1, turn: 1, role: "reviewer", duckling: "glm53flash", content: "{}", verdict: "request-changes", findings: [] }),
+      ev("turn_end", 4, { round: 1, turn: 1, role: "reviewer" }),
+    ];
+    render(<ConversationTurn block={buildTurns(events)[0]!} roster={["glm53flash"]} />);
+    const text = screen.getByTestId("visual-override").textContent ?? "";
+    expect(text).toMatch(/no visual comparison is configured/);
+    expect(text).not.toMatch(/required/);
+  });
+});
+
 describe("an ask_advisor consult", () => {
   it("renders the duck's answer open, in the middle of the turn", () => {
     const events: DucklabEvent[] = [

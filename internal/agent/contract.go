@@ -37,6 +37,12 @@ type Finding struct {
 	// the change must hold. Required for a class-level finding; welcome on an
 	// anchored one.
 	Invariant string `json:"invariant,omitempty"`
+	// VisualCheck is the reviewer's declaration that the finding rests on the
+	// harness's visual-check figure (a capture's pixel difference against a
+	// reference). Under a diagnostic check such a finding is the person's
+	// caveat, not a blocking defect, and the strategy records it as an
+	// observation instead of letting it decide the verdict (B-516).
+	VisualCheck bool `json:"visual_check,omitempty"`
 }
 
 // ClassLevel reports whether the finding names a pattern rather than a place.
@@ -51,6 +57,11 @@ type Verdict struct {
 	NativeChecks       *NativeReviewChecks  `json:"native_checks,omitempty"`
 	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
 	ManifestAudit      *ManifestAudit       `json:"manifest_audit,omitempty"`
+	// Returned is the verdict the reviewer actually wrote, kept when the
+	// parser read it as something else: an approval carrying only blocking
+	// findings marked visual_check is read as request-changes for the
+	// mode-aware guard to settle (B-516). Empty when the parser kept it.
+	Returned string `json:"-"`
 }
 
 // ManifestAudit makes a pre-freeze review accountable for the whole object.
@@ -677,6 +688,23 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 			// "*" says "everywhere"; without the rule it is everywhere and
 			// nowhere, and the implementer has nothing to hold the change to.
 			return nil, fmt.Errorf("verdict contract: finding %d is class-level (file \"*\") but names no invariant", i)
+		}
+	}
+	// A blocking finding the reviewer marked visual_check is the harness's to
+	// decide: under a diagnostic visual check it is the person's caveat, under
+	// a required one it blocks (B-516). The parser does not know the mode, so
+	// an approval carrying only such findings is read as the request-changes
+	// it formally is, and the strategy's guard settles it by the mode — Codex
+	// on #170 reproduced the reviewer, told such a finding "does not block",
+	// approving with it and being rejected here before the guard could run.
+	if v.Approved() && len(v.Blocking()) > 0 {
+		visualOnly := true
+		for _, f := range v.Blocking() {
+			visualOnly = visualOnly && f.VisualCheck
+		}
+		if visualOnly {
+			v.Returned = v.Verdict
+			v.Verdict = "request-changes"
 		}
 	}
 	// A reviewer cannot approve and simultaneously report blocking problems.

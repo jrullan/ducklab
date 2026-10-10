@@ -184,6 +184,9 @@ type FailedAttempt struct {
 	// Visual is that run's visual check result. It measured that run's code,
 	// and is rendered labelled as such (B-508).
 	Visual string
+	// VisualMode is the check's mode as every prompt showing a figure states
+	// it (strategy.VisualModeStatement, B-516), rendered after the figure.
+	VisualMode string
 }
 
 // carriedVisualMarker begins the line that carries another run's visual
@@ -195,8 +198,12 @@ const carriedVisualMarker = "  - Visual result carried from run "
 // prompt unlabelled from r-20261005-004552-4tpn, and luna reported "the
 // earlier render comparison reported a 44.5% difference before the gutter
 // adjustment" — a figure for code it never rendered, cited as its own.
-func carriedVisualLine(runID, summary string) string {
-	return fmt.Sprintf("%s%s — it measured that run's code, not this run's tree: %s\n", carriedVisualMarker, runID, strings.TrimSpace(summary))
+func carriedVisualLine(runID, summary, mode string) string {
+	line := fmt.Sprintf("%s%s — it measured that run's code, not this run's tree: %s", carriedVisualMarker, runID, strings.TrimSpace(summary))
+	if mode = strings.TrimSpace(mode); mode != "" {
+		line += " " + mode
+	}
+	return line + "\n"
 }
 
 // SupersedeCarriedVisual replaces each carried visual result with a pointer
@@ -236,7 +243,7 @@ func RenderFailedAttempts(attempts []FailedAttempt) string {
 		}
 		b.WriteString("\n")
 		if strings.TrimSpace(a.Visual) != "" {
-			b.WriteString(carriedVisualLine(a.RunID, a.Visual))
+			b.WriteString(carriedVisualLine(a.RunID, a.Visual, a.VisualMode))
 		}
 	}
 	return b.String()

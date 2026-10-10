@@ -1063,6 +1063,38 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 				}
 			}
+			// B-516 (TI-36X T-009 r-20261010-011504-4oml): under a diagnostic
+			// visual check, a finding whose basis is the figure is the person's
+			// caveat, not dissent. It leaves the verdict here — before the
+			// transcript, the ledger, the deliverables conversion and the
+			// message record read it — so every later reader sees the verdict
+			// as decided. See demoteDiagnostic.
+			if turn.Role == config.RoleReviewer {
+				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil {
+					observed, original := params.Visual.demoteDiagnostic(v, visual)
+					if len(observed) > 0 {
+						emit(params, "visual_observation", map[string]interface{}{
+							"round": round, "turn": i, "observations": observed,
+							"original_verdict": original, "effective_verdict": v.Verdict,
+							"detail": "the visual check is diagnostic: findings resting on its figure are recorded as observations and do not block the verdict",
+						})
+					} else if v.Returned != "" && v.Returned != v.Verdict {
+						// The reviewer approved while raising blocking findings it
+						// marked visual_check, and nothing demoted them (a required
+						// check, or no comparison configured): the approval was
+						// overridden, and the record says so (Codex on #170).
+						reason, why := "no_comparison", "no visual comparison is configured, so the findings block as written"
+						if params.Visual != nil && params.Visual.Required && len(params.Visual.Compares) > 0 {
+							reason, why = "required", "the visual check is required, so they block"
+						}
+						emit(params, "visual_verdict_override", map[string]interface{}{
+							"round": round, "turn": i,
+							"original_verdict": v.Returned, "effective_verdict": v.Verdict, "reason": reason,
+							"detail": "the reviewer approved while raising blocking findings it marked visual_check; " + why,
+						})
+					}
+				}
+			}
 			// A document council's architect: check the structure of the draft
 			// against the rules and the draft before it, once; and notice a
 			// revision that changed nothing, which no further round will fix.

@@ -161,7 +161,7 @@ func TestTheAdvisorIsToldTheComparisonContractAndTheFigure(t *testing.T) {
 		"capture `calculator.png` against REF-IMG-6c63e390: at most 2.0% of its pixels may differ (a pixel counts as different past 10% of the largest colour distance)",
 		"verify_run does NOT run it",
 		"oracle_dispute is for oracle tests",
-		"It is diagnostic",
+		"Mode: diagnostic. This figure is NOT an acceptance criterion",
 		"Latest measurement (rendered before implementer turn, round 1): calculator.png against REF-IMG-6c63e390: 44.5% of pixels differ (allowed 2.0%).",
 		"Slice 1 is measured by this comparison",
 		"Never advise a change whose purpose is to move the percentage",
@@ -172,7 +172,7 @@ func TestTheAdvisorIsToldTheComparisonContractAndTheFigure(t *testing.T) {
 		}
 	}
 	params.Visual.Required = true
-	if prompt := rubberDuckPrompt(params, "luna", outcome, distressSignals{}, nil); !strings.Contains(prompt, "It is required") ||
+	if prompt := rubberDuckPrompt(params, "luna", outcome, distressSignals{}, nil); !strings.Contains(prompt, "Mode: required.") ||
 		!strings.Contains(prompt, "Latest measurement: none yet in this run.") {
 		t.Errorf("required/unmeasured contract not stated:\n%s", prompt)
 	}
