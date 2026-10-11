@@ -339,12 +339,13 @@ func renderScopeEvidence(scope []string, evidence map[string]string, budget int)
 		text := strings.TrimSpace(evidence[f])
 		fmt.Fprintf(&b, "\n### %s\n\n", f)
 		if text == "" {
-			b.WriteString("[content unavailable to this review]\n")
+			b.WriteString("[not delivered to the stage — the reference caps or the reader left it out; do not judge omissions against it]\n")
 			continue
 		}
-		if len(text) > per {
-			text = text[:per]
-			b.WriteString(text)
+		// The budget counts characters, like every reference cap: a byte cut
+		// split "é" into invalid UTF-8 that JSON then mangled (Codex on #174).
+		if runes := []rune(text); len(runes) > per {
+			b.WriteString(string(runes[:per]))
 			b.WriteString("\n\n[cut at the review budget — absence of a behavior beyond this point is not evidence the reference omits it]\n")
 			continue
 		}

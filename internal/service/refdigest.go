@@ -211,7 +211,8 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string, rol
 	}
 	anyScope := false
 	for _, d := range digests {
-		if roleOf(d.Path) == RefRoleScope {
+		// Scope is announced only for scope content the prompt carries.
+		if roleOf(d.Path) == RefRoleScope && d.Unreadable == "" {
 			anyScope = true
 		}
 	}
@@ -288,7 +289,8 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		summarize := func(sctx context.Context, prompt string) (string, error) {
 			return s.refDigestCall(sctx, rs, architect, d.Model, d.Provider, d.Cost, p, prompt)
 		}
-		digests, derr2 := digestReferences(ctx, files, digestChunkChars(archCtx), d.Model, cacheDir, summarize, func(dg refDigest) {
+		// Scope first, like inline loading: the digest order is the prompt order.
+		digests, derr2 := digestReferences(ctx, scopeFirst(files, roleOf), digestChunkChars(archCtx), d.Model, cacheDir, summarize, func(dg refDigest) {
 			rs.writer.AppendEvent("reference_digested", map[string]interface{}{
 				"path": dg.Path, "chars": dg.Chars, "digest_chars": dg.DigestChars, "cached": dg.Cached,
 				"unreadable": dg.Unreadable,
@@ -311,6 +313,13 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		}
 		dropped = nil
 	}
+	// A scope reference that did not arrive whole is said, never silent
+	// (Codex on #174). Inline loading already wrote the note into its
+	// section; the digest section gets it here.
+	short := scopeShortfall(files, roleOf, loaded)
+	if mode == "digest" {
+		rendered += renderScopeShortfallNote(short)
+	}
 	unreadable = includedUnreadable(unreadable, loaded)
 	rs.writer.AppendEvent("references_loaded", map[string]interface{}{
 		"files": loaded, "dropped": dropped, "mode": mode, "unreadable": unreadable,
@@ -318,6 +327,7 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 	if len(unreadable) > 0 {
 		warnUnreadableRefs(rs, unreadable)
 	}
+	warnScopeShortfall(rs, short)
 	rs.armRefs(files, mode)
 	rs.setRefEvidence(loaded)
 	return rendered, nil

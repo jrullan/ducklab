@@ -161,14 +161,18 @@ func loadReferencesCached(ctx context.Context, refs []StageRef, caps config.Refe
 		return "", nil, nil, err
 	}
 	roleOf := refRoleOf(refs)
-	anyScope := false
-	for _, f := range files {
-		if roleOf(f) == RefRoleScope {
-			anyScope = true
-		}
-	}
+	// Scope files load first (Codex on #174): the caps used to apply in
+	// alphabetical order, so with max_files 1 `a-background.md` loaded and
+	// `z-scope.md` dropped — while the prompt still announced a SCOPE
+	// reference nobody received. The person's explicit target is the last
+	// thing a cap may evict.
+	files = scopeFirst(files, roleOf)
 
-	var b strings.Builder
+	type entry struct {
+		rf   refFile
+		body string
+	}
+	var entries []entry
 	total := 0
 	for _, f := range files {
 		if len(loaded) >= caps.MaxFiles || total >= caps.TotalChars {
@@ -180,13 +184,14 @@ func loadReferencesCached(ctx context.Context, refs []StageRef, caps config.Refe
 			dropped = append(dropped, f)
 			continue
 		}
+		role := ""
+		if roleOf(f) == RefRoleScope {
+			role = RefRoleScope
+		}
 		if !doc.Readable() {
-			fmt.Fprintf(&b, "\n### Reference: %s%s\n\n%s\n", f, refRoleLabel(roleOf(f), anyScope), doc.Notice())
-			uf := refFile{Path: f, Type: doc.Kind, Unreadable: doc.Notice(), text: doc.Notice()}
-			if roleOf(f) == RefRoleScope {
-				uf.Role = RefRoleScope
-			}
+			uf := refFile{Path: f, Type: doc.Kind, Unreadable: doc.Notice(), Role: role, text: doc.Notice()}
 			loaded = append(loaded, uf)
+			entries = append(entries, entry{rf: uf, body: doc.Notice()})
 			continue
 		}
 		// Caps count characters, so a cut never splits a rune.
@@ -200,24 +205,37 @@ func loadReferencesCached(ctx context.Context, refs []StageRef, caps config.Refe
 			text = text[:caps.TotalChars-total]
 			truncated = true
 		}
-		role := roleOf(f)
-		fmt.Fprintf(&b, "\n### Reference: %s%s\n\n%s\n", f, refRoleLabel(role, anyScope), strings.TrimSpace(string(text)))
-		if truncated {
-			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
-		}
 		total += len(text)
-		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, Pages: doc.Pages, text: strings.TrimSpace(string(text))}
+		body := strings.TrimSpace(string(text))
+		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, Pages: doc.Pages, Role: role, text: body}
 		if doc.Kind == reftext.KindPDF {
 			rf.Type = doc.Kind
 		}
-		if role == RefRoleScope {
-			rf.Role = RefRoleScope
-		}
 		loaded = append(loaded, rf)
+		entries = append(entries, entry{rf: rf, body: body})
 	}
 	if len(loaded) == 0 {
 		return "", loaded, dropped, nil
 	}
+	// The prompt announces scope only for scope content it actually carries.
+	anyScope := false
+	for _, e := range entries {
+		if e.rf.Role == RefRoleScope && e.rf.Unreadable == "" {
+			anyScope = true
+		}
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		role := RefRoleBackground
+		if e.rf.Role == RefRoleScope {
+			role = RefRoleScope
+		}
+		fmt.Fprintf(&b, "\n### Reference: %s%s\n\n%s\n", e.rf.Path, refRoleLabel(role, anyScope), e.body)
+		if e.rf.Truncated {
+			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
+		}
+	}
+	b.WriteString(renderScopeShortfallNote(scopeShortfall(files, roleOf, loaded)))
 	head := "\n\n## Reference documents\n\n" + refGuidance(stageName, anyScope)
 	return head + b.String(), loaded, dropped, nil
 }
