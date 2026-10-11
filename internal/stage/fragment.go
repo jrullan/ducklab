@@ -118,6 +118,7 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	if err != nil {
 		return nil, err
 	}
+	prompt = withRevisionContext(prompt, p)
 	script := newScript(p.Rounds)
 	budget := newRoundBudget(script)
 	var raw string
@@ -183,6 +184,7 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		if err != nil {
 			return nil, err
 		}
+		prompt = withRevisionContext(prompt, p)
 		prompt += compositionRepairContext(script.Amendment, artifact.RenderBody(proposed), mechanical, semantic,
 			"The outline above is your current candidate: sections you already changed and do not re-emit keep their current candidate text.")
 		script = newScript(left)

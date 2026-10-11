@@ -86,7 +86,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		if err != nil {
 			return nil, err
 		}
-		raw, err = p.Execute(ctx, soloPass(prefix, 0), triagePrompt)
+		raw, err = p.Execute(ctx, soloPass(prefix, 0), withRevisionContext(triagePrompt, p))
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			}
 			continue
 		}
-		prompt := buildSectionPassPrompt(kind, ask, sec)
+		prompt := withRevisionContext(buildSectionPassPrompt(kind, ask, sec), p)
 		enforceV2 := kind == artifact.KindPlan && (strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") ||
 			(strings.Contains(strings.ToLower(sec.Body), "**work unit:**") && strings.Contains(strings.ToLower(sec.Body), "**acceptance slices:**")))
 		script := sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2)
@@ -223,7 +223,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		prompt := buildNewSectionPassPrompt(kind, ask, &proposed, title, prefix)
+		prompt := withRevisionContext(buildNewSectionPassPrompt(kind, ask, &proposed, title, prefix), p)
 		var assigned *artifact.Section
 		if kind == artifact.KindPlan {
 			// T-900 is a wire placeholder. The merger assigns the real next id,
@@ -304,7 +304,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			script := sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2)
 			script.MaxRounds = left
 			script.Amendment = sectionGuard(base, &proposed, kind, sec.ID, ask, checkRemovals)
-			prompt := buildSectionPassPrompt(kind, ask, sec) +
+			prompt := withRevisionContext(buildSectionPassPrompt(kind, ask, sec), p) +
 				compositionRepairContext(script.Amendment, renderSectionMarkdown(*sec), mechanical, semantic,
 					"Only section `"+sec.ID+"` is yours in this pass; findings about other sections are repaired in their own passes. "+
 						"The section above is its current candidate text. If no finding concerns this section, answer UNCHANGED.")
