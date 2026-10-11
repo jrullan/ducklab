@@ -187,17 +187,26 @@ func digestReferences(ctx context.Context, files []string, chunkChars int, model
 }
 
 // renderRefDigests is the digest-mode reference section of a stage prompt.
-func renderRefDigests(digests []refDigest, totalChars int, stageName string) string {
+func renderRefDigests(digests []refDigest, totalChars int, stageName string, roleOf func(string) string) string {
+	if roleOf == nil {
+		roleOf = func(string) string { return RefRoleBackground }
+	}
+	anyScope := false
+	for _, d := range digests {
+		if roleOf(d.Path) == RefRoleScope {
+			anyScope = true
+		}
+	}
 	var b strings.Builder
 	b.WriteString("\n\n## Reference documents (digests)\n\n")
-	b.WriteString(refGuidance(stageName))
+	b.WriteString(refGuidance(stageName, anyScope))
 	fmt.Fprintf(&b, "The corpus (%d documents, %d chars) does not fit your context, so each "+
 		"document appears as a digest. The FULL text of every document is available: call "+
 		"the ref_read tool with the document's path whenever a section needs its exact "+
 		"detail — identifiers, rules, numbers. Do not guess detail a digest elides.\n",
 		len(digests), totalChars)
 	for _, d := range digests {
-		fmt.Fprintf(&b, "\n### Digest: %s (full text: %d chars — ref_read for detail)\n\n%s\n", d.Path, d.Chars, d.digest)
+		fmt.Fprintf(&b, "\n### Digest: %s%s (full text: %d chars — ref_read for detail)\n\n%s\n", d.Path, refRoleLabel(roleOf(d.Path), anyScope), d.Chars, d.digest)
 	}
 	return b.String()
 }
@@ -205,12 +214,13 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string) str
 // stageReferences loads a stage's references in whichever mode fits the
 // architect seat, emits the run's reference events, and arms ref_read.
 // Returns the rendered section to append to the seed.
-func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refPaths []string, architect config.DucklingID) (string, error) {
-	rendered, loaded, dropped, err := loadReferences(refPaths, projCfg.References, stageName)
+func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refs []StageRef, architect config.DucklingID) (string, error) {
+	rendered, loaded, dropped, err := loadReferences(refs, projCfg.References, stageName)
 	if err != nil {
 		return "", err
 	}
-	files, err := collectRefFiles(refPaths)
+	roleOf := refRoleOf(refs)
+	files, err := collectRefFiles(refPaths(refs))
 	if err != nil {
 		return "", err
 	}
@@ -249,10 +259,14 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		if derr2 != nil {
 			return "", derr2
 		}
-		rendered = renderRefDigests(digests, totalChars, stageName)
+		rendered = renderRefDigests(digests, totalChars, stageName, roleOf)
 		loaded = loaded[:0]
 		for _, dg := range digests {
-			loaded = append(loaded, refFile{Path: dg.Path, Chars: dg.Chars})
+			rf := refFile{Path: dg.Path, Chars: dg.Chars}
+			if roleOf(dg.Path) == RefRoleScope {
+				rf.Role = RefRoleScope
+			}
+			loaded = append(loaded, rf)
 		}
 		dropped = nil
 	}

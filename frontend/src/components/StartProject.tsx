@@ -13,6 +13,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, type EngineClient, type ProjectPreset, type ProjectStartResult } from "../api/client";
 import { canChooseDirectory, canChooseFile, chooseDirectory, chooseFile } from "../lib/picker";
+import { stageRefs } from "../lib/refroles";
+import { ReferenceRoles } from "./ReferenceRoles";
 
 const isImageRef = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
 
@@ -42,6 +44,8 @@ export function StartProject({
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [refsText, setRefsText] = useState("");
+  // Paths the person marked as scope (B-520); everything else is background.
+  const [scopeRefs, setScopeRefs] = useState<Set<string>>(new Set());
   const [needIdentity, setNeedIdentity] = useState(false);
   const [gitName, setGitName] = useState("");
   const [gitEmail, setGitEmail] = useState("");
@@ -82,7 +86,7 @@ export function StartProject({
         name: name.trim(),
         brief: brief.trim(),
         ...(path.trim() ? { path: path.trim() } : {}),
-        ...(refs.length ? { refs } : {}),
+        ...(refs.length ? { refs: stageRefs(refs, scopeRefs) } : {}),
         ...(preset ? { preset } : {}),
         ...(needIdentity ? { git_name: gitName.trim(), git_email: gitEmail.trim() } : {}),
       });
@@ -160,6 +164,20 @@ export function StartProject({
             </button>
           )}
         </div>
+        <ReferenceRoles
+          paths={refs}
+          scope={scopeRefs}
+          brief={brief}
+          testPrefix="start-refs"
+          onToggle={(path, on) =>
+            setScopeRefs((cur) => {
+              const next = new Set(cur);
+              if (on) next.add(path);
+              else next.delete(path);
+              return next;
+            })
+          }
+        />
       </div>
 
       <div className="space-y-1">

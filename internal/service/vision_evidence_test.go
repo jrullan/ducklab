@@ -278,7 +278,7 @@ func TestB515AStageArchitectWhoSawTheImageIsVerified(t *testing.T) {
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img}, Ducklings: []string{"pato-uno"},
+		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: backgroundRefs(img), Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestB515ARefutedArchitectIsNotSentTheImage(t *testing.T) {
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img}, Ducklings: []string{"pato-uno"},
+		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: backgroundRefs(img), Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
 		t.Fatal(err)

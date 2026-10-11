@@ -46,6 +46,9 @@ type refFile struct {
 	Path      string `json:"path"`
 	Chars     int    `json:"chars"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Role is "scope" when the person marked the reference as the intended
+	// product (B-520); empty is background.
+	Role string `json:"role,omitempty"`
 }
 
 // loadReferences expands the named paths (files, or directories searched
@@ -119,11 +122,18 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 	return b.String()
 }
 
-func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
+func loadReferences(refs []StageRef, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
 	caps = resolveRefCaps(caps)
-	files, err := collectRefFiles(paths)
+	files, err := collectRefFiles(refPaths(refs))
 	if err != nil {
 		return "", nil, nil, err
+	}
+	roleOf := refRoleOf(refs)
+	anyScope := false
+	for _, f := range files {
+		if roleOf(f) == RefRoleScope {
+			anyScope = true
+		}
 	}
 
 	var b strings.Builder
@@ -148,40 +158,21 @@ func loadReferences(paths []string, caps config.References, stageName string) (r
 			text = text[:caps.TotalChars-total]
 			truncated = true
 		}
-		fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, strings.TrimSpace(text))
+		role := roleOf(f)
+		fmt.Fprintf(&b, "\n### Reference: %s%s\n\n%s\n", f, refRoleLabel(role, anyScope), strings.TrimSpace(text))
 		if truncated {
 			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
 		}
 		total += len(text)
-		loaded = append(loaded, refFile{Path: f, Chars: len(text), Truncated: truncated})
+		rf := refFile{Path: f, Chars: len(text), Truncated: truncated}
+		if role == RefRoleScope {
+			rf.Role = RefRoleScope
+		}
+		loaded = append(loaded, rf)
 	}
 	if len(loaded) == 0 {
 		return "", loaded, dropped, nil
 	}
-	head := "\n\n## Reference documents\n\n" + refGuidance(stageName)
+	head := "\n\n## Reference documents\n\n" + refGuidance(stageName, anyScope)
 	return head + b.String(), loaded, dropped, nil
-}
-
-// refGuidance is stage-shaped. Intake's hardline ("never derive
-// requirements") exists because a bug-inbox snapshot once became fifteen
-// requirements — but read in a SPEC it told the architect to leave the
-// wiki's architecture, RBAC and audit detail out of the document, the
-// opposite of why the person attached it.
-func refGuidance(stageName string) string {
-	if stageName == "spec" || stageName == "plan" {
-		return "Provided by the person as design context. USE them: ground your sections in the " +
-			"detail they carry — architecture decisions, domain rules, exact identifiers, " +
-			"workflows — rather than restating the requirements more vaguely. Your document is " +
-			"judged against this detail: a section vaguer than the reference it draws on is " +
-			"unfinished. Two limits: the " +
-			"approved requirements define scope, so a reference's plans, wish lists or open " +
-			"problems never add sections; and where a reference and the code disagree, the code " +
-			"is the truth for as-built claims — note the disagreement instead of copying the claim.\n"
-	}
-	return "Provided by the person as BACKGROUND, not as scope. Where a reference and the code " +
-		"disagree, the code is the truth for as-built claims — note the disagreement instead of " +
-		"copying the claim. A reference that lists open problems, pending feedback, plans or " +
-		"wishes describes WORK, not the product: never derive requirements from it — the first " +
-		"survey of MiEmpresa turned a bug-inbox snapshot into fifteen requirements about its " +
-		"fourteen bugs. Requirements state what the system IS.\n"
 }

@@ -40,7 +40,7 @@ func TestSpecMaterializesDeclaredReferenceContractInsteadOfTrustingModelCopy(t *
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "spec", Mode: "solo", Refs: []string{refs},
+		Stage: "spec", Mode: "solo", Refs: backgroundRefs(refs),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestSpecGateMaterializesReferenceContractDespiteTypedProse(t *testing.T) {
 			Message: provider.Message{Role: "assistant", Content: text}, FinishReason: provider.FinishStop,
 		}}}
 	}
-	run, err := s.StageStart(context.Background(), projectID, StageRequest{Stage: "spec", Mode: "solo", Refs: []string{refs}})
+	run, err := s.StageStart(context.Background(), projectID, StageRequest{Stage: "spec", Mode: "solo", Refs: backgroundRefs(refs)})
 	if err != nil {
 		t.Fatal(err)
 	}

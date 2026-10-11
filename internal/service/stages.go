@@ -86,9 +86,11 @@ type StageRequest struct {
 	// loaded bounded into the prompt as context. They live where the
 	// ducklings' fs tools cannot reach (a wiki outside the project root),
 	// so the prompt is the one honest channel; the run records what was
-	// included and what the caps dropped.
-	Refs   []string `json:"refs,omitempty"`
-	Stream bool     `json:"stream"`
+	// included and what the caps dropped. Each carries its role (B-520):
+	// a plain path is background; {"path", "role": "scope"} marks a reference
+	// that describes the intended product the brief asks to build toward.
+	Refs   []StageRef `json:"refs,omitempty"`
+	Stream bool       `json:"stream"`
 	// resumed is set only by RunResume: the run keeps its recorded ceilings
 	// and its ledger continues from what it already spent.
 	resumed bool
@@ -621,29 +623,37 @@ func writeStageRequest(runDir string, req StageRequest) {
 // persisted. The project preset is part of every intake, not only the first
 // ProjectStart call, so a failed first model can be retried without silently
 // losing the selected delivery contract.
-func normalizeStageRefs(projectRoot, stageName string, refs []string) []string {
-	all := append([]string(nil), refs...)
+//
+// Roles ride along (B-520). A path named twice keeps one entry, and scope
+// wins over background: the explicit choice beats the default.
+func normalizeStageRefs(projectRoot, stageName string, refs []StageRef) []StageRef {
+	all := append([]StageRef(nil), refs...)
 	if stageName == "intake" {
 		preset := filepath.Join(projectRoot, ".ducklab", "preset.md")
 		if info, err := os.Stat(preset); err == nil && !info.IsDir() {
-			all = append(all, preset)
+			all = append(all, StageRef{Path: preset})
 		}
 	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(all))
+	seen := map[string]int{}
+	out := make([]StageRef, 0, len(all))
 	for _, ref := range all {
-		ref = strings.TrimSpace(ref)
-		if ref == "" {
+		path := strings.TrimSpace(ref.Path)
+		if path == "" {
 			continue
 		}
-		if ref != "~" && !strings.HasPrefix(ref, "~/") && !filepath.IsAbs(ref) {
-			ref = filepath.Join(projectRoot, ref)
+		if path != "~" && !strings.HasPrefix(path, "~/") && !filepath.IsAbs(path) {
+			path = filepath.Join(projectRoot, path)
 		}
-		ref = filepath.Clean(ref)
-		if !seen[ref] {
-			seen[ref] = true
-			out = append(out, ref)
+		path = filepath.Clean(path)
+		role, _ := normalizeRefRole(ref.Role)
+		if i, ok := seen[path]; ok {
+			if role == RefRoleScope {
+				out[i].Role = RefRoleScope
+			}
+			continue
 		}
+		seen[path] = len(out)
+		out = append(out, StageRef{Path: path, Role: role})
 	}
 	return out
 }
@@ -814,7 +824,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	var referenceContracts []capability.ReferenceContract
 	// Image references travel as images, not as text (B-457): an image path
 	// in Refs used to be read into the prompt as bytes.
-	textRefs, imageRefs := splitImageRefs(req.Refs)
+	textRefs, imageRefs := splitImageStageRefs(req.Refs)
+	referenceRoles := ""
 	if len(textRefs) > 0 {
 		refs, rerr := s.stageReferences(ctx, rs, projCfg, req.Stage, textRefs, roster[config.RoleArchitect])
 		if rerr != nil {
@@ -824,6 +835,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// References are prompt context, recorded by their own run evidence.
 		// They must not be folded into the person's verbatim Intent entry.
 		seed += refs
+		// The post-composition reviewer never sees the reference section;
+		// it is told each reference's role here instead (B-520).
+		referenceRoles = renderReferenceRolesForReview(rs.refFiles(), refRoleOf(textRefs), req.Stage)
 		referenceContracts, rerr = loadReferenceContracts(rs.refFiles())
 		if rerr != nil {
 			s.failRun(rs, fmt.Errorf("reference contracts: %w", rerr))
@@ -993,6 +1007,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		SplitTask:          req.SplitTask,
 		Images:             images,
 		ReferenceContracts: referenceContracts,
+		ReferenceRoles:     referenceRoles,
 		// A small architect gets the engine as its working memory: below
 		// 64k of declared context, document updates run sectioned — one
 		// triage pass, then one fresh conversation per touched section.

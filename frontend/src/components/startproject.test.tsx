@@ -24,6 +24,23 @@ describe("StartProject", () => {
     });
   });
 
+  // B-520: a guidebook the person marks as scope is sent with its role;
+  // the rest stay plain (background) paths.
+  it("sends a reference marked scope with its role", async () => {
+    const projectStart = vi.fn(() => Promise.resolve(started));
+    render(<StartProject client={{ projectStart } as unknown as EngineClient} onStarted={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("start-brief"), { target: { value: "Match the manual." } });
+    fireEvent.change(screen.getByTestId("start-name"), { target: { value: "TI-36X" } });
+    fireEvent.change(screen.getByTestId("start-refs"), { target: { value: "/m/guide.md\n/m/notes.md" } });
+    expect(screen.getByTestId("start-refs-scope-hint")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId("start-refs-scope")[0]!);
+    fireEvent.click(screen.getByTestId("start-submit"));
+    await waitFor(() => expect(projectStart).toHaveBeenCalled());
+    expect(projectStart).toHaveBeenCalledWith({
+      name: "TI-36X", brief: "Match the manual.", refs: [{ path: "/m/guide.md", role: "scope" }, "/m/notes.md"],
+    });
+  });
+
   // B-463: asked once, in plain words, and sent with the retry.
   it("asks for a git identity when the machine has none, then retries with it", async () => {
     const projectStart = vi.fn()
