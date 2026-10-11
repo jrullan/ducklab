@@ -92,7 +92,7 @@ func TestDigestReferencesCachesByContent(t *testing.T) {
 // the digest is the floor, the tool is the ceiling.
 func TestRenderRefDigestsNamesTheTool(t *testing.T) {
 	digests := []refDigest{{Path: "/w/rbac.md", Chars: 33_578, DigestChars: 20, digest: "module-first permissions"}}
-	got := renderRefDigests(digests, 256_000, "spec")
+	got := renderRefDigests(digests, 256_000, "spec", nil)
 	for _, want := range []string{"ref_read", "module-first permissions", "/w/rbac.md", "full text: 33578 chars", "USE them"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("digest section lacks %q", want)

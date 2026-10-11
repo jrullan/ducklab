@@ -727,6 +727,35 @@ describe("Cycle — starting a stage", () => {
     );
   });
 
+  // B-520: each document reference has a scope toggle; the launch carries
+  // the person's choice, and a brief that targets a guide gets a hint —
+  // never a silent guess.
+  it("marks a reference as scope and hints when the brief targets a guide", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    fireEvent.change(screen.getByTestId("cycle-brief"), {
+      target: { value: "Use this guide to fill in the gap between the implemented and the intended functionality." },
+    });
+    fireEvent.click(screen.getByTestId("cycle-refs-door"));
+    fireEvent.change(screen.getByTestId("cycle-refs"), {
+      target: { value: "~/manuals/ti36x-guidebook.md\n~/notes/bugs.md\n~/Pictures/front.png" },
+    });
+    const toggles = screen.getAllByTestId("cycle-refs-scope");
+    // Images travel as images: no toggle for them.
+    expect(toggles.map((t) => t.getAttribute("data-path"))).toEqual(["~/manuals/ti36x-guidebook.md", "~/notes/bugs.md"]);
+    expect(toggles.every((t) => !(t as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getByTestId("cycle-refs-scope-hint")).toHaveTextContent("mark it as scope");
+    fireEvent.click(toggles[0]!);
+    expect(screen.queryByTestId("cycle-refs-scope-hint")).toBeNull();
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({
+        refs: [{ path: "~/manuals/ti36x-guidebook.md", role: "scope" }, "~/notes/bugs.md", "~/Pictures/front.png"],
+      })),
+    );
+  });
+
   // B-457: a pixel-perfect request needs its visual source of truth.
   it("accepts image references and says what happens to them", async () => {
     const c = client();

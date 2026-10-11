@@ -23,6 +23,8 @@ import { IntentChain } from "../components/IntentChain";
 import type { RevisionNote } from "../lib/retry";
 import { SurveyCoverageLine } from "../components/SurveyInventory";
 import { canChooseFile, chooseFile } from "../lib/picker";
+import { stageRefs } from "../lib/refroles";
+import { ReferenceRoles } from "../components/ReferenceRoles";
 import { routeHref } from "../app/routes";
 import { SideDrawer } from "../components/SideDrawer";
 
@@ -90,6 +92,8 @@ export function Cycle({
   // filled in references was led straight past the survey.
   const [intakePath, setIntakePath] = useState<"adopt" | "brief" | null>(null);
   const [refsOpen, setRefsOpen] = useState(false);
+  // Paths the person marked as scope (B-520); everything else is background.
+  const [scopeRefs, setScopeRefs] = useState<Set<string>>(new Set());
   const refsList = () => refsText.split("\n").map((l) => l.trim()).filter(Boolean);
   const isImageRef = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
   async function pickReferenceFile() {
@@ -467,7 +471,7 @@ export function Cycle({
         adopt,
         ducklings,
         agentTurns: stageAgentTurns(),
-        ...(refsList().length ? { refs: refsList() } : {}),
+        ...(refsList().length ? { refs: stageRefs(refsList(), scopeRefs) } : {}),
       });
       setStartedRun(run.id);
       setBrief("");
@@ -1069,7 +1073,7 @@ export function Cycle({
                 ) : (
                   <>
                     <label className="mb-1 block text-xs text-ink-muted" htmlFor="cycle-refs">
-                      references — paths to .md/.txt files or folders, or images
+                      references — paths to .md/.txt/.pdf files or folders, or images
                       (.png/.jpg/.webp/.gif) of what it should look like, one per line
                       (documents load bounded into the prompt; the run records what was included)
                     </label>
@@ -1094,6 +1098,20 @@ export function Cycle({
                         </button>
                       )}
                     </div>
+                    <ReferenceRoles
+                      paths={refsList()}
+                      scope={scopeRefs}
+                      brief={brief}
+                      testPrefix="cycle-refs"
+                      onToggle={(path, on) =>
+                        setScopeRefs((cur) => {
+                          const next = new Set(cur);
+                          if (on) next.add(path);
+                          else next.delete(path);
+                          return next;
+                        })
+                      }
+                    />
                     {/* B-457: a visual requirement needs a visual source of
                         truth. Say what happens to an image before the run. */}
                     {refsList().some(isImageRef) && (

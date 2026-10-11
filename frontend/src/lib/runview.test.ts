@@ -708,6 +708,23 @@ describe("the announced test-first gate", () => {
     ]);
     expect(turns[0]!.text).toContain("full text in the prompt");
   });
+  // B-519: an unreadable reference is said in the lane, one block per file,
+  // in the words the model saw.
+  it("names each unreadable reference after the load line", () => {
+    const notice = "notes.docx: unreadable binary reference (Word document, 3 KB); its content is not text and cannot be extracted; ask the person for a text or PDF version";
+    const turns = buildTurns([
+      ev("references_loaded", {
+        files: [{ path: "/w/guide.pdf", chars: 78542, type: "pdf", pages: 83 }, { path: "/w/notes.docx", chars: 0, unreadable: notice }],
+        mode: "inline",
+        unreadable: [{ path: "/w/notes.docx", type: "Word document", bytes: 3000, reason: "its content is not text", notice }],
+      }, 1),
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.role).toBe("refs");
+    expect(turns[0]!.text).toContain("78,542 chars");
+    expect(turns[1]!.role).toBe("refs-warning");
+    expect(turns[1]!.text).toBe(notice);
+  });
   it("opens on gate_started with the phase's words and closes on the gate event", () => {
     const turns = buildTurns([
       ev("gate_started", { phase: "before", detail: "running the suite before any test is written — a red test only means something against a green baseline" }, 1),

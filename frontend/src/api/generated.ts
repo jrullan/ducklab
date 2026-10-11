@@ -1037,7 +1037,7 @@ export interface ServiceProjectStartRequest {
   name?: string;
   path?: string;
   preset?: string;
-  refs?: string[];
+  refs?: ServiceStageRef[];
 }
 
 export interface ServiceProjectStartResult {
@@ -1165,6 +1165,8 @@ export interface ServiceSkillSummary {
   version?: number;
 }
 
+export type ServiceStageRef = string | { path: string; role?: "scope" | "background" };
+
 export interface ServiceStageRequest {
   adopt?: boolean;
   agent_turns?: number;
@@ -1174,7 +1176,7 @@ export interface ServiceStageRequest {
   from?: string;
   images?: string[];
   mode?: string;
-  refs?: string[];
+  refs?: ServiceStageRef[];
   revise?: string;
   revise_findings?: string;
   revises_run?: string;

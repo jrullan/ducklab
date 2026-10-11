@@ -27,7 +27,7 @@ func settled(t *testing.T, s *Service, runID string) {
 // parent.
 func TestAStaleTabCannotReviseAnAlreadyRevisedRun(t *testing.T) {
 	s, projectID, root, guide := revisionChainProject(t)
-	r0 := startAndSettle(t, s, projectID, StageRequest{Stage: "intake", Mode: "solo", Refs: []string{guide}, From: "Fill the gap."})
+	r0 := startAndSettle(t, s, projectID, StageRequest{Stage: "intake", Mode: "solo", Refs: backgroundRefs(guide), From: "Fill the gap."})
 	r1 := startAndSettle(t, s, projectID, StageRequest{Stage: "intake", RevisesRun: r0.ID, Revise: "first correction"})
 
 	_, err := s.StageStart(context.Background(), projectID, StageRequest{Stage: "intake", RevisesRun: r0.ID, Revise: "from the old tab"})

@@ -107,7 +107,7 @@ func intakeChainOfThree(t *testing.T) (*Service, string, string, string, []*runl
 	t.Helper()
 	s, projectID, root, guide := revisionChainProject(t)
 	first := startAndSettle(t, s, projectID, StageRequest{
-		Stage: "intake", Mode: "solo", Rounds: 2, Refs: []string{guide},
+		Stage: "intake", Mode: "solo", Rounds: 2, Refs: backgroundRefs(guide),
 		From: "Fill the gap between the implemented and the intended calculator.",
 	})
 	// Revision 1: only the reviewer's findings, forwarded.
@@ -181,7 +181,7 @@ func TestIntakeRevisionChainStaysUnderOneIntentAndInheritsTheJob(t *testing.T) {
 	// The job carries over: references (wholesale), brief, mode, rounds.
 	for _, run := range []*runlog.Run{r1, r2, r3} {
 		req := persistedStageRequest(t, root, run.ID)
-		if !slices.Contains(req.Refs, guide) || !slices.Contains(req.Refs, filepath.Join(root, ".ducklab", "preset.md")) {
+		if !slices.Contains(refPaths(req.Refs), guide) || !slices.Contains(refPaths(req.Refs), filepath.Join(root, ".ducklab", "preset.md")) {
 			t.Fatalf("%s refs = %v, want the guidebook inherited beside the preset", run.ID, req.Refs)
 		}
 		if req.Mode != "solo" || req.Rounds != 2 {
@@ -277,7 +277,7 @@ func TestDocumentRevisionsInheritRefsModeAndRounds(t *testing.T) {
 				t.Fatal(err)
 			}
 			w.Close()
-			parentRefs := []string{"/refs/guidebook.pdf", "/refs/preset.md"}
+			parentRefs := []StageRef{{Path: "/refs/guidebook.pdf", Role: RefRoleScope}, {Path: "/refs/preset.md"}}
 			writeStageRequest(filepath.Join(root, ".ducklab", "runs", parentID), StageRequest{
 				Stage: stageName, Mode: "sectioned", Rounds: 3, Refs: parentRefs, From: "the brief",
 			})
@@ -308,11 +308,11 @@ func TestDocumentRevisionsInheritRefsModeAndRounds(t *testing.T) {
 			}
 
 			// The person's own choices win.
-			override := StageRequest{Stage: stageName, Revise: "again", RevisesRun: parentID, Refs: []string{"/refs/other.md"}, Mode: "solo", Rounds: 1}
+			override := StageRequest{Stage: stageName, Revise: "again", RevisesRun: parentID, Refs: backgroundRefs("/refs/other.md"), Mode: "solo", Rounds: 1}
 			if _, err := s.prepareRevision(root, projectID, &override); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(override.Refs, []string{"/refs/other.md"}) || override.Mode != "solo" || override.Rounds != 1 {
+			if !slices.Equal(override.Refs, backgroundRefs("/refs/other.md")) || override.Mode != "solo" || override.Rounds != 1 {
 				t.Fatalf("override lost: refs %v mode %q rounds %d", override.Refs, override.Mode, override.Rounds)
 			}
 

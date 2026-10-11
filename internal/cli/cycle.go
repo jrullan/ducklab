@@ -37,7 +37,7 @@ func stageCmd(stage string, args []string, repo string) int {
 	supportProfile := ""
 	rounds := 0
 	adopt := false
-	var refs []string
+	var refs, scopeRefs []string
 	sub := ""
 	var revArgs []string
 	for i := 0; i < len(args); i++ {
@@ -66,6 +66,17 @@ func stageCmd(stage string, args []string, repo string) int {
 				return 2
 			}
 			refs = append(refs, args[i+1])
+			i++
+		case "--ref-scope":
+			// Repeatable (B-520): a reference that describes the product the
+			// brief asks to build — "implement what this guide describes".
+			// Intake derives requirements from it and may lift exclusions;
+			// a plain --ref stays background.
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --ref-scope needs a file or directory")
+				return 2
+			}
+			scopeRefs = append(scopeRefs, args[i+1])
 			i++
 		case "--adopt":
 			// Intake only, and the engine enforces it: a survey of the tree
@@ -105,7 +116,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--adopt] [--mode council|solo] [--support-profile auto|small|standard] [--rounds N] [--yes]\n"+
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--ref-scope FILE|DIR]... [--adopt] [--mode council|solo] [--support-profile auto|small|standard] [--rounds N] [--yes]\n"+
 				"       ducklab %s accept|reject|diff\n"+
 				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
@@ -125,8 +136,8 @@ func stageCmd(stage string, args []string, repo string) int {
 	if from != "" {
 		req["from"] = from
 	}
-	if len(refs) > 0 {
-		req["refs"] = refs
+	if refList := cliStageRefs(refs, scopeRefs); len(refList) > 0 {
+		req["refs"] = refList
 	}
 	if yes {
 		req["autonomy"] = "auto"
@@ -767,4 +778,17 @@ func bugCmd(verb string, args []string, repo string) int {
 		fmt.Fprintln(os.Stderr, "       ducklab bug status <id> <status>")
 		return 2
 	}
+}
+
+// cliStageRefs is the request's reference list: --ref paths as plain strings
+// (background) and --ref-scope paths as {"path", "role": "scope"} (B-520).
+func cliStageRefs(background, scope []string) []interface{} {
+	var out []interface{}
+	for _, p := range background {
+		out = append(out, p)
+	}
+	for _, p := range scope {
+		out = append(out, map[string]string{"path": p, "role": "scope"})
+	}
+	return out
 }

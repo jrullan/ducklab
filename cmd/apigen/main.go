@@ -87,7 +87,14 @@ func renderTS(doc map[string]any) string {
 
 	for _, name := range names {
 		schema, _ := schemas[name].(map[string]any)
-		b.WriteString(renderInterface(name, schema))
+		if isUnion(schema) {
+			// A DTO with two accepted wire shapes (service.StageRef) is a
+			// type alias, not an interface: an interface could only describe
+			// one of them.
+			fmt.Fprintf(&b, "export type %s = %s;\n", name, tsType(schema))
+		} else {
+			b.WriteString(renderInterface(name, schema))
+		}
 		b.WriteString("\n")
 	}
 
@@ -134,9 +141,31 @@ func tsKey(k string) string {
 	return k
 }
 
+// isUnion reports a schema that is a oneOf or an enum rather than an object.
+func isUnion(p map[string]any) bool {
+	_, oneOf := p["oneOf"].([]any)
+	_, enum := p["enum"].([]any)
+	return oneOf || enum
+}
+
 func tsType(p map[string]any) string {
 	if ref, ok := p["$ref"].(string); ok {
 		return ref[strings.LastIndex(ref, "/")+1:]
+	}
+	if variants, ok := p["oneOf"].([]any); ok {
+		parts := make([]string, 0, len(variants))
+		for _, v := range variants {
+			vm, _ := v.(map[string]any)
+			parts = append(parts, tsVariant(vm))
+		}
+		return strings.Join(parts, " | ")
+	}
+	if values, ok := p["enum"].([]any); ok {
+		parts := make([]string, 0, len(values))
+		for _, v := range values {
+			parts = append(parts, fmt.Sprintf("%q", fmt.Sprint(v)))
+		}
+		return strings.Join(parts, " | ")
 	}
 	switch p["type"] {
 	case "string":
@@ -235,4 +264,34 @@ func schemaTypeOf(content any) string {
 func asSlice(v any) []any {
 	s, _ := v.([]any)
 	return s
+}
+
+// tsVariant renders one oneOf member. An object member is written inline with
+// its properties: it has no name of its own to reference.
+func tsVariant(p map[string]any) string {
+	props, ok := p["properties"].(map[string]any)
+	if !ok || p["type"] != "object" {
+		return tsType(p)
+	}
+	required := map[string]bool{}
+	if list, ok := p["required"].([]any); ok {
+		for _, r := range list {
+			required[fmt.Sprint(r)] = true
+		}
+	}
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fields := make([]string, 0, len(keys))
+	for _, k := range keys {
+		pm, _ := props[k].(map[string]any)
+		opt := "?"
+		if required[k] {
+			opt = ""
+		}
+		fields = append(fields, fmt.Sprintf("%s%s: %s", tsKey(k), opt, tsType(pm)))
+	}
+	return "{ " + strings.Join(fields, "; ") + " }"
 }

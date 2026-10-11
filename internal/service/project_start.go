@@ -31,8 +31,10 @@ type ProjectStartRequest struct {
 	Path string `json:"path,omitempty"`
 	// Brief is what to build. Empty starts the intake as an interview.
 	Brief string `json:"brief"`
-	// Refs are reference documents or images (B-457).
-	Refs []string `json:"refs,omitempty"`
+	// Refs are reference documents or images (B-457). Each is a plain path
+	// (background) or {"path", "role": "scope"} when it describes the product
+	// the brief asks to build (B-520).
+	Refs []StageRef `json:"refs,omitempty"`
 	// Preset sets up a kind of project (B-459): "web-page", "web-app", or
 	// empty for none.
 	Preset string `json:"preset,omitempty"`
@@ -172,7 +174,7 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		return nil, err
 	}
 	out := &ProjectStartResult{Project: project}
-	refs := append([]string(nil), req.Refs...)
+	refs := append([]StageRef(nil), req.Refs...)
 	setup := "project setup"
 	if preset.ID != "" {
 		// Serialised: two starts at once must not both pick the same port.
@@ -182,7 +184,7 @@ func (s *Service) ProjectStart(ctx context.Context, req ProjectStartRequest) (*P
 		if err != nil {
 			return nil, fmt.Errorf("preset %s: %w", preset.ID, err)
 		}
-		refs = append(refs, ref)
+		refs = append(refs, StageRef{Path: ref})
 		setup = "project setup: " + preset.ID
 	}
 	// The setup is versioned at once (reviews of #121/#122): project.toml

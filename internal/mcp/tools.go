@@ -149,15 +149,17 @@ func toolList() []map[string]interface{} {
 			"name": "project_start",
 			"description": "Start a new project from an idea: creates the project folder (default ~/Ducklab/<name>), git, and starts the intake run that drafts the requirements. " +
 				"Pass the person's own words as `brief`; reference documents or images (.png/.jpg/.webp/.gif) as `refs`. " +
+				"When the person says a document describes what to BUILD (\"implement this guide\", \"match the manual\"), pass that path in `scope_refs` instead of `refs`. " +
 				"If it answers git_identity_required, ask the person for the name and email to record in THIS project's git config and call again with git_name and git_email.",
 			"inputSchema": obj(map[string]interface{}{
-				"name":      str("project name"),
-				"brief":     str("what to build, in the person's words (empty starts an interview)"),
-				"path":      str("absolute folder (optional; default ~/Ducklab/<name>)"),
-				"refs":      map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reference documents or images"},
-				"git_name":  str("git user.name for this project only, when asked"),
-				"git_email": str("git user.email for this project only, when asked"),
-				"preset":    str("optional kind of project: web-page (one self-contained index.html served locally) or web-app (several files, no build step)"),
+				"name":       str("project name"),
+				"brief":      str("what to build, in the person's words (empty starts an interview)"),
+				"path":       str("absolute folder (optional; default ~/Ducklab/<name>)"),
+				"refs":       map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND reference documents or images: context only — they never add requirements"},
+				"scope_refs": scopeRefsProp(),
+				"git_name":   str("git user.name for this project only, when asked"),
+				"git_email":  str("git user.email for this project only, when asked"),
+				"preset":     str("optional kind of project: web-page (one self-contained index.html served locally) or web-app (several files, no build step)"),
 			}, "name"),
 		},
 		{
@@ -229,8 +231,9 @@ func toolList() []map[string]interface{} {
 				"adopt":           map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
 				"revise":          str("optional: what to change about the stage's current draft — the retry of a failed or rejected intake/spec/plan run, with its redo note. The person's own words only; put reviewer findings in revise_findings"),
 				"revise_findings": str("optional, with a revision: reviewer findings carried over from the previous draft, kept apart from the person's note and labelled as the reviewer's (B-521)"),
-				"revises_run":     str("optional, with a revision: the run whose draft this revises (default: the run that wrote the proposal on the table). The revision inherits its references, brief, mode and rounds and, for intake, continues its intent"),
-				"refs":            map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "absolute paths: .md/.txt documents or directories (loaded bounded into the prompt), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
+				"revises_run":     str("optional, with a revision: the run whose draft this revises (default: the run that wrote the proposal on the table). The revision inherits its references (roles included), brief, mode and rounds and, for intake, continues its intent"),
+				"refs":            map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND references — absolute paths: .md/.txt/.pdf documents or directories (loaded bounded into the prompt as context — PDFs as their extracted text, and a binary the engine cannot read reaches the model only as a notice and warns the run; they never add requirements), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
+				"scope_refs":      scopeRefsProp(),
 			}, "project_id", "stage"),
 		},
 		{
@@ -671,7 +674,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			"name": a.str("name"), "brief": a.str("brief"), "path": a.str("path"),
 			"git_name": a.str("git_name"), "git_email": a.str("git_email"), "preset": a.str("preset"),
 		}
-		if refs, ok := a["refs"].([]interface{}); ok {
+		if refs := stageRefsArg(a); len(refs) > 0 {
 			req["refs"] = refs
 		}
 		out, err := s.eng.ProjectStart(req)
@@ -858,7 +861,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if parent := strings.TrimSpace(a.str("revises_run")); parent != "" {
 			req["revises_run"] = parent
 		}
-		if refs, ok := a["refs"].([]interface{}); ok && len(refs) > 0 {
+		if refs := stageRefsArg(a); len(refs) > 0 {
 			req["refs"] = refs
 		}
 		copyRunOverrides(req, a)
@@ -1277,4 +1280,35 @@ func newerRun(a, b map[string]interface{}) bool {
 		return as > bs
 	}
 	return fmt.Sprint(a["id"]) > fmt.Sprint(b["id"])
+}
+
+// scopeRefsProp is the MCP field for references the person marked as SCOPE
+// (B-520). A separate list, not a per-item role, because a small operator
+// copies a path into the right list far more reliably than it builds objects.
+func scopeRefsProp() map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "array",
+		"items": map[string]interface{}{"type": "string"},
+		"description": "SCOPE references — absolute paths to documents that describe the product the person wants built " +
+			"(\"use this guide to fill the gap\", \"implement what the manual describes\"). The architect derives requirements " +
+			"from them and may lift exclusions with traceability. Only list a document here when the person said so; " +
+			"if unsure, ask the person — do not guess. Every other reference goes in refs.",
+	}
+}
+
+// stageRefsArg merges refs (background, plain paths) and scope_refs into the
+// engine's reference list, where a scope reference is {"path", "role"}.
+func stageRefsArg(a args) []interface{} {
+	var out []interface{}
+	if refs, ok := a["refs"].([]interface{}); ok {
+		out = append(out, refs...)
+	}
+	if scope, ok := a["scope_refs"].([]interface{}); ok {
+		for _, r := range scope {
+			if p, ok := r.(string); ok && strings.TrimSpace(p) != "" {
+				out = append(out, map[string]interface{}{"path": p, "role": "scope"})
+			}
+		}
+	}
+	return out
 }
