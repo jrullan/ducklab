@@ -15,6 +15,20 @@ function turn(role: string): TurnBlock {
   };
 }
 
+// B-519: the lane shows the notice the model saw instead of the reference.
+describe("ConversationTurn unreadable reference", () => {
+  it("renders the notice as an alert, not a quiet divider", () => {
+    const block = turn("refs-warning");
+    block.text = "notes.docx: unreadable binary reference (Word document, 3 KB); its content is not text and cannot be extracted; ask the person for a text or PDF version";
+    render(<ConversationTurn block={block} roster={[]} />);
+    const alert = screen.getByTestId("refs-unreadable");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent("Reference not read");
+    expect(alert).toHaveTextContent("notes.docx: unreadable binary reference (Word document, 3 KB)");
+    expect(screen.queryByTestId("refs-divider")).not.toBeInTheDocument();
+  });
+});
+
 describe("ConversationTurn avatars", () => {
   it("renders the current human avatar, not the legacy person icon, for human transcript turns", () => {
     render(<ConversationTurn block={turn("human")} roster={[]} />);

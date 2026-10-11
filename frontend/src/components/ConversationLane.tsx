@@ -73,6 +73,15 @@ export function ConversationTurn({
       </div>
     );
   }
+  if (block.role === "refs-warning") {
+    // B-519: the model saw only this notice in place of the reference.
+    return (
+      <div data-testid="refs-unreadable" role="alert" className="my-2 rounded-card border border-serious px-3 py-2 text-sm">
+        <span className="font-medium" style={{ color: statusVar("serious") }}>⚠ Reference not read · </span>
+        <span className="text-ink">{block.text}</span>
+      </div>
+    );
+  }
   if (block.role === "switch") {
     return (
       <div data-testid="consultant-switch-divider" className="my-2 flex items-center gap-2 text-xs text-ink-muted" role="separator">

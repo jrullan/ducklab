@@ -9,6 +9,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/reftext"
 )
 
 // Reference documents for a document stage.
@@ -43,16 +44,33 @@ func resolveRefCaps(caps config.References) config.References {
 
 // refFile is one loaded reference, for the record.
 type refFile struct {
-	Path      string `json:"path"`
-	Chars     int    `json:"chars"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Path string `json:"path"`
+	// Chars counts characters of the text the model got — a PDF's
+	// extraction, never the file's bytes (B-519).
+	Chars     int  `json:"chars"`
+	Truncated bool `json:"truncated,omitempty"`
+	// Type is "pdf" for an extracted PDF; empty for plain text.
+	Type  string `json:"type,omitempty"`
+	Pages int    `json:"pages,omitempty"`
+	// Unreadable is the notice the model saw in place of a binary reference
+	// that could not be extracted.
+	Unreadable string `json:"unreadable,omitempty"`
+}
+
+// refUnreadable is one reference the model could not read, for the warning.
+type refUnreadable struct {
+	Path   string `json:"path"`
+	Type   string `json:"type"`
+	Bytes  int64  `json:"bytes"`
+	Reason string `json:"reason"`
+	Notice string `json:"notice"`
 }
 
 // loadReferences expands the named paths (files, or directories searched
-// recursively for .md and .txt), loads them under the caps, and renders the
+// recursively for .md, .txt, .json and .pdf), loads them under the caps, and renders the
 // section a stage prompt carries. dropped names what the caps excluded.
 // collectRefFiles expands the named paths — files, or directories searched
-// recursively for .md/.txt — into the sorted file list both modes share.
+// recursively for .md/.txt/.json/.pdf — into the sorted file list both modes share.
 func collectRefFiles(paths []string) ([]string, error) {
 	var files []string
 	for _, p := range paths {
@@ -78,7 +96,7 @@ func collectRefFiles(paths []string) ([]string, error) {
 				return werr
 			}
 			switch strings.ToLower(filepath.Ext(path)) {
-			case ".md", ".txt", ".json":
+			case ".md", ".txt", ".json", ".pdf":
 				files = append(files, path)
 			}
 			return nil
@@ -120,6 +138,15 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 }
 
 func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
+	return loadReferencesCached(paths, caps, stageName, "")
+}
+
+// loadReferencesCached is loadReferences with the PDF extraction cache.
+// Every file goes through reftext (B-519): a PDF travels as its extracted
+// text, and a binary that cannot be extracted travels as a notice — it used
+// to travel as its bytes, and a guidebook reached the architect as PDF
+// object syntax.
+func loadReferencesCached(paths []string, caps config.References, stageName, cacheDir string) (rendered string, loaded []refFile, dropped []string, err error) {
 	caps = resolveRefCaps(caps)
 	files, err := collectRefFiles(paths)
 	if err != nil {
@@ -133,12 +160,18 @@ func loadReferences(paths []string, caps config.References, stageName string) (r
 			dropped = append(dropped, f)
 			continue
 		}
-		raw, rerr := os.ReadFile(f)
+		doc, rerr := reftext.Load(f, cacheDir)
 		if rerr != nil {
 			dropped = append(dropped, f)
 			continue
 		}
-		text := string(raw)
+		if !doc.Readable() {
+			fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, doc.Notice())
+			loaded = append(loaded, refFile{Path: f, Type: doc.Kind, Unreadable: doc.Notice()})
+			continue
+		}
+		// Caps count characters, so a cut never splits a rune.
+		text := []rune(doc.Text)
 		truncated := false
 		if len(text) > caps.PerFileChars {
 			text = text[:caps.PerFileChars]
@@ -148,12 +181,16 @@ func loadReferences(paths []string, caps config.References, stageName string) (r
 			text = text[:caps.TotalChars-total]
 			truncated = true
 		}
-		fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, strings.TrimSpace(text))
+		fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, strings.TrimSpace(string(text)))
 		if truncated {
 			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
 		}
 		total += len(text)
-		loaded = append(loaded, refFile{Path: f, Chars: len(text), Truncated: truncated})
+		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, Pages: doc.Pages}
+		if doc.Kind == reftext.KindPDF {
+			rf.Type = doc.Kind
+		}
+		loaded = append(loaded, rf)
 	}
 	if len(loaded) == 0 {
 		return "", loaded, dropped, nil
