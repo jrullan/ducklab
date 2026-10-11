@@ -268,6 +268,12 @@ func (s *Service) prepareRevision(projectRoot, projectID string, req *StageReque
 	return plan, nil
 }
 
+// revisionCrashPoint marks the two boundaries of a revision's launch that an
+// engine death must not corrupt: the child's prepared record written but the
+// parent unclaimed, and the parent claimed but the child not yet running.
+// A no-op in the engine; tests stop the launch there to exercise recovery.
+var revisionCrashPoint = func(string) {}
+
 // revisedByPattern finds the revision that already claimed a run.
 var revisedByPattern = regexp.MustCompile(`\(revised by (r-[A-Za-z0-9-]+)\)`)
 
@@ -604,7 +610,15 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		run.RosterSources[string(role)] = "request"
 	}
 
-	setRunStatus(run, "running", time.Now())
+	// A revision is written PREPARED until its parent is claimed (review of
+	// #175): an engine that dies between this record and the claim leaves a
+	// child that recovery never reactivates — it reconciles it against the
+	// parent's durable "revised by" instead (reconcilePreparedRevision).
+	if req.Revision != nil {
+		setRunStatus(run, runStatusPrepared, time.Now())
+	} else {
+		setRunStatus(run, "running", time.Now())
+	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
@@ -620,10 +634,17 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		_ = json.Unmarshal(data, &run.StageRequest)
 	}
 	if req.Revision != nil {
+		revisionCrashPoint("before-claim")
 		if err := s.claimRevisionParent(entry.Path, req, revising, runID); err != nil {
 			discardUnstartedRun(writer)
 			return nil, err
 		}
+		revisionCrashPoint("after-claim")
+		// Claimed: the parent's record names this run, so it is real. A failed
+		// write here is harmless — the in-memory run proceeds, and recovery
+		// finalizes a prepared child its parent names.
+		setRunStatus(run, "running", time.Now())
+		_ = writer.WriteState()
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs := &runState{
@@ -1048,10 +1069,21 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	} else if strings.TrimSpace(req.Revise) != "" {
 		intentText = req.Revise
 	}
-	if req.Stage == "intake" && !req.Adopt && !req.resumed {
-		if err := s.recordStageIntent(rs, projectRoot, req, intentText); err != nil {
-			s.failRun(rs, err)
-			return
+	if req.Stage == "intake" && !req.Adopt {
+		if !req.resumed {
+			if err := s.recordStageIntent(rs, projectRoot, req, intentText); err != nil {
+				s.failRun(rs, err)
+				return
+			}
+		} else if req.Revision != nil && req.Revision.Intent != "" {
+			// A revision finalized by recovery resumes without ever having
+			// started: its journal entry is still owed. Idempotent per run;
+			// a resumed run never fails over its provenance.
+			if id, _ := artifact.IntentIDForRun(projectRoot, rs.run.ID); id == "" {
+				if err := s.recordStageIntent(rs, projectRoot, req, intentText); err != nil {
+					rs.writer.AppendEvent("warning", map[string]interface{}{"detail": "intent revision not recorded: " + err.Error()})
+				}
+			}
 		}
 	}
 	if strings.TrimSpace(originalBrief) != "" {

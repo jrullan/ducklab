@@ -52,7 +52,9 @@ func EnsureIntent(projectRoot string) (*Document, error) {
 			continue
 		}
 		var run historicalIntake
-		if json.Unmarshal(state, &run) != nil || run.Stage != "intake" || seen[run.ID] {
+		// A prepared revision has not claimed its parent and may never run
+		// (B-521): it is not history.
+		if json.Unmarshal(state, &run) != nil || run.Stage != "intake" || seen[run.ID] || run.Status == "prepared" {
 			continue
 		}
 		var request struct {
