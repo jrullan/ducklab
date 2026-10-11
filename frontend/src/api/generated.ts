@@ -1162,10 +1162,7 @@ export interface ServiceSkillSummary {
   version?: number;
 }
 
-export interface ServiceStageRef {
-  path?: string;
-  role?: string;
-}
+export type ServiceStageRef = string | { path: string; role?: "scope" | "background" };
 
 export interface ServiceStageRequest {
   adopt?: boolean;

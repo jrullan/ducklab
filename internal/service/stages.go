@@ -836,8 +836,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// They must not be folded into the person's verbatim Intent entry.
 		seed += refs
 		// The post-composition reviewer never sees the reference section;
-		// it is told each reference's role here instead (B-520).
-		referenceRoles = renderReferenceRolesForReview(rs.refFiles(), refRoleOf(textRefs), req.Stage)
+		// it is told each reference's role here instead (B-520), with the
+		// scope references' content bounded to the reviewing seat's context.
+		reviewSeat := roster[config.RoleReviewer]
+		if reviewSeat == "" {
+			reviewSeat = roster[config.RoleArchitect]
+		}
+		reviewCtx := 0
+		if d, derr := s.ducklings.Get(reviewSeat); derr == nil {
+			reviewCtx = d.Caps.ContextTokens
+		}
+		referenceRoles = renderReferenceRolesForReview(rs.refFiles(), refRoleOf(textRefs), req.Stage,
+			rs.refEvidenceMap(), reviewEvidenceBudget(reviewCtx))
 		referenceContracts, rerr = loadReferenceContracts(rs.refFiles())
 		if rerr != nil {
 			s.failRun(rs, fmt.Errorf("reference contracts: %w", rerr))

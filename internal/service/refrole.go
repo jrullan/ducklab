@@ -95,6 +95,27 @@ func (r StageRef) MarshalJSON() ([]byte, error) {
 	}{r.Path, RefRoleScope})
 }
 
+// OpenAPISchema documents both accepted wire shapes. Reflecting the struct
+// would claim every reference must be an object — a source-breaking change
+// for clients that have always sent path strings — and would leave role an
+// unrestricted string although anything but scope/background is refused.
+func (StageRef) OpenAPISchema() map[string]any {
+	return map[string]any{
+		"oneOf": []any{
+			map[string]any{"type": "string", "description": "a path; the reference is background"},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string"},
+					"role": map[string]any{"type": "string", "enum": []any{RefRoleScope, RefRoleBackground}},
+				},
+				"required":             []any{"path"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
 // backgroundRefs wraps plain paths as background references.
 func backgroundRefs(paths ...string) []StageRef {
 	out := make([]StageRef, 0, len(paths))
@@ -242,23 +263,27 @@ const intakeBackgroundRule = "Where a reference and the code " +
 // renderReferenceRolesForReview is the block the post-composition reviewer
 // reads. That reviewer sees the base, the delta and the candidate — not the
 // reference section — so without this it could not know a reference was the
-// target, and would approve a candidate that silently excluded it.
-func renderReferenceRolesForReview(files []string, roleOf func(string) string, stageName string) string {
+// target, and would approve a candidate that silently excluded it. Knowing
+// the role is not enough to judge an omission (Codex on #174): the reviewer
+// has no ref_read, so the scope references' content — what the stage prompt
+// carried, bounded text or digest — rides along within budget. Background
+// references send only their names: they can never ground the finding.
+func renderReferenceRolesForReview(files []string, roleOf func(string) string, stageName string, evidence map[string]string, budget int) string {
 	if len(files) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("## Reference roles — set by the person\n\n")
-	anyScope := false
+	var scope []string
 	for _, f := range files {
 		role := roleOf(f)
 		if role == RefRoleScope {
-			anyScope = true
+			scope = append(scope, f)
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", f, role)
 	}
 	b.WriteString("\n")
-	if !anyScope {
+	if len(scope) == 0 {
 		b.WriteString("Every reference is background: context that never adds scope.\n")
 		return b.String()
 	}
@@ -267,15 +292,85 @@ func renderReferenceRolesForReview(files []string, roleOf func(string) string, s
 			"candidate omits, defers or declares out of scope behavior a scope reference details " +
 			"under an approved requirement, without the request or the approved requirements " +
 			"saying so. Background references are never grounds for that finding.\n")
-		return b.String()
+	} else {
+		b.WriteString("A SCOPE reference describes the intended product. Raise a finding when the " +
+			"candidate keeps or adds an exclusion of behavior a scope reference describes and the " +
+			"request asks to close, or declares such behavior out of scope merely because it is not " +
+			"implemented. Lifting or narrowing an exclusion with traceability to the reference is the " +
+			"requested change, not a contradiction. Background references are never grounds for that " +
+			"finding.\n")
 	}
-	b.WriteString("A SCOPE reference describes the intended product. Raise a finding when the " +
-		"candidate keeps or adds an exclusion of behavior a scope reference describes and the " +
-		"request asks to close, or declares such behavior out of scope merely because it is not " +
-		"implemented. Lifting or narrowing an exclusion with traceability to the reference is the " +
-		"requested change, not a contradiction. Background references are never grounds for that " +
-		"finding.\n")
+	b.WriteString(renderScopeEvidence(scope, evidence, budget))
 	return b.String()
+}
+
+// reviewEvidenceBudget bounds the scope-reference content shown to the
+// composition reviewer: 16k chars, or an eighth of a small seat's context
+// (~4 chars per token), never below 2k — the reviewer must still fit the base,
+// the delta and the candidate.
+func reviewEvidenceBudget(contextTokens int) int {
+	const most, least = 16_000, 2_000
+	if contextTokens <= 0 {
+		return most
+	}
+	n := contextTokens / 2
+	if n > most {
+		n = most
+	}
+	if n < least {
+		n = least
+	}
+	return n
+}
+
+// renderScopeEvidence splits the budget evenly across the scope references
+// and says plainly where it cut: an elided tail read as "the reference does
+// not describe this" is the omission this evidence exists to catch.
+func renderScopeEvidence(scope []string, evidence map[string]string, budget int) string {
+	var b strings.Builder
+	b.WriteString("\n## Scope reference content — bounded\n\n" +
+		"What the stage was given for each scope reference (its text, or its digest when the " +
+		"corpus was too large). Compare the candidate against it.\n")
+	per := budget
+	if len(scope) > 0 {
+		per = budget / len(scope)
+	}
+	for _, f := range scope {
+		text := strings.TrimSpace(evidence[f])
+		fmt.Fprintf(&b, "\n### %s\n\n", f)
+		if text == "" {
+			b.WriteString("[content unavailable to this review]\n")
+			continue
+		}
+		if len(text) > per {
+			text = text[:per]
+			b.WriteString(text)
+			b.WriteString("\n\n[cut at the review budget — absence of a behavior beyond this point is not evidence the reference omits it]\n")
+			continue
+		}
+		b.WriteString(text + "\n")
+	}
+	return b.String()
+}
+
+// setRefEvidence keeps what the stage prompt carried for each reference.
+func (rs *runState) setRefEvidence(loaded []refFile) {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	rs.refEvidence = make(map[string]string, len(loaded))
+	for _, f := range loaded {
+		rs.refEvidence[f.Path] = f.text
+	}
+}
+
+func (rs *runState) refEvidenceMap() map[string]string {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	out := make(map[string]string, len(rs.refEvidence))
+	for k, v := range rs.refEvidence {
+		out[k] = v
+	}
+	return out
 }
 
 // splitImageStageRefs separates image references (which travel as images,

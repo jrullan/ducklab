@@ -4001,18 +4001,31 @@
         "type": "object"
       },
       "ServiceStageRef": {
-        "properties": {
-          "path": {
+        "oneOf": [
+          {
+            "description": "a path; the reference is background",
             "type": "string"
           },
-          "role": {
-            "type": "string"
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "role": {
+                "enum": [
+                  "scope",
+                  "background"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
           }
-        },
-        "required": [
-          "path"
-        ],
-        "type": "object"
+        ]
       },
       "ServiceStageRequest": {
         "properties": {

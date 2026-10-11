@@ -262,7 +262,7 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		rendered = renderRefDigests(digests, totalChars, stageName, roleOf)
 		loaded = loaded[:0]
 		for _, dg := range digests {
-			rf := refFile{Path: dg.Path, Chars: dg.Chars}
+			rf := refFile{Path: dg.Path, Chars: dg.Chars, text: dg.digest}
 			if roleOf(dg.Path) == RefRoleScope {
 				rf.Role = RefRoleScope
 			}
@@ -274,6 +274,7 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		"files": loaded, "dropped": dropped, "mode": mode,
 	})
 	rs.armRefs(files, mode)
+	rs.setRefEvidence(loaded)
 	return rendered, nil
 }
 

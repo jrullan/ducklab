@@ -49,6 +49,10 @@ type refFile struct {
 	// Role is "scope" when the person marked the reference as the intended
 	// product (B-520); empty is background.
 	Role string `json:"role,omitempty"`
+	// text is what the prompt carried for this reference (bounded text, or
+	// the digest in digest mode). Not recorded: the record names, it does
+	// not copy.
+	text string
 }
 
 // loadReferences expands the named paths (files, or directories searched
@@ -164,7 +168,7 @@ func loadReferences(refs []StageRef, caps config.References, stageName string) (
 			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
 		}
 		total += len(text)
-		rf := refFile{Path: f, Chars: len(text), Truncated: truncated}
+		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, text: strings.TrimSpace(text)}
 		if role == RefRoleScope {
 			rf.Role = RefRoleScope
 		}

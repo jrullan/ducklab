@@ -157,18 +157,37 @@ func TestDigestReferencesLabelScope(t *testing.T) {
 
 func TestReferenceRolesForReview(t *testing.T) {
 	roleOf := refRoleOf([]StageRef{{Path: "/w/guide.md", Role: RefRoleScope}})
-	got := renderReferenceRolesForReview([]string{"/w/guide.md", "/w/notes.md"}, roleOf, "intake")
-	for _, want := range []string{"- /w/guide.md: scope", "- /w/notes.md: background", "keeps or adds an exclusion", "Lifting or narrowing an exclusion with traceability"} {
+	evidence := map[string]string{"/w/guide.md": "Matrix mode computes determinants.", "/w/notes.md": "BUG-7 crash on resize"}
+	got := renderReferenceRolesForReview([]string{"/w/guide.md", "/w/notes.md"}, roleOf, "intake", evidence, 16_000)
+	for _, want := range []string{"- /w/guide.md: scope", "- /w/notes.md: background", "keeps or adds an exclusion", "Lifting or narrowing an exclusion with traceability",
+		"## Scope reference content — bounded", "### /w/guide.md", "Matrix mode computes determinants."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("review roles lack %q:\n%s", want, got)
 		}
 	}
-	bg := renderReferenceRolesForReview([]string{"/w/notes.md"}, refRoleOf(nil), "intake")
-	if !strings.Contains(bg, "Every reference is background") || strings.Contains(bg, "SCOPE") {
+	if strings.Contains(got, "BUG-7") {
+		t.Error("a background reference's content reached the reviewer; it can never ground the finding")
+	}
+	bg := renderReferenceRolesForReview([]string{"/w/notes.md"}, refRoleOf(nil), "intake", evidence, 16_000)
+	if !strings.Contains(bg, "Every reference is background") || strings.Contains(bg, "SCOPE") || strings.Contains(bg, "BUG-7") {
 		t.Errorf("background-only review roles:\n%s", bg)
 	}
-	if renderReferenceRolesForReview(nil, roleOf, "intake") != "" {
+	if renderReferenceRolesForReview(nil, roleOf, "intake", evidence, 16_000) != "" {
 		t.Error("no references must render nothing")
+	}
+	// The budget is honoured and the cut is named, never silent.
+	long := map[string]string{"/w/guide.md": strings.Repeat("x", 5000) + "TAIL"}
+	cut := renderReferenceRolesForReview([]string{"/w/guide.md"}, roleOf, "intake", long, 2_000)
+	if strings.Contains(cut, "TAIL") || !strings.Contains(cut, "cut at the review budget") {
+		t.Errorf("budget not enforced or cut not named:\n%s", cut[len(cut)-300:])
+	}
+}
+
+func TestReviewEvidenceBudgetFitsSmallSeats(t *testing.T) {
+	for _, tc := range []struct{ ctx, want int }{{0, 16_000}, {200_000, 16_000}, {16_384, 8_192}, {2_000, 2_000}} {
+		if got := reviewEvidenceBudget(tc.ctx); got != tc.want {
+			t.Errorf("reviewEvidenceBudget(%d) = %d, want %d", tc.ctx, got, tc.want)
+		}
 	}
 }
 
@@ -189,7 +208,9 @@ func TestScopeReferenceReachesArchitectCriticAndCompositionReviewer(t *testing.T
 					"## REQ-002 — Unsupported modes\n\n**Priority:** must\n\nMatrix mode is not supported.\n",
 			})
 			guide := filepath.Join(t.TempDir(), "guidebook.md")
-			os.WriteFile(guide, []byte("# Guidebook\n\n## Matrix\n\nThe calculator computes 3x3 determinants."), 0o644)
+			// Statistics appears ONLY in the guidebook: the candidate below omits
+			// it, and the composition reviewer must be shown the text it omits.
+			os.WriteFile(guide, []byte("# Guidebook\n\n## Matrix\n\nThe calculator computes 3x3 determinants.\n\n## Statistics\n\nThe calculator computes one-variable statistics: mean and standard deviation."), 0o644)
 
 			var mu sync.Mutex
 			var architect, critic, composition string
@@ -267,6 +288,16 @@ func TestScopeReferenceReachesArchitectCriticAndCompositionReviewer(t *testing.T
 			}
 			if !strings.Contains(composition, wantRole) {
 				t.Errorf("composition reviewer roles lack %q", wantRole)
+			}
+			// Codex on #174: knowing the role is not enough; the reviewer must
+			// see the behavior the candidate omits, in its own evidence block
+			// (not merely echoed inside the delta).
+			evidence := ""
+			if i := strings.Index(composition, "## Scope reference content — bounded"); i >= 0 {
+				evidence = composition[i:]
+			}
+			if got := strings.Contains(evidence, "one-variable statistics: mean and standard deviation"); got != tc.scope {
+				t.Errorf("composition reviewer evidence carries the omitted behavior = %v, want %v", got, tc.scope)
 			}
 			if got := strings.Contains(composition, "Lifting or narrowing an exclusion with traceability"); got != tc.scope {
 				t.Errorf("composition scope instruction = %v, want %v", got, tc.scope)
