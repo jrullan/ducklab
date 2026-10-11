@@ -322,17 +322,25 @@ func (s *Service) claimRevisionParent(projectRoot string, req StageRequest, plan
 		// The draft on the table is answered; its intent is not. The person
 		// is still asking for the same thing, so a superseded run in a
 		// revision chain leaves the intent open (B-521).
-		s.resolveSupersededRun(parent, resolution, req.Revision.Intent)
+		if err := s.resolveSupersededRun(parent, resolution, req.Revision.Intent); err != nil {
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
+		}
 	case run.Status == "failed" && !run.Accepted:
 		w, err := s.ensureWriter(rs)
 		if err != nil {
-			return err
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
 		}
 		rs.wmu.Lock()
+		previous := rs.run.Resolution
 		rs.run.Resolution = resolution
 		rs.wmu.Unlock()
+		if err := w.WriteState(); err != nil {
+			rs.wmu.Lock()
+			rs.run.Resolution = previous
+			rs.wmu.Unlock()
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
+		}
 		w.AppendEvent("human", map[string]interface{}{"action": "revised", "detail": resolution})
-		_ = w.WriteState()
 	default:
 		if plan.explicit {
 			return refuseLaunch("run %s is %s and no longer takes changes", parent, run.Status)
@@ -549,12 +557,13 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// never learned. Resolved here, at the moment the person asks, not when
 	// the revision lands: the decision happened now, whatever the revision's
 	// fate.
+	//
+	// The claim is the LAST fallible step (review of #175): the revision's
+	// own record — state, log, persisted request — exists on disk first, so
+	// a launch that cannot create its run never consumes the parent's
+	// decision; and a claim that fails or loses the race removes the record
+	// it made. Everything after the claim cannot fail.
 	runID := runlog.GenerateRunID()
-	if req.Revision != nil {
-		if err := s.claimRevisionParent(entry.Path, req, revising, runID); err != nil {
-			return nil, err
-		}
-	}
 
 	// Recorded as what will actually run, not as a constant. A report that
 	// says every stage was a council when half were solo is a report that
@@ -600,6 +609,22 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// The request outlives the goroutine: an answered question re-enters the
+	// stage with the same brief, mode and revision, and the request used to
+	// live nowhere a resume could find it.
+	if err := writeStageRequest(writer.RunDir(), req); err != nil {
+		discardUnstartedRun(writer)
+		return nil, fmt.Errorf("record the stage request: %w", err)
+	}
+	if data, err := json.Marshal(req); err == nil {
+		_ = json.Unmarshal(data, &run.StageRequest)
+	}
+	if req.Revision != nil {
+		if err := s.claimRevisionParent(entry.Path, req, revising, runID); err != nil {
+			discardUnstartedRun(writer)
+			return nil, err
+		}
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs := &runState{
 		run: run, writer: writer, runDir: writer.RunDir(),
@@ -610,13 +635,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
-	// The request outlives the goroutine: an answered question re-enters the
-	// stage with the same brief, mode and revision, and the request used to
-	// live nowhere a resume could find it.
-	writeStageRequest(rs.runDir, req)
-	if data, err := json.Marshal(req); err == nil {
-		_ = json.Unmarshal(data, &run.StageRequest)
-	}
 	// The event log is the self-contained account of why every later turn and
 	// finding happened. Persist the exact effective request in its first frame;
 	// clients joining live can show it without reading a sidecar file.
@@ -860,10 +878,20 @@ func liveRequirementCount(doc *artifact.Document) int {
 const stageRequestFile = "stage_request.json"
 const sectionedCheckpointFile = "sectioned_checkpoint.json"
 
-func writeStageRequest(runDir string, req StageRequest) {
-	if data, err := json.Marshal(req); err == nil {
-		_ = os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
+func writeStageRequest(runDir string, req StageRequest) error {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
 	}
+	return os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
+}
+
+// discardUnstartedRun removes the record of a stage run that never started:
+// its launch failed before anything was queued, so no one has seen it and a
+// leftover "running" record would read as a crashed run on the next start.
+func discardUnstartedRun(w *runlog.Writer) {
+	_ = w.Close()
+	_ = os.RemoveAll(w.RunDir())
 }
 
 // normalizeStageRefs gives references a stable meaning before the request is
