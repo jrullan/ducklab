@@ -9,7 +9,7 @@
 //   - text is returned as it is;
 //   - a PDF is extracted to text, page-aware (each page opens with
 //     "--- page N ---", so an offset maps to a page), and the extraction is
-//     cached by content hash next to the digest cache;
+//     cached by content hash in the person's cache directory (CacheDir);
 //   - anything else binary (docx, xlsx, zip, an unknown blob — sniffed from
 //     the content, not the extension) is never passed on: the caller gets a
 //     notice to show the model instead and the reason to warn the person.
@@ -96,28 +96,49 @@ const cacheVersion = "pdftext-v1"
 // Load reads a reference and returns it as model-readable text, or as an
 // unreadable Doc with the reason. cacheDir may be "" to disable the
 // extraction cache. The error is only for a file that cannot be read at all.
-func Load(path, cacheDir string) (Doc, error) {
+//
+// ctx bounds the PDF extraction together with PDFTimeout: an aborted run or
+// a canceled ref_read stops a hung pdftotext instead of waiting it out.
+func Load(ctx context.Context, path, cacheDir string) (Doc, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Doc{}, err
 	}
 	d := Doc{Path: path, Size: int64(len(raw))}
-	switch {
-	case isPDF(raw):
+	if isPDF(raw) {
 		d.Kind, d.Type = KindPDF, "PDF"
-		if extractPDF(&d, raw, cacheDir) != nil && isText(raw) && !looksLikePDFBody(raw) {
-			// pdftotext refused a text file that only starts like a PDF:
-			// it is a text reference, and losing it is the worse error.
-			d = Doc{Path: path, Size: d.Size, Kind: KindText, Type: "text", Text: string(raw)}
+		if extractPDF(ctx, &d, raw, cacheDir) == nil || looksLikePDFBody(raw) {
+			return d, nil
 		}
-	case isText(raw):
-		d.Kind, d.Type = KindText, "text"
-		d.Text = string(raw)
-	default:
-		d.Kind, d.Type = KindBinary, binaryType(raw, path)
-		d.Reason = "its content is not text and cannot be extracted"
+		// pdftotext refused a text file that only starts like a PDF: it is a
+		// text reference, and losing it is the worse error.
+		d = Doc{Path: path, Size: d.Size}
 	}
+	if text, enc, ok := decodeText(raw); ok {
+		d.Kind, d.Type, d.Text = KindText, "text", text
+		if enc != "" {
+			d.Type = "text (" + enc + ")"
+		}
+		return d, nil
+	}
+	d.Kind, d.Type = KindBinary, binaryType(raw, path)
+	d.Reason = "its content is not text and cannot be extracted"
 	return d, nil
+}
+
+// CacheDir is where PDF extractions and reference digests are cached: the
+// person's cache directory, never the project. Under <project>/.ducklab the
+// cache was untracked plaintext of the person's private references, one
+// `git add -A` from being committed and a dirty tree for every clean-tree
+// guard (review of #173). Entries are content-hash keyed, so one cache
+// serves every project. "" when the platform has no cache directory, which
+// disables caching rather than falling back to the worktree.
+func CacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil || base == "" {
+		return ""
+	}
+	return filepath.Join(base, "ducklab", "refs")
 }
 
 // isPDF sniffs the header. A header at the start (after a BOM or whitespace)
@@ -149,32 +170,76 @@ func looksLikePDFBody(raw []byte) bool {
 	return bytes.Contains(raw, []byte("endobj")) || bytes.Contains(raw, []byte("xref"))
 }
 
-// isText accepts UTF-8 or 8-bit text without NUL bytes or binary control
-// characters. Latin-1 notes are still text to a model; a zip is not.
 func isText(raw []byte) bool {
+	_, _, ok := decodeText(raw)
+	return ok
+}
+
+// decodeText returns raw as valid UTF-8 text, naming the legacy encoding it
+// was transcoded from ("" for UTF-8), or false for a binary.
+//
+// Invalid UTF-8 is binary unless it reads as a Windows-1252 (Latin-1
+// superset) note: mostly ASCII, every high byte a defined character. The
+// first cut accepted any control-free bytes, so 1 KB of 0xff reached the
+// prompt as "text" (review of #173); a legacy note is transcoded, never
+// passed through raw.
+func decodeText(raw []byte) (string, string, bool) {
 	if len(raw) == 0 {
-		return true
+		return "", "", true
 	}
 	if bytes.IndexByte(raw, 0) >= 0 {
-		return false
+		return "", "", false
 	}
 	// "application/pdf" is DetectContentType reading the first five bytes;
 	// whether the rest is text is decided below, like any other file — prose
 	// that opens with "%PDF-" is still prose (review of #173).
 	if ct := http.DetectContentType(raw); !strings.HasPrefix(ct, "text/") && ct != "application/pdf" {
-		return false
+		return "", "", false
 	}
 	// DetectContentType reads 512 bytes; a binary tail must not pass.
-	control := 0
+	control, high := 0, 0
 	for _, c := range raw {
 		if c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != '\f' && c != 0x1b {
 			control++
 		}
+		if c >= 0x80 {
+			high++
+		}
 	}
 	if control*100 > len(raw) {
-		return false
+		return "", "", false
 	}
-	return utf8.Valid(raw) || control == 0
+	if utf8.Valid(raw) {
+		return string(raw), "", true
+	}
+	// Legacy 8-bit prose is mostly ASCII: accented letters and typographic
+	// quotes are a small share of it. A blob of high bytes is not prose.
+	if control > 0 || high*4 > len(raw) {
+		return "", "", false
+	}
+	var b strings.Builder
+	b.Grow(len(raw) + high)
+	for _, c := range raw {
+		switch {
+		case c < 0x80:
+			b.WriteByte(c)
+		case c < 0xA0:
+			r := cp1252[c-0x80]
+			if r == 0 {
+				return "", "", false
+			}
+			b.WriteRune(r)
+		default:
+			b.WriteRune(rune(c))
+		}
+	}
+	return b.String(), "Windows-1252", true
+}
+
+// cp1252 maps Windows-1252's 0x80–0x9F; 0 marks the five undefined bytes.
+var cp1252 = [32]rune{
+	'€', 0, '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', 0, 'Ž', 0,
+	0, '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', 0, 'ž', 'Ÿ',
 }
 
 // binaryType names a binary for the person, from its content.
@@ -215,7 +280,7 @@ func binaryType(raw []byte, path string) string {
 // extractPDF fills d from the PDF's text, through the cache. The error is
 // the extraction's own failure (pdftotext missing, refused, timed out); a
 // PDF with no text is not an error, only unreadable.
-func extractPDF(d *Doc, raw []byte, cacheDir string) error {
+func extractPDF(ctx context.Context, d *Doc, raw []byte, cacheDir string) error {
 	cachePath := ""
 	if cacheDir != "" {
 		cachePath = cachePathFor(cacheDir, raw)
@@ -225,7 +290,7 @@ func extractPDF(d *Doc, raw []byte, cacheDir string) error {
 			return nil
 		}
 	}
-	out, err := runPDFToText(d.Path)
+	out, err := runPDFToText(ctx, d.Path)
 	if err != nil {
 		d.Reason = err.Error()
 		return err
@@ -299,17 +364,24 @@ func hasWords(text string) bool {
 
 func lookPDFToText() (string, error) { return exec.LookPath(pdftotext) }
 
-func runPDFToText(path string) (string, error) {
+func runPDFToText(parent context.Context, path string) (string, error) {
 	bin, err := lookPDFToText()
 	if err != nil {
 		return "", errors.New("its text could not be extracted because pdftotext (poppler-utils) is not installed on the engine host")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), PDFTimeout)
+	// The caller's context, not Background (review of #173): an aborted run
+	// or canceled tool call must stop the extractor, not wait out the timeout.
+	ctx, cancel := context.WithTimeout(parent, PDFTimeout)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, bin, "-layout", "-enc", "UTF-8", path, "-")
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	// A child that inherited the pipes would hold Wait open after the kill.
+	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Run(); err != nil {
+		if perr := parent.Err(); perr != nil {
+			return "", fmt.Errorf("text extraction was stopped: %v", perr)
+		}
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("text extraction timed out after %s", PDFTimeout)
 		}

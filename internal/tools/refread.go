@@ -69,7 +69,7 @@ func (t *RefRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	// Through reftext, never as bytes (B-519): a PDF is read as its extracted
 	// text, and a binary that cannot be read says so instead of pouring
 	// object syntax into the seat's context.
-	doc, err := reftext.Load(target, ectx.RefCacheDir)
+	doc, err := reftext.Load(ctx, target, ectx.RefCacheDir)
 	if err != nil {
 		return ErrorResult("read %s: %v", target, err), nil
 	}

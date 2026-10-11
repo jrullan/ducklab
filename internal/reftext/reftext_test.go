@@ -3,10 +3,12 @@ package reftext
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // needPDFToText skips where poppler is absent; the extraction is the feature.
@@ -21,7 +23,7 @@ func needPDFToText(t *testing.T) {
 // as object syntax.
 func TestPDFIsExtractedToPageMarkedText(t *testing.T) {
 	needPDFToText(t)
-	d, err := Load(filepath.Join("testdata", "guide.pdf"), "")
+	d, err := Load(context.Background(), filepath.Join("testdata", "guide.pdf"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +49,11 @@ func TestPDFIsExtractedToPageMarkedText(t *testing.T) {
 func TestPDFExtractionIsCachedByContent(t *testing.T) {
 	needPDFToText(t)
 	cache := t.TempDir()
-	first, err := Load(filepath.Join("testdata", "guide.pdf"), cache)
+	first, err := Load(context.Background(), filepath.Join("testdata", "guide.pdf"), cache)
 	if err != nil || first.Cached {
 		t.Fatalf("first load: cached=%v err=%v", first.Cached, err)
 	}
-	second, err := Load(filepath.Join("testdata", "guide.pdf"), cache)
+	second, err := Load(context.Background(), filepath.Join("testdata", "guide.pdf"), cache)
 	if err != nil || !second.Cached || second.Text != first.Text {
 		t.Fatalf("second load: cached=%v same=%v err=%v", second.Cached, second.Text == first.Text, err)
 	}
@@ -60,7 +62,7 @@ func TestPDFExtractionIsCachedByContent(t *testing.T) {
 // A scanned PDF has no text layer: an empty reference reads as "covered".
 func TestScannedPDFIsUnreadable(t *testing.T) {
 	needPDFToText(t)
-	d, err := Load(filepath.Join("testdata", "scanned.pdf"), "")
+	d, err := Load(context.Background(), filepath.Join("testdata", "scanned.pdf"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestPDFWithoutPDFToTextIsUnreadable(t *testing.T) {
 	old := pdftotext
 	pdftotext = "ducklab-no-such-pdftotext"
 	defer func() { pdftotext = old }()
-	d, err := Load(filepath.Join("testdata", "guide.pdf"), "")
+	d, err := Load(context.Background(), filepath.Join("testdata", "guide.pdf"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +111,7 @@ func TestBinaryReferencesAreSniffedAndNeverPassedAsBytes(t *testing.T) {
 		if err := os.WriteFile(p, c.data, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		d, err := Load(p, "")
+		d, err := Load(context.Background(), p, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,20 +125,83 @@ func TestBinaryReferencesAreSniffedAndNeverPassedAsBytes(t *testing.T) {
 	}
 }
 
-// Text stays text, including 8-bit notes a model can still read.
+// Text stays text. An 8-bit note is still readable, but it reaches the model
+// transcoded to UTF-8 — review of #173: raw invalid UTF-8 on the prompt path
+// is bytes, whatever the sniffer called it.
 func TestTextPassesThrough(t *testing.T) {
 	dir := t.TempDir()
+	for name, c := range map[string]struct {
+		data []byte
+		want string
+		typ  string
+	}{
+		"a.md":      {[]byte("# RBAC\nmodule-first permissions — ñ\n"), "# RBAC\nmodule-first permissions — ñ\n", "text"},
+		"latin.txt": {[]byte{'c', 'a', 'f', 0xe9, '\n'}, "café\n", "text (Windows-1252)"},
+		"cp1252.md": {[]byte("He said \x93press 2nd\x94 \x96 then MODE.\n"), "He said “press 2nd” – then MODE.\n", "text (Windows-1252)"},
+		"empty.md":  {[]byte{}, "", "text"},
+	} {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, c.data, 0o644)
+		d, err := Load(context.Background(), p, "")
+		if err != nil || !d.Readable() || d.Kind != KindText || d.Text != c.want || d.Type != c.typ {
+			t.Errorf("%s: readable=%v kind=%q type=%q text=%q err=%v", name, d.Readable(), d.Kind, d.Type, d.Text, err)
+		}
+	}
+}
+
+// Review of #173: 1 KB of 0xff passed as "text" — control-free is not prose.
+// Invalid UTF-8 that is not a plausible legacy note is binary.
+func TestHighByteBlobIsBinary(t *testing.T) {
+	dir := t.TempDir()
 	for name, data := range map[string][]byte{
-		"a.md":      []byte("# RBAC\nmodule-first permissions — ñ\n"),
-		"latin.txt": {'c', 'a', 'f', 0xe9, '\n'},
-		"empty.md":  {},
+		"ff.md":    bytes.Repeat([]byte{0xff}, 1024),
+		"mixed.md": append([]byte("header line\n"), bytes.Repeat([]byte{0xc3, 0x28, 0xa0, 0xa1}, 200)...),
+		"undef.md": []byte("mostly ascii prose here with one \x81 undefined byte\n"),
 	} {
 		p := filepath.Join(dir, name)
 		os.WriteFile(p, data, 0o644)
-		d, err := Load(p, "")
-		if err != nil || !d.Readable() || d.Kind != KindText || d.Text != string(data) {
-			t.Errorf("%s: readable=%v kind=%q err=%v", name, d.Readable(), d.Kind, err)
+		d, err := Load(context.Background(), p, "")
+		if err != nil || d.Readable() || d.Kind != KindBinary || d.Text != "" {
+			t.Errorf("%s: readable=%v kind=%q text=%q", name, d.Readable(), d.Kind, d.Text)
 		}
+		if !strings.HasPrefix(d.Notice(), name+": unreadable binary reference (") {
+			t.Errorf("%s: notice %q", name, d.Notice())
+		}
+	}
+}
+
+// Review of #173: the extraction ran under context.Background, so aborting
+// a run could not stop a hung pdftotext. A blocking extractor must stop as
+// soon as the caller cancels, long before PDFTimeout.
+func TestCanceledContextStopsTheExtractor(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "pdftotext")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := pdftotext
+	pdftotext = fake
+	defer func() { pdftotext = old }()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	start := time.Now()
+	d, err := Load(ctx, filepath.Join("testdata", "guide.pdf"), "")
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("extraction ran %s after the caller canceled", took)
+	}
+	if err != nil || d.Readable() || !strings.Contains(d.Reason, "stopped") {
+		t.Errorf("canceled extraction: readable=%v reason=%q err=%v", d.Readable(), d.Reason, err)
+	}
+}
+
+// Review of #173: the cache lived in <project>/.ducklab/refs-cache, one
+// `git add -A` from committing private reference text. It lives in the
+// person's cache directory now.
+func TestCacheDirIsOutsideAnyProject(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", base)
+	if got := CacheDir(); got != filepath.Join(base, "ducklab", "refs") {
+		t.Errorf("CacheDir() = %q, want under %q", got, base)
 	}
 }
 
@@ -148,7 +213,7 @@ func TestRealGuidebookReadsAsEnglish(t *testing.T) {
 		t.Skip("REFTEXT_REAL_PDF not set")
 	}
 	needPDFToText(t)
-	d, err := Load(path, "")
+	d, err := Load(context.Background(), path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +235,7 @@ func TestTextMentioningThePDFHeaderStaysText(t *testing.T) {
 	}
 	p := filepath.Join(t.TempDir(), "notes.md")
 	os.WriteFile(p, note, 0o644)
-	d, err := Load(p, "")
+	d, err := Load(context.Background(), p, "")
 	if err != nil || !d.Readable() || d.Kind != KindText || d.Text != string(note) {
 		t.Errorf("doc = kind %q readable %v reason %q", d.Kind, d.Readable(), d.Reason)
 	}
@@ -185,7 +250,7 @@ func TestTextStartingWithThePDFHeaderFallsBackToText(t *testing.T) {
 	for _, bin := range []string{pdftotext, "ducklab-no-such-pdftotext"} {
 		old := pdftotext
 		pdftotext = bin
-		d, err := Load(p, "")
+		d, err := Load(context.Background(), p, "")
 		pdftotext = old
 		if err != nil || !d.Readable() || d.Kind != KindText || d.Text != string(body) {
 			t.Errorf("pdftotext=%s: kind %q readable %v reason %q", bin, d.Kind, d.Readable(), d.Reason)
@@ -205,7 +270,7 @@ func TestPDFWithLeadingJunkStillExtracts(t *testing.T) {
 	for name, lead := range map[string]string{"bom.pdf": "\xEF\xBB\xBF", "ws.pdf": "\n\n  ", "junk.pdf": "garbage from a mail gateway\n"} {
 		p := filepath.Join(dir, name)
 		os.WriteFile(p, append([]byte(lead), pdf...), 0o644)
-		d, err := Load(p, "")
+		d, err := Load(context.Background(), p, "")
 		if err != nil || d.Kind != KindPDF || !d.Readable() || !strings.Contains(d.Text, "Calculator guidebook page one") {
 			t.Errorf("%s: kind %q readable %v reason %q", name, d.Kind, d.Readable(), d.Reason)
 		}
@@ -222,14 +287,14 @@ func TestTruncatedCacheEntryIsNotTrusted(t *testing.T) {
 	cache := t.TempDir()
 	entry := cachePathFor(cache, raw)
 	os.WriteFile(entry, []byte("--- page 1 ---\nCalcul"), 0o644)
-	d, err := Load(src, cache)
+	d, err := Load(context.Background(), src, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d.Cached || !strings.Contains(d.Text, "toggle key switches fractions") {
 		t.Fatalf("truncated entry served: cached=%v text=%q", d.Cached, d.Text)
 	}
-	again, _ := Load(src, cache)
+	again, _ := Load(context.Background(), src, cache)
 	if !again.Cached || again.Text != d.Text {
 		t.Errorf("the rewritten entry was not served whole: cached=%v", again.Cached)
 	}

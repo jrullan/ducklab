@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -138,7 +139,7 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 }
 
 func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
-	return loadReferencesCached(paths, caps, stageName, "")
+	return loadReferencesCached(context.Background(), paths, caps, stageName, "")
 }
 
 // loadReferencesCached is loadReferences with the PDF extraction cache.
@@ -146,7 +147,7 @@ func loadReferences(paths []string, caps config.References, stageName string) (r
 // text, and a binary that cannot be extracted travels as a notice — it used
 // to travel as its bytes, and a guidebook reached the architect as PDF
 // object syntax.
-func loadReferencesCached(paths []string, caps config.References, stageName, cacheDir string) (rendered string, loaded []refFile, dropped []string, err error) {
+func loadReferencesCached(ctx context.Context, paths []string, caps config.References, stageName, cacheDir string) (rendered string, loaded []refFile, dropped []string, err error) {
 	caps = resolveRefCaps(caps)
 	files, err := collectRefFiles(paths)
 	if err != nil {
@@ -160,7 +161,7 @@ func loadReferencesCached(paths []string, caps config.References, stageName, cac
 			dropped = append(dropped, f)
 			continue
 		}
-		doc, rerr := reftext.Load(f, cacheDir)
+		doc, rerr := reftext.Load(ctx, f, cacheDir)
 		if rerr != nil {
 			dropped = append(dropped, f)
 			continue

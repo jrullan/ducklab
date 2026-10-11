@@ -95,7 +95,7 @@ type refDigest struct {
 	digest     string
 }
 
-// refCacheEntry is what .ducklab/refs-cache stores: a digest is paid for
+// refCacheEntry is what the reference cache (reftext.CacheDir) stores: a digest is paid for
 // once per document version per model, not once per run.
 type refCacheEntry struct {
 	Path   string `json:"path"`
@@ -155,7 +155,7 @@ func digestReferences(ctx context.Context, files []string, chunkChars int, model
 		// is summarized from its text, and a binary that cannot be read is
 		// never summarized — a model asked to digest object syntax returns a
 		// confident digest of nothing.
-		doc, err := reftext.Load(f, cacheDir)
+		doc, err := reftext.Load(ctx, f, cacheDir)
 		if err != nil {
 			return nil, fmt.Errorf("reference %q: %w", f, err)
 		}
@@ -228,8 +228,11 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string) str
 // architect seat, emits the run's reference events, and arms ref_read.
 // Returns the rendered section to append to the seed.
 func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refPaths []string, architect config.DucklingID) (string, error) {
-	cacheDir := filepath.Join(rs.projectPath, ".ducklab", "refs-cache")
-	rendered, loaded, dropped, err := loadReferencesCached(refPaths, projCfg.References, stageName, cacheDir)
+	// Out of the worktree (review of #173): extractions and digests are
+	// plaintext of the person's private references, and under .ducklab they
+	// were untracked files for `git add -A` and every clean-tree guard.
+	cacheDir := refCacheDir()
+	rendered, loaded, dropped, err := loadReferencesCached(ctx, refPaths, projCfg.References, stageName, cacheDir)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +245,7 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 	totalChars := 0
 	var unreadable []refUnreadable
 	for _, f := range files {
-		doc, lerr := reftext.Load(f, cacheDir)
+		doc, lerr := reftext.Load(ctx, f, cacheDir)
 		if lerr != nil {
 			continue
 		}
@@ -290,6 +293,7 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		}
 		dropped = nil
 	}
+	unreadable = includedUnreadable(unreadable, loaded)
 	rs.writer.AppendEvent("references_loaded", map[string]interface{}{
 		"files": loaded, "dropped": dropped, "mode": mode, "unreadable": unreadable,
 	})
@@ -298,6 +302,31 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 	}
 	rs.armRefs(files, mode)
 	return rendered, nil
+}
+
+// refCacheDir is the reference cache shared by inline loading, digests and
+// ref_read: outside every project (see reftext.CacheDir).
+func refCacheDir() string { return reftext.CacheDir() }
+
+// includedUnreadable keeps the unreadable references the prompt actually
+// carried as a notice. A file the inline caps dropped never reached the model
+// at all, and warning that "the model saw only a notice" for it was false
+// (review of #173); it is reported as dropped instead. Digest mode loads the
+// whole corpus, so there every unreadable file is included.
+func includedUnreadable(unreadable []refUnreadable, loaded []refFile) []refUnreadable {
+	shown := map[string]bool{}
+	for _, f := range loaded {
+		if f.Unreadable != "" {
+			shown[f.Path] = true
+		}
+	}
+	var out []refUnreadable
+	for _, u := range unreadable {
+		if shown[u.Path] {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // warnUnreadableRefs tells the person — on the run (Now, the run page, MCP
