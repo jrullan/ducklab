@@ -148,7 +148,7 @@ func ValidPlanArtifact(item string) bool {
 
 // fieldVocabulary is the single authority for parser and syntax-lint field validation.
 var fieldVocabulary = []FieldDefinition{
-	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope},
+	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Revisions", Kind: KindIntent, Scope: SectionScope},
 	{Canonical: "Delete", Kind: KindIntent, Scope: SectionScope},
 	{Canonical: "Originates from", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Priority", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Status", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Assumption", Kind: KindRequirements, Scope: SectionScope},
 	{Canonical: "Delete", Kind: KindRequirements, Scope: SectionScope},

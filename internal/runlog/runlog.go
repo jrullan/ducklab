@@ -213,6 +213,13 @@ type Run struct {
 	// StageRequest is the persisted artifact-stage launch request, exposed on
 	// reads so an operator can replay an amendment without losing its shape.
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`
+	// Intent is the intention (INT-NNN) an intake run serves — the brief it
+	// recorded, or, for a revision, the intent its chain continues (B-521).
+	Intent string `json:"intent,omitempty"`
+	// RevisesRun is the run whose draft this document-stage revision
+	// changes, and Revision its place in the chain (1 for the first).
+	RevisesRun string `json:"revises_run,omitempty"`
+	Revision   int    `json:"revision,omitempty"`
 	// InterruptedTurn is the last turn stopped by a pausing interruption.
 	InterruptedTurn *InterruptedTurn `json:"interrupted_turn,omitempty"`
 	// RemoteReceipts are the publication receipts recorded for this accepted

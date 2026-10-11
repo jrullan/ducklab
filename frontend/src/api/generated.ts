@@ -626,6 +626,7 @@ export interface RunlogRun {
   harness_profile?: RunlogHarnessProfile;
   history_duration_escalated?: boolean;
   id?: string;
+  intent?: string;
   interrupted_turn?: RunlogInterruptedTurn;
   local_only?: boolean;
   mode?: string;
@@ -647,6 +648,8 @@ export interface RunlogRun {
   resume_notes?: RunlogResumeNote[];
   revert_sha?: string;
   review_evidence?: RunlogReviewEvidence;
+  revises_run?: string;
+  revision?: number;
   roster?: Record<string, string>;
   roster_sources?: Record<string, string>;
   seat_tier_sources?: Record<string, string>;
@@ -1173,12 +1176,23 @@ export interface ServiceStageRequest {
   mode?: string;
   refs?: string[];
   revise?: string;
+  revise_findings?: string;
+  revises_run?: string;
+  revision?: ServiceStageRevision;
   rounds?: number;
   settle?: boolean;
   split_task?: string;
   stage?: string;
   stream?: boolean;
   support_profile?: string;
+}
+
+export interface ServiceStageRevision {
+  findings?: string;
+  intent?: string;
+  note?: string;
+  number?: number;
+  parent?: string;
 }
 
 export interface ServiceStatus {

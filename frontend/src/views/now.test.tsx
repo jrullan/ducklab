@@ -542,7 +542,8 @@ describe("Now — the inbox", () => {
     fireEvent.click(screen.getByTestId("now-request-changes"));
     fireEvent.change(screen.getByLabelText("requested changes"), { target: { value: "split the last acceptance slice" } });
     fireEvent.click(screen.getByRole("button", { name: "Start revision" }));
-    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "plan", { revise: "split the last acceptance slice" }));
+    // B-521: the revision names the run it revises.
+    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "plan", { revise: "split the last acceptance slice", revisesRun: "r-plan" }));
   });
 
   // B-517: Now's note on a waiting document goes through the same revision
@@ -563,7 +564,7 @@ describe("Now — the inbox", () => {
     fireEvent.click(await screen.findByTestId("now-request-changes"));
     fireEvent.change(screen.getByLabelText("requested changes"), { target: { value: "REQ-008 invents behavior" } });
     fireEvent.click(screen.getByRole("button", { name: "Start revision" }));
-    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "intake", { revise: "REQ-008 invents behavior" }));
+    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "intake", { revise: "REQ-008 invents behavior", revisesRun: "r-20261010-115519-tpfn" }));
     expect(client.runStart).not.toHaveBeenCalled();
     expect(await screen.findByTestId("now-request-changes-error")).toHaveTextContent("no intake draft to revise");
   });

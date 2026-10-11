@@ -97,6 +97,41 @@ describe("Cycle", () => {
     expect(screen.queryByRole("group", { name: "section state filters" })).toBeNull();
   });
 
+  // B-521, TI-36X: three revisions of one intake proposal belong to one
+  // intention. The view shows the person's brief, then each revision, with
+  // the reviewer's carried-over findings apart from the person's own note.
+  it("shows an intention with its revisions as one chain", async () => {
+    const intent = {
+      kind: "intent", version: 4, approved: true, markdown: "",
+      sections: [{
+        id: "INT-002", title: "Use this guide to fill in the gap",
+        body: "**Run:** r-tpfn\n**Submitted at:** 2026-10-10T11:55:19Z\n**Outcome:** pending\n**Requirements:** -\n**Revisions:** r-eett, r-mrrq\n\n" +
+          "### Original brief\n\nUse this guide to fill in the gap.\n\n" +
+          "### Revision 1 — r-eett\n\nSubmitted at 2026-10-10T12:15:43Z.\n\n#### Reviewer findings carried over\n\n- [major] REQ-008 invents behavior\n\n" +
+          "### Revision 2 — r-mrrq\n\nSubmitted at 2026-10-11T17:17:45Z.\n\n#### The person's note\n\nKeep the guidebook wording.\n\n#### Reviewer findings carried over\n\n- [critical] The fraction paragraph was deleted",
+      }],
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/intent")) return json(intent);
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/INT-002")) return json({ id: "INT-002", kind: "intent", title: "Use this guide", down: [] });
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="intent" section="INT-002" />);
+
+    const chain = await screen.findByTestId("intent-chain");
+    expect(within(chain).getByTestId("intent-chain-status")).toHaveTextContent("pending · 2 revisions");
+    expect(within(chain).getByTestId("intent-chain-brief")).toHaveTextContent("Use this guide to fill in the gap.");
+    const revisions = within(chain).getAllByTestId("intent-revision");
+    expect(revisions.map((r) => r.getAttribute("data-run"))).toEqual(["r-eett", "r-mrrq"]);
+    expect(within(revisions[0]!).queryByTestId("intent-revision-note")).toBeNull();
+    expect(within(revisions[0]!).getByTestId("intent-revision-findings")).toHaveTextContent("the reviewer's words, not yours");
+    expect(within(revisions[0]!).getByTestId("intent-revision-findings")).toHaveTextContent("REQ-008 invents behavior");
+    expect(within(revisions[1]!).getByTestId("intent-revision-note")).toHaveTextContent("Keep the guidebook wording.");
+    expect(within(revisions[1]!).getByTestId("intent-revision-findings")).toHaveTextContent("The fraction paragraph was deleted");
+  });
+
   it("adds an intention without exposing Intake or leaving the Intent document", async () => {
     const intent = {
       kind: "intent", version: 1, approved: true, markdown: "",
@@ -1080,8 +1115,11 @@ describe("Cycle — asking for a change", () => {
     fireEvent.click(screen.getByTestId("request-changes-button"));
 
     await waitFor(() =>
+      // B-521: it names the run that wrote the proposal, whose references,
+      // mode, rounds and intent the revision continues.
       expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
         revise: "SPEC-004 should also stop the opposite vertex dragging",
+        revisesRun: "r-1",
       }),
     );
     expect((await screen.findByTestId("revision-run-link")).getAttribute("href")).toBe("#/runs/r-2");

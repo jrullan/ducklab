@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { RedoNote } from "../api/client";
+import { splitRevisionNote, type RevisionNote } from "../lib/retry";
 
 export function DecisionCard({
   next,
@@ -54,7 +55,10 @@ export function DecisionCard({
   cost?: string;
   onAccept: () => void;
   onReject: () => void;
-  onRequestChanges?: (note: string) => Promise<void>;
+  /** The note as sent, and (B-521) the same note split by who wrote it —
+   * the person's words, and the seeded findings they sent unchanged — so a
+   * revision never records a reviewer's objection as the person's intention. */
+  onRequestChanges?: (text: string, split?: RevisionNote) => Promise<void>;
   /** Called with the person's note when they wrote one beside Resume. */
   onResume?: (note?: string) => void;
   /** B-493: a run stopped on an error, its budget or its provider can be told
@@ -70,7 +74,7 @@ export function DecisionCard({
   /** The engine's retry recommendation, shown as an editable draft beside
    * the reason the run failed. */
   redoNote?: RedoNote;
-  onRetry?: (note: string) => void;
+  onRetry?: (text: string, split?: RevisionNote) => void;
   /** Document gates revise; their other exit is explicitly a discard. */
   documentGate?: boolean;
   /** B-247: the task's work already landed under this commit. Accepting
@@ -149,7 +153,7 @@ export function DecisionCard({
     if (!note.trim() || !onRequestChanges) return;
     setAsking(true);
     try {
-      await onRequestChanges(note.trim());
+      await onRequestChanges(note.trim(), splitRevisionNote(note, seededRequestChangesDraft.current));
       setNote("");
     } finally {
       setAsking(false);
@@ -277,7 +281,11 @@ export function DecisionCard({
           <textarea aria-label="retry note" rows={5} value={redoDraft} onChange={(e) => setRedoDraft(e.target.value)}
             className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
           <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted">
-            {onRetry && <button type="button" onClick={() => onRetry(redoDraft)} disabled={!redoDraft.trim()} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Retry with this note</button>}
+            {onRetry && <button type="button" onClick={() => {
+              // B-521: what Ducklab assembled and the person left untouched
+              // is carried over, not the person's words.
+              onRetry(redoDraft, splitRevisionNote(redoDraft, seededRedoDraft.current));
+            }} disabled={!redoDraft.trim()} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Retry with this note</button>}
             <span>Edit before retrying; the note recommends, never decides.</span>
           </div>
         </div>

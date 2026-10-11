@@ -337,6 +337,13 @@ export interface Run {
   note?: string;
   /** Exact persisted request that drove an intake/spec/plan run. */
   stage_request?: Record<string, unknown>;
+  /** B-521: the intention (INT-NNN) an intake run serves — its own brief or,
+   * for a revision, the intent the chain continues. */
+  intent?: string;
+  /** The run whose draft this document revision changes, and its place in
+   * the chain (1 for the first revision). */
+  revises_run?: string;
+  revision?: number;
   /** The run finished without touching a file: the work was already in the
    * tree. Wears FAILED in the metrics on purpose; the UI says this instead. */
   no_changes?: boolean;
@@ -1662,15 +1669,21 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; splitTask?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[]; supportProfile?: "auto" | "small" | "standard" } = {},
+    opts: { from?: string; mode?: string; revise?: string; reviseFindings?: string; revisesRun?: string; rounds?: number; adopt?: boolean; extend?: string; splitTask?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[]; supportProfile?: "auto" | "small" | "standard" } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
       from: opts.from ?? "",
       // Set only when revising: it turns the run from "write this document"
       // into "edit this one", which is the answer to a draft that is almost
-      // right.
+      // right. The person's own words only (B-521).
       revise: opts.revise ?? "",
+      // B-521: reviewer findings carried into the revision, apart from the
+      // person's note so neither the prompt nor the intent journal calls
+      // them the person's; and the run being revised, whose references,
+      // mode, rounds and intent the revision continues.
+      revise_findings: opts.reviseFindings || undefined,
+      revises_run: opts.revisesRun || undefined,
       // Intake only: survey the tree into the requirements the code already
       // satisfies, instead of interviewing about an idea.
       adopt: opts.adopt ?? false,

@@ -2130,6 +2130,9 @@
           "id": {
             "type": "string"
           },
+          "intent": {
+            "type": "string"
+          },
           "interrupted_turn": {
             "$ref": "#/components/schemas/RunlogInterruptedTurn"
           },
@@ -2206,6 +2209,12 @@
           },
           "review_evidence": {
             "$ref": "#/components/schemas/RunlogReviewEvidence"
+          },
+          "revises_run": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
           },
           "roster": {
             "additionalProperties": {
@@ -4041,6 +4050,15 @@
           "revise": {
             "type": "string"
           },
+          "revise_findings": {
+            "type": "string"
+          },
+          "revises_run": {
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/ServiceStageRevision"
+          },
           "rounds": {
             "type": "integer"
           },
@@ -4069,6 +4087,26 @@
           "stage",
           "stream"
         ],
+        "type": "object"
+      },
+      "ServiceStageRevision": {
+        "properties": {
+          "findings": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "ServiceStatus": {

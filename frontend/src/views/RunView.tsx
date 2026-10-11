@@ -32,7 +32,7 @@ import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { documentLabel, runLabel } from "../lib/runview";
-import { retryRoute, reviseRun, revisesDocument } from "../lib/retry";
+import { retryRoute, reviseRun, revisesDocument, type RevisionNote } from "../lib/retry";
 import { VisualCheck } from "../components/VisualCheck";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
@@ -1024,12 +1024,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     ? Object.values(allRuns).find((r) => r.id !== run.id && r.task_id === run.task_id && r.accepted && r.commit_sha)?.commit_sha
     : undefined;
 
-  const requestChanges = async (text: string) => {
+  const requestChanges = async (text: string, split?: RevisionNote) => {
     setActionError(null);
     try {
       // A release's draft revises through its own door; the document stages
       // through theirs. Same button, same meaning: "almost".
-      const started = await reviseRun(client, run, text);
+      const started = await reviseRun(client, run, text, split);
       setRevisionRun(started.id);
     } catch (e) {
       useRuns.getState().failAccept(runId, e instanceof Error ? e.message : String(e));
@@ -1201,7 +1201,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         // B-517: a document stage's retry revises that stage; only a code
         // run with a task relaunches as code. No route, no button.
         onRetry={retryTo === null ? undefined : revisesDocument(run)
-          ? (note) => void requestChanges(note)
+          ? (note, split) => void requestChanges(note, split)
           : (note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
         documentGate={!!(documentProposal || run.stage === "release")}
         landedAs={landedAs}
@@ -1329,6 +1329,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           >
             Open in the consultant pane
           </button>
+        )}
+        {/* B-521: a revision continues its parent's job and, for intake, the
+            person's intention — the header names both, so a chain of
+            revisions reads as one request, not several. */}
+        {(run.intent || run.revises_run) && (
+          <span data-testid="run-revision-chain" className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+            {run.revision ? <span>Revision {run.revision}</span> : null}
+            {run.revises_run && <a className="underline hover:text-ink" href={routeHref({ name: "run", id: run.revises_run })}>of {run.revises_run}</a>}
+            {run.intent && (
+              <a className="rounded border border-hairline px-2 py-0.5 text-ink underline" href={routeHref({ name: "cycle", stage: "intent", section: run.intent })}>
+                {run.revises_run ? "continues" : "records"} {run.intent}
+              </a>
+            )}
+          </span>
         )}
         {run.bug_id && (
           <a

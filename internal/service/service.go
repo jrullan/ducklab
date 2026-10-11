@@ -4937,6 +4937,15 @@ func triageBugIDs(data map[string]interface{}) map[string]struct{} {
 // revision requested on its draft, or a sibling's proposal accepted over it.
 // Quietly a no-op when the run is not waiting: only a paused gate is moot.
 func (s *Service) resolveSuperseded(id, resolution string) {
+	s.resolveSupersededRun(id, resolution, "")
+}
+
+// resolveSupersededRun is resolveSuperseded for a revision: when the
+// superseded intake serves continuingIntent — the intention the revision
+// carries on — the intent stays open. The person asked for the same thing
+// again with a correction; closing it as superseded with no requirements
+// orphaned the request the whole chain was answering (B-521).
+func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4951,7 +4960,9 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	if rs.run.Stage == "intake" {
-		_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "superseded", nil)
+		if intentID, _ := artifact.IntentIDForRun(rs.projectPath, rs.run.ID); continuingIntent == "" || intentID != continuingIntent {
+			_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "superseded", nil)
+		}
 	}
 	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "superseded", "detail": resolution})
