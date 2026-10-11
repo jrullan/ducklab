@@ -222,16 +222,18 @@ func toolList() []map[string]interface{} {
 			"description": "Run a document stage: intake (brief or adopt), spec, plan. adopt=true " +
 				"surveys an existing codebase into the requirements it already satisfies.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id":  str("the project id"),
-				"stage":       str("intake | spec | plan"),
-				"brief":       str("intake only: what to build, or context for adopt"),
-				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
-				"mode":        str("optional mode: solo | council | sectioned"),
-				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
-				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
-				"revise":      str("optional: what to change about the stage's current draft — the retry of a failed or rejected intake/spec/plan run, with its redo note"),
-				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND references — absolute paths: .md/.txt/.pdf documents or directories (loaded bounded into the prompt as context — PDFs as their extracted text, and a binary the engine cannot read reaches the model only as a notice and warns the run; they never add requirements), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
-				"scope_refs":  scopeRefsProp(),
+				"project_id":      str("the project id"),
+				"stage":           str("intake | spec | plan"),
+				"brief":           str("intake only: what to build, or context for adopt"),
+				"ducklings":       map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":            str("optional mode: solo | council | sectioned"),
+				"agent_turns":     map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"adopt":           map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
+				"revise":          str("optional: what to change about the stage's current draft — the retry of a failed or rejected intake/spec/plan run, with its redo note. The person's own words only; put reviewer findings in revise_findings"),
+				"revise_findings": str("optional, with a revision: reviewer findings carried over from the previous draft, kept apart from the person's note and labelled as the reviewer's (B-521)"),
+				"revises_run":     str("optional, with a revision: the run whose draft this revises (default: the run that wrote the proposal on the table). The revision inherits its references (roles included), brief, mode and rounds and, for intake, continues its intent"),
+				"refs":            map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND references — absolute paths: .md/.txt/.pdf documents or directories (loaded bounded into the prompt as context — PDFs as their extracted text, and a binary the engine cannot read reaches the model only as a notice and warns the run; they never add requirements), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
+				"scope_refs":      scopeRefsProp(),
 			}, "project_id", "stage"),
 		},
 		{
@@ -853,6 +855,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if r := strings.TrimSpace(a.str("revise")); r != "" {
 			req["revise"] = r
 		}
+		if f := strings.TrimSpace(a.str("revise_findings")); f != "" {
+			req["revise_findings"] = f
+		}
+		if parent := strings.TrimSpace(a.str("revises_run")); parent != "" {
+			req["revises_run"] = parent
+		}
 		if refs := stageRefsArg(a); len(refs) > 0 {
 			req["refs"] = refs
 		}
@@ -1020,9 +1028,9 @@ func (s *Server) status() (map[string]interface{}, error) {
 		for _, r := range runs {
 			switch r["status"] {
 			case "paused":
-				waiting = append(waiting, pick(r, "id", "stage", "task_id", "pending_kind", "verdict", "next"))
+				waiting = append(waiting, pick(r, "id", "stage", "task_id", "pending_kind", "verdict", "next", "intent", "revises_run", "revision"))
 			case "running", "queued":
-				active = append(active, pick(r, "id", "stage", "task_id", "status"))
+				active = append(active, pick(r, "id", "stage", "task_id", "status", "intent", "revises_run", "revision"))
 			}
 		}
 		entry := map[string]interface{}{
@@ -1119,7 +1127,9 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	view := pick(run, "id", "project_id", "stage", "mode", "task_id", "status", "verdict",
-		"failure", "redo_note", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings", "stage_request")
+		"failure", "redo_note", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings", "stage_request",
+		// B-521: which intention an intake serves, and the revision chain.
+		"intent", "revises_run", "revision")
 	if diff, _, _, dErr := s.eng.RunDiff(id); dErr == nil && diff != "" {
 		view["diff"] = diff
 	}
@@ -1188,6 +1198,12 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 				req["revise"] = reason
 			}
 		}
+		// The revision names the run it revises: the engine inherits its
+		// references, mode and rounds and continues its intent (B-521). A
+		// replayed request's own revision record is the engine's, not ours.
+		delete(req, "revision")
+		delete(req, "revise_findings")
+		req["revises_run"] = runID
 		out, err := s.eng.StageStart(projectID, stageName, req)
 		if err != nil {
 			return nil, err

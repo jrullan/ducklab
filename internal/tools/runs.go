@@ -87,6 +87,11 @@ func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 		if a.Task != "" && s.TaskID != a.Task {
 			continue
 		}
+		// A revision still waiting to claim its parent is not a run yet
+		// (B-521); recovery settles it.
+		if s.Status == "prepared" {
+			continue
+		}
 		rows = append(rows, row{s.ID, s.Stage, s.TaskID, s.Status, s.Verdict, s.Started})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].started > rows[j].started })

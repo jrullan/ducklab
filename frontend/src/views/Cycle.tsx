@@ -19,6 +19,8 @@ import { DiffView } from "../components/DiffView";
 import { documentLabel, parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
 import { DecisionCard } from "../components/DecisionCard";
+import { IntentChain } from "../components/IntentChain";
+import type { RevisionNote } from "../lib/retry";
 import { SurveyCoverageLine } from "../components/SurveyInventory";
 import { canChooseFile, chooseFile } from "../lib/picker";
 import { stageRefs } from "../lib/refroles";
@@ -411,10 +413,17 @@ export function Cycle({
   // The third answer. Accept and reject are a verdict on a document that is
   // usually almost right, and "almost" had no button: rejecting left the draft
   // alone and redrafting regenerated the parts you were happy with.
-  async function requestChanges(text: string) {
+  async function requestChanges(text: string, split?: RevisionNote) {
     setFailure(null);
     try {
-      const run = await client.stageStart(projectId, active.stage, { revise: text });
+      // B-521: the revision names the run that wrote this proposal, so it
+      // continues that run's references, mode, rounds and intent.
+      const revisesRun = artifact?.proposal?.run_id || undefined;
+      const run = await client.stageStart(projectId, active.stage, {
+        revise: split ? split.note : text,
+        ...(split?.findings ? { reviseFindings: split.findings } : {}),
+        revisesRun,
+      });
       setStartedRun(run.id);
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
@@ -918,7 +927,7 @@ export function Cycle({
         {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
           <ol className="order-3 space-y-3" data-testid="cycle-sections">
             {focusedSections.map((s) => (
-              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} focused={Boolean(selectedSection)} />
+              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} isIntent={active.stage === "intent"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} focused={Boolean(selectedSection)} />
             ))}
           </ol>
         )}
@@ -1368,7 +1377,7 @@ export function Cycle({
   );
 }
 
-function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false, requirementIds = new Set<string>(), focused = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean; requirementIds?: Set<string>; focused?: boolean }) {
+function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, isIntent = false, proposalPending = false, requirementIds = new Set<string>(), focused = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; isIntent?: boolean; proposalPending?: boolean; requirementIds?: Set<string>; focused?: boolean }) {
   // The Down walk is the engine's link, not a UI guess based on where a task
   // happens to be printed. Keep only task ids found in that walk, then use the
   // task record for its live state.
@@ -1422,7 +1431,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
                 : <span key={claim} className="mr-2">implements {claim}</span>)}
             </div>
           )}
-          <Prose body={cleanSectionBody(section.body)} className="mt-2 space-y-3 text-sm leading-relaxed text-ink-secondary" />
+          {isIntent ? <IntentChain body={section.body} /> : <Prose body={cleanSectionBody(section.body)} className="mt-2 space-y-3 text-sm leading-relaxed text-ink-secondary" />}
         </div>
       ) : <>
         <div data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
@@ -1440,7 +1449,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
                   : <span key={claim} className="mr-2">implements {claim}</span>)}
               </div>
             )}
-            <Prose body={cleanSectionBody(section.body)} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+            {isIntent ? <IntentChain body={section.body} /> : <Prose body={cleanSectionBody(section.body)} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
           </div>
         </details>
       </>}
@@ -1504,7 +1513,12 @@ function sectionsForStage(sections: readonly Section[], stage: string): Section[
 }
 
 function cleanSectionBody(body: string): string {
-  return body.replace(/\bAs-built:\s*yes\b\.?\s*/gi, "").trim();
+  return body
+    .replace(/\bAs-built:\s*yes\b\.?\s*/gi, "")
+    // B-521: the engine's fences around a person's words in intent.md are
+    // structure, not prose.
+    .replace(/^<!-- \/?ducklab:text[^\n]*-->[ \t]*$/gm, "")
+    .trim();
 }
 
 function summarySentence(section: Section): string {

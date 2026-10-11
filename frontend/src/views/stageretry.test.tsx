@@ -64,8 +64,32 @@ describe("RunView — Retry with this note goes through the run's own door", () 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]!.path).toBe("/v1/projects/ti-36x-pro/stages/intake");
     expect(sent[0]!.body.stage).toBe("intake");
-    expect(sent[0]!.body.revise).toBe(NOTE);
+    // B-521: the note Ducklab assembled, sent untouched, is carried over —
+    // not the person's words — and the revision names the run it revises
+    // (eett's request carried neither and was journaled as INT-003).
+    expect(sent[0]!.body.revise).toBe("");
+    expect(sent[0]!.body.revise_findings).toBe(NOTE);
+    expect(sent[0]!.body.revises_run).toBe("r-20261010-115519-tpfn");
     expect(sent.some((s) => s.path.endsWith("/runs"))).toBe(false);
+  });
+
+  it("names the revision chain and the intent it continues in the header", async () => {
+    const sent: Sent[] = [];
+    show({ ...failedIntake, id: "r-20261011-171745-mrrq", intent: "INT-002", revises_run: "r-20261010-121543-eett", revision: 2 }, sent);
+    const chain = await screen.findByTestId("run-revision-chain");
+    expect(chain).toHaveTextContent("Revision 2");
+    expect(chain).toHaveTextContent("of r-20261010-121543-eett");
+    expect(chain).toHaveTextContent("continues INT-002");
+  });
+
+  it("sends what the person wrote into the retry note as their note", async () => {
+    const sent: Sent[] = [];
+    show(failedIntake, sent);
+    fireEvent.change(await screen.findByLabelText("retry note"), { target: { value: `Keep the guidebook wording.\n\n${NOTE}` } });
+    fireEvent.click(await retryButton());
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.body.revise).toBe("Keep the guidebook wording.");
+    expect(sent[0]!.body.revise_findings).toBe(NOTE);
   });
 
   // The whole class: every document stage that waits at a gate with a note.
@@ -79,7 +103,8 @@ describe("RunView — Retry with this note goes through the run's own door", () 
       fireEvent.click(await retryButton());
       await waitFor(() => expect(sent).toHaveLength(1));
       expect(sent[0]!.path).toBe(`/v1/projects/ti-36x-pro/stages/${stage}`);
-      expect(sent[0]!.body.revise).toBe(NOTE);
+      expect(sent[0]!.body.revise_findings).toBe(NOTE);
+      expect(sent[0]!.body.revises_run).toBe(failedIntake.id);
     });
   }
 
@@ -97,7 +122,7 @@ describe("RunView — Retry with this note goes through the run's own door", () 
     show({ ...failedIntake, stage: "plan", mode: "solo", stage_request: { stage: "plan", extend: "add a CSV export", mode: "solo", rounds: 1 } }, sent);
     fireEvent.click(await retryButton());
     await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]!.body).toMatchObject({ extend: "add a CSV export", mode: "solo", rounds: 1, revise: NOTE });
+    expect(sent[0]!.body).toMatchObject({ extend: "add a CSV export", mode: "solo", rounds: 1, revise_findings: NOTE, revises_run: failedIntake.id });
   });
 
   it("still relaunches a failed build as a build of its task", async () => {

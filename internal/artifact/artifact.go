@@ -148,7 +148,7 @@ func ValidPlanArtifact(item string) bool {
 
 // fieldVocabulary is the single authority for parser and syntax-lint field validation.
 var fieldVocabulary = []FieldDefinition{
-	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope},
+	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Revisions", Kind: KindIntent, Scope: SectionScope},
 	{Canonical: "Delete", Kind: KindIntent, Scope: SectionScope},
 	{Canonical: "Originates from", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Priority", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Status", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Assumption", Kind: KindRequirements, Scope: SectionScope},
 	{Canonical: "Delete", Kind: KindRequirements, Scope: SectionScope},
@@ -315,7 +315,12 @@ func Parse(content string, kind Kind) (*Document, error) {
 			if kind == KindPlan {
 				scope = PlanMilestoneScope
 			}
-			parseSectionFields(current, text, kind, scope)
+			fields := text
+			if kind == KindIntent {
+				// Fenced user text is opaque: no field in it is ours.
+				fields = withoutIntentText(text)
+			}
+			parseSectionFields(current, fields, kind, scope)
 		default:
 			preamble = append(preamble, text)
 		}
@@ -336,7 +341,14 @@ func Parse(content string, kind Kind) (*Document, error) {
 		}
 	}
 
+	var fence intentFence
 	for _, line := range lines {
+		// A heading inside a person's fenced words is their Markdown, not a
+		// new journal entry (intent only; other kinds have no fences).
+		if kind == KindIntent && fence.opaque(line) {
+			buf = append(buf, line)
+			continue
+		}
 		if id, title, ok := parseHeading(line, "## ", prefix); ok {
 			flush()
 			commitParent()

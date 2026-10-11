@@ -143,6 +143,13 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 					legacyBound = true
 				}
 			}
+			abandoned := false
+			if run.Status == runStatusPrepared {
+				if !reconcilePreparedRevision(entry.Path, runDir, run) {
+					continue
+				}
+				abandoned = run.Status == "failed"
+			}
 			rs := &runState{
 				run:         run,
 				runDir:      runDir,
@@ -158,6 +165,11 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			s.runs[id] = rs
 			s.runsMu.Unlock()
 			recovered++
+			if abandoned {
+				if w, werr := s.ensureWriter(rs); werr == nil {
+					_ = w.WriteState()
+				}
+			}
 			if legacyBound {
 				if w, werr := s.ensureWriter(rs); werr == nil {
 					_ = w.WriteState()
@@ -204,6 +216,42 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// runStatusPrepared marks a revision whose record exists but whose parent is
+// not yet claimed. It is never registered, listed, queued or resumed; only
+// StageStart (after the claim) and recovery (reconcilePreparedRevision) move
+// a run out of it.
+const runStatusPrepared = "prepared"
+
+// reconcilePreparedRevision settles a revision the engine died preparing
+// (review of #175). Its parent's durable record decides: a parent whose
+// resolution names this run was claimed by it, so the revision is real — it
+// continues as a running run that recovery pauses for resume. Any other
+// parent was never claimed, and may be revised again: the prepared record is
+// removed (or, when it cannot be, left failed and unresumable), so a restart
+// can never yield two live revisions of one gate. Reports whether the run
+// should be registered.
+func reconcilePreparedRevision(projectRoot, runDir string, run *runlog.Run) bool {
+	named := false
+	if run.RevisesRun != "" {
+		if parent, err := runlog.ReadState(runlog.RunDirFor(projectRoot, run.RevisesRun)); err == nil {
+			if m := revisedByPattern.FindStringSubmatch(parent.Resolution); m != nil && m[1] == run.ID {
+				named = true
+			}
+		}
+	}
+	if named {
+		setRunStatus(run, "running", time.Now())
+		return true
+	}
+	if err := os.RemoveAll(runDir); err == nil {
+		return false
+	}
+	setRunStatus(run, "failed", time.Now())
+	run.Failure = "abandoned: the engine stopped before this revision claimed " + run.RevisesRun + "; revise that run again"
+	run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	return true
 }
 
 // reconcileAcceptedRun repairs the authoritative half-settled state: the

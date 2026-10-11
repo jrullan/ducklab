@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -45,8 +46,20 @@ type StageRequest struct {
 	// Revise is what to change about the draft already on the table. Set only
 	// when revising: it turns the run from "write this document" into "edit
 	// this one", which is the answer to a proposal that is almost right.
-	Revise   string `json:"revise"`
-	Autonomy string `json:"autonomy"`
+	Revise string `json:"revise"`
+	// ReviseFindings are reviewer findings the person forwards into the
+	// revision, kept apart from Revise — the person's own words — so neither
+	// the prompt nor the intent journal attributes a model's objection to the
+	// person (B-521). The engine folds them into Revise, labelled, and clears
+	// this field; the run's Revision keeps them for the record.
+	ReviseFindings string `json:"revise_findings,omitempty"`
+	// RevisesRun names the run whose draft this revision changes. Optional:
+	// absent, the run that wrote the proposal on the table is the parent.
+	RevisesRun string `json:"revises_run,omitempty"`
+	// Revision is the engine's record of what this revision continues and
+	// what it added. Set only by the engine; a client-sent value is ignored.
+	Revision *StageRevision `json:"revision,omitempty"`
+	Autonomy string         `json:"autonomy"`
 	// AgentTurns caps model calls per reply for every seat in this stage —
 	// the intake that died at 12/12 had no way to be launched with more.
 	// Zero keeps the defaults; -1 lifts the cap.
@@ -96,6 +109,254 @@ type StageRequest struct {
 	resumed bool
 }
 
+// StageRevision is what one revision of a document stage continues and adds.
+// Revise on the same request is the whole accumulated instruction the
+// architect reads; Note and Findings are only THIS revision's delta, which is
+// what the intent journal and the desktop show (B-521).
+type StageRevision struct {
+	// Parent is the run whose draft this revision changes.
+	Parent string `json:"parent,omitempty"`
+	// Intent is the intention an intake revision continues (INT-NNN). Empty
+	// for spec and plan, and for an intake whose parent serves no open intent.
+	Intent string `json:"intent,omitempty"`
+	// Number counts revisions in the chain, 1 for the first.
+	Number int `json:"number,omitempty"`
+	// Note is the person's own words; Findings the reviewer findings carried
+	// over. Either may be empty; lines the chain already said are dropped.
+	Note     string `json:"note,omitempty"`
+	Findings string `json:"findings,omitempty"`
+}
+
+// revisionFindingsLabel heads carried-over findings in the architect's
+// revision note: the reviewer's words, not the person's.
+const revisionFindingsLabel = "Reviewer findings carried over from the previous draft (the reviewer's words, not the person's):"
+
+// composeRevision is one revision's instruction: the person's note, then the
+// labelled findings.
+func composeRevision(note, findings string) string {
+	note, findings = strings.TrimSpace(note), strings.TrimSpace(findings)
+	if findings != "" {
+		findings = revisionFindingsLabel + "\n" + findings
+	}
+	return appendRevision(note, findings)
+}
+
+// dropSaidLines removes the lines of text that the chain already carries, so
+// a finding forwarded twice — or a whole earlier note pasted back — does not
+// snowball the instruction one revision later (B-521). Blank-line runs left
+// behind collapse.
+func dropSaidLines(text, said string) string {
+	seen := map[string]bool{}
+	for _, line := range strings.Split(said, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			seen[line] = true
+		}
+	}
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && seen[trimmed] {
+			continue
+		}
+		if trimmed == "" && (len(out) == 0 || strings.TrimSpace(out[len(out)-1]) == "") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// revisionPlan is what prepareRevision decided for StageStart.
+type revisionPlan struct {
+	// proposalRun wrote the draft on the table.
+	proposalRun string
+	// explicit is true when the request named its parent (revises_run).
+	explicit bool
+}
+
+// prepareRevision turns a revision request into its effective form before
+// anything is validated or recorded (B-521, B-087).
+//
+// The parent is the run named by RevisesRun or, absent, the run whose
+// proposal is on the table. The revision inherits that run's references —
+// the entries as recorded, whatever per-reference data they carry — its
+// brief, mode and rounds, each unless the person set it on this request: a
+// revision is the same job with a correction, and the TI-36X revisions that
+// lost the guidebook and the council rounds revised a different job. The
+// accumulated instruction folds the chain's earlier notes, then this
+// revision's own note and its labelled findings, minus lines the chain
+// already said. For intake, the revision continues the parent's intent.
+func (s *Service) prepareRevision(projectRoot, projectID string, req *StageRequest) (revisionPlan, error) {
+	var plan revisionPlan
+	req.Revision = nil
+	note := strings.TrimSpace(req.Revise)
+	findings := strings.TrimSpace(req.ReviseFindings)
+	req.ReviseFindings = ""
+	parent := strings.TrimSpace(req.RevisesRun)
+	req.RevisesRun = ""
+	if note == "" && findings == "" {
+		return plan, nil
+	}
+	kind := stage.Name(req.Stage).Kind()
+	if prop, err := artifact.LoadProposed(projectRoot, kind); err == nil && prop != nil {
+		plan.proposalRun = prop.Front.RunID
+	}
+	explicit := parent != ""
+	plan.explicit = explicit
+	if !explicit {
+		parent = plan.proposalRun
+	}
+	var parentRun *runlog.Run
+	if parent != "" {
+		s.runsMu.RLock()
+		rs, ok := s.runs[parent]
+		s.runsMu.RUnlock()
+		if ok {
+			parentRun = rs.snapshotRun()
+		}
+	}
+	if explicit && (parentRun == nil || parentRun.ProjectID != projectID || parentRun.Stage != req.Stage) {
+		return plan, refuseLaunch("revises_run %q is not a %s run of this project", parent, req.Stage)
+	}
+	said := ""
+	revision := &StageRevision{Parent: parent, Number: 1}
+	if parent != "" {
+		if prior, ok := loadStageRequest(filepath.Join(projectRoot, ".ducklab", "runs", parent)); ok {
+			// Wholesale: a reference entry is inherited as recorded, so data
+			// it carries beside its path travels with it. Reloaded from the
+			// same paths at run time, not copied: the person may have edited
+			// a document between draft and revision.
+			if len(req.Refs) == 0 {
+				req.Refs = prior.Refs
+			}
+			if req.From == "" {
+				req.From = prior.From
+			}
+			if req.Mode == "" {
+				req.Mode = prior.Mode
+			}
+			if req.Rounds == 0 {
+				req.Rounds = prior.Rounds
+			}
+			said = prior.Revise
+			if prior.Revision != nil {
+				revision.Number = prior.Revision.Number + 1
+			}
+		}
+		// A parent launched with an empty mode (the settings decided) ran
+		// in the mode its record states; the revision runs the same.
+		if req.Mode == "" && parentRun != nil {
+			req.Mode = parentRun.Mode
+		}
+	}
+	note = dropSaidLines(note, said)
+	findings = dropSaidLines(findings, said+"\n"+note)
+	revision.Note, revision.Findings = note, findings
+	req.Revise = appendRevision(said, composeRevision(note, findings))
+	if req.Stage == "intake" && parent != "" {
+		ref, err := artifact.IntentForRun(projectRoot, parent)
+		if err != nil {
+			return plan, err
+		}
+		// An accepted intention is closed: a change to it is a new one.
+		if ref.ID != "" && !strings.EqualFold(ref.Outcome, "accepted") {
+			revision.Intent = ref.ID
+			revision.Number = ref.Revisions + 1
+		}
+	}
+	req.Revision = revision
+	return plan, nil
+}
+
+// revisionCrashPoint marks the two boundaries of a revision's launch that an
+// engine death must not corrupt: the child's prepared record written but the
+// parent unclaimed, and the parent claimed but the child not yet running.
+// A no-op in the engine; tests stop the launch there to exercise recovery.
+var revisionCrashPoint = func(string) {}
+
+// revisedByPattern finds the revision that already claimed a run.
+var revisedByPattern = regexp.MustCompile(`\(revised by (r-[A-Za-z0-9-]+)\)`)
+
+// claimRevisionParent makes "revise this draft" a compare-and-set on the run
+// that wrote it (review of #175). An old tab, or a double-submit, used to pass
+// the parent check after the first request had already superseded it: two
+// revisions then edited whatever proposal was newest on disk while both
+// claimed the old run as parent, and their revision numbers collided.
+//
+// Under the parent's decision lock, the parent must still be answerable: not
+// already revised; when the request names it, the owner of the draft on the
+// table; and either paused at a gate that offers request_changes (it is
+// superseded here, its intent left open for the chain) or a failed draft with
+// no gate (the "Retry with this note" door), which is marked as revised. Any
+// other parent is refused before a run exists. The resolution names the
+// revision, so a late request is told which run to revise instead.
+func (s *Service) claimRevisionParent(projectRoot string, req StageRequest, plan revisionPlan, runID string) error {
+	parent := req.Revision.Parent
+	if parent == "" {
+		return nil
+	}
+	s.runsMu.RLock()
+	rs, ok := s.runs[parent]
+	s.runsMu.RUnlock()
+	if !ok {
+		if plan.explicit {
+			return refuseLaunch("revises_run %q is not a %s run of this project", parent, req.Stage)
+		}
+		// A proposal written by a run this engine does not know (an older
+		// engine's record): nothing to claim.
+		return nil
+	}
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	run := rs.snapshotRun()
+	if m := revisedByPattern.FindStringSubmatch(run.Resolution); m != nil {
+		return refuseLaunch("run %s was already revised by %s — revise the newest draft instead", parent, m[1])
+	}
+	proposalRun := ""
+	if prop, err := artifact.LoadProposed(projectRoot, stage.Name(req.Stage).Kind()); err == nil && prop != nil {
+		proposalRun = prop.Front.RunID
+	}
+	if plan.explicit && proposalRun != "" && proposalRun != parent {
+		return refuseLaunch("run %s's draft is no longer the one on the table — %s's is; revise that one", parent, proposalRun)
+	}
+	resolution := fmt.Sprintf("changes requested (revised by %s): %s", runID, composeRevision(req.Revision.Note, req.Revision.Findings))
+	switch {
+	case run.Status == "paused" && run.PendingKind == "gate":
+		if !slices.Contains(runNext(run), "request_changes") {
+			return refuseLaunch("run %s does not take changes now; it offers %v", parent, runNext(run))
+		}
+		// The draft on the table is answered; its intent is not. The person
+		// is still asking for the same thing, so a superseded run in a
+		// revision chain leaves the intent open (B-521).
+		if err := s.resolveSupersededRun(parent, resolution, req.Revision.Intent); err != nil {
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
+		}
+	case run.Status == "failed" && !run.Accepted:
+		w, err := s.ensureWriter(rs)
+		if err != nil {
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
+		}
+		rs.wmu.Lock()
+		previous := rs.run.Resolution
+		rs.run.Resolution = resolution
+		rs.wmu.Unlock()
+		if err := w.WriteState(); err != nil {
+			rs.wmu.Lock()
+			rs.run.Resolution = previous
+			rs.wmu.Unlock()
+			return fmt.Errorf("claim %s for revision: %w", parent, err)
+		}
+		w.AppendEvent("human", map[string]interface{}{"action": "revised", "detail": resolution})
+	default:
+		if plan.explicit {
+			return refuseLaunch("run %s is %s and no longer takes changes", parent, run.Status)
+		}
+		// A rejected draft still on disk, revised without naming it: there
+		// is no gate left to claim.
+	}
+	return nil
+}
+
 // StageStart runs intake, spec or plan and leaves a proposal for the human.
 //
 // Returns immediately with a running run, like every other long operation: the
@@ -111,10 +372,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
-	// Intake retries keep the delivery constraints chosen at project creation,
-	// and relative references are project-relative rather than dependent on the
-	// engine daemon's working directory (B-474).
-	req.Refs = normalizeStageRefs(entry.Path, req.Stage, req.Refs)
 	// Refuse an impossible document run before it acquires an id, a queue
 	// entry, and a misleading failed-run record. The desktop normally prevents
 	// these launches, but CLI and MCP callers deserve the same invariant.
@@ -130,7 +387,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 			return nil, fmt.Errorf("spec needs accepted requirements — add an intention and accept the resulting requirements first")
 		}
 	}
-	if req.Stage == "plan" && req.Revise == "" && req.Extend == "" && req.SplitTask == "" {
+	if req.Stage == "plan" && req.Revise == "" && req.ReviseFindings == "" && req.Extend == "" && req.SplitTask == "" {
 		plan, loadErr := artifact.Load(entry.Path, artifact.KindPlan)
 		if loadErr != nil {
 			return nil, loadErr
@@ -191,6 +448,20 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		}
 		req.Revise = specSettleNote(debt)
 	}
+
+	// A revision continues its parent: inherited references, brief, mode and
+	// rounds, the chain's notes folded, the intent it serves (B-521). Before
+	// the references are normalized, so "the person named none" is still
+	// visible as an empty list — the preset normalization adds made every
+	// intake revision look as if it carried references of its own.
+	revising, err := s.prepareRevision(entry.Path, projectID, &req)
+	if err != nil {
+		return nil, err
+	}
+	// Intake retries keep the delivery constraints chosen at project creation,
+	// and relative references are project-relative rather than dependent on the
+	// engine daemon's working directory (B-474).
+	req.Refs = normalizeStageRefs(entry.Path, req.Stage, req.Refs)
 
 	// The plan amendment: Review's "this needs more, but not a redesign".
 	// Solo and one round unless asked otherwise: the architect returns a
@@ -292,25 +563,13 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// never learned. Resolved here, at the moment the person asks, not when
 	// the revision lands: the decision happened now, whatever the revision's
 	// fate.
-	if req.Revise != "" {
-		kind := stage.Name(req.Stage).Kind()
-		if prop, pErr := artifact.LoadProposed(entry.Path, kind); pErr == nil && prop != nil && prop.Front.RunID != "" {
-			s.resolveSuperseded(prop.Front.RunID, "changes requested: "+req.Revise)
-			// The revision inherits what the revised run was launched with.
-			// A spec drafted over 13 reference documents was once revised
-			// with the note "use the reference documents" — and the revise
-			// request carried none, so the model revised blind (B-087).
-			// Reloaded fresh from the same paths, not copied: the person may
-			// have edited a document between draft and revision.
-			if prior, ok := loadStageRequest(filepath.Join(entry.Path, ".ducklab", "runs", prop.Front.RunID)); ok {
-				if len(req.Refs) == 0 && req.From == "" {
-					req.Refs = prior.Refs
-					req.From = prior.From
-				}
-				req.Revise = appendRevision(prior.Revise, req.Revise)
-			}
-		}
-	}
+	//
+	// The claim is the LAST fallible step (review of #175): the revision's
+	// own record — state, log, persisted request — exists on disk first, so
+	// a launch that cannot create its run never consumes the parent's
+	// decision; and a claim that fails or loses the race removes the record
+	// it made. Everything after the claim cannot fail.
+	runID := runlog.GenerateRunID()
 
 	// Recorded as what will actually run, not as a constant. A report that
 	// says every stage was a council when half were solo is a report that
@@ -318,7 +577,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	warning := bothSidesWarning(roster)
 	profile, profileSource, _ := s.stageSupportProfile(roster, req.SupportProfile)
 	run := &runlog.Run{
-		ID:                   runlog.GenerateRunID(),
+		ID:                   runID,
 		ProjectID:            projectID,
 		Stage:                req.Stage,
 		Mode:                 mode,
@@ -340,6 +599,9 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		// until a person approves it, and saying so is the honest label (P3).
 		Gate: "none",
 	}
+	if req.Revision != nil {
+		run.RevisesRun, run.Revision, run.Intent = req.Revision.Parent, req.Revision.Number, req.Revision.Intent
+	}
 	s.recordSeatTiers(run, roster)
 	for _, role := range documentFilled {
 		run.RosterSources[string(role)] = "documents council seat"
@@ -348,10 +610,41 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		run.RosterSources[string(role)] = "request"
 	}
 
-	setRunStatus(run, "running", time.Now())
+	// A revision is written PREPARED until its parent is claimed (review of
+	// #175): an engine that dies between this record and the claim leaves a
+	// child that recovery never reactivates — it reconciles it against the
+	// parent's durable "revised by" instead (reconcilePreparedRevision).
+	if req.Revision != nil {
+		setRunStatus(run, runStatusPrepared, time.Now())
+	} else {
+		setRunStatus(run, "running", time.Now())
+	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
+	}
+	// The request outlives the goroutine: an answered question re-enters the
+	// stage with the same brief, mode and revision, and the request used to
+	// live nowhere a resume could find it.
+	if err := writeStageRequest(writer.RunDir(), req); err != nil {
+		discardUnstartedRun(writer)
+		return nil, fmt.Errorf("record the stage request: %w", err)
+	}
+	if data, err := json.Marshal(req); err == nil {
+		_ = json.Unmarshal(data, &run.StageRequest)
+	}
+	if req.Revision != nil {
+		revisionCrashPoint("before-claim")
+		if err := s.claimRevisionParent(entry.Path, req, revising, runID); err != nil {
+			discardUnstartedRun(writer)
+			return nil, err
+		}
+		revisionCrashPoint("after-claim")
+		// Claimed: the parent's record names this run, so it is real. A failed
+		// write here is harmless — the in-memory run proceeds, and recovery
+		// finalizes a prepared child its parent names.
+		setRunStatus(run, "running", time.Now())
+		_ = writer.WriteState()
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs := &runState{
@@ -363,13 +656,6 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
-	// The request outlives the goroutine: an answered question re-enters the
-	// stage with the same brief, mode and revision, and the request used to
-	// live nowhere a resume could find it.
-	writeStageRequest(rs.runDir, req)
-	if data, err := json.Marshal(req); err == nil {
-		_ = json.Unmarshal(data, &run.StageRequest)
-	}
 	// The event log is the self-contained account of why every later turn and
 	// finding happened. Persist the exact effective request in its first frame;
 	// clients joining live can show it without reading a sidecar file.
@@ -613,10 +899,20 @@ func liveRequirementCount(doc *artifact.Document) int {
 const stageRequestFile = "stage_request.json"
 const sectionedCheckpointFile = "sectioned_checkpoint.json"
 
-func writeStageRequest(runDir string, req StageRequest) {
-	if data, err := json.Marshal(req); err == nil {
-		_ = os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
+func writeStageRequest(runDir string, req StageRequest) error {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
 	}
+	return os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
+}
+
+// discardUnstartedRun removes the record of a stage run that never started:
+// its launch failed before anything was queued, so no one has seen it and a
+// leftover "running" record would read as a crashed run on the next start.
+func discardUnstartedRun(w *runlog.Writer) {
+	_ = w.Close()
+	_ = os.RemoveAll(w.RunDir())
 }
 
 // normalizeStageRefs gives references a stable meaning before the request is
@@ -656,6 +952,41 @@ func normalizeStageRefs(projectRoot, stageName string, refs []StageRef) []StageR
 		out = append(out, StageRef{Path: path, Role: role})
 	}
 	return out
+}
+
+// recordStageIntent writes an intake's place in the intent journal before a
+// model sees it. A fresh brief is a new intention. A revision is recorded
+// under the intention it continues — "Revision N (run X)" with the person's
+// note and the carried-over findings apart — never as a new INT: the TI-36X
+// chain turned three reviewer-findings blobs into INT-003..005 and orphaned
+// the person's INT-002 (B-521). A revision whose parent serves no open intent
+// (an adoption survey, an accepted intention) is the one case where the
+// correction itself becomes a new intention.
+func (s *Service) recordStageIntent(rs *runState, projectRoot string, req StageRequest, intentText string) error {
+	var intentID string
+	switch {
+	case req.Revision != nil && req.Revision.Intent != "":
+		n, err := artifact.AppendIntentRevision(projectRoot, req.Revision.Intent, rs.run.ID, rs.run.StartedAt, req.Revision.Note, req.Revision.Findings)
+		if err != nil {
+			return fmt.Errorf("record intent revision: %w", err)
+		}
+		intentID = req.Revision.Intent
+		rs.wmu.Lock()
+		rs.run.Revision = n
+		rs.wmu.Unlock()
+	case strings.TrimSpace(intentText) != "":
+		id, err := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, intentText)
+		if err != nil {
+			return fmt.Errorf("record intent: %w", err)
+		}
+		intentID = id
+	default:
+		return nil
+	}
+	rs.wmu.Lock()
+	rs.run.Intent = intentID
+	rs.wmu.Unlock()
+	return nil
 }
 
 // loadStageRequest rebuilds a stage run's request from its record. The false
@@ -733,15 +1064,26 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// generated context are appended. Intent is provenance, not a prompt dump.
 	originalBrief := seed
 	intentText := originalBrief
-	if strings.TrimSpace(req.Revise) != "" {
-		// A requested correction is itself new human intent. Do not duplicate
-		// the inherited seed and call it new; preserve the words that changed it.
+	if req.Revision != nil {
+		intentText = composeRevision(req.Revision.Note, req.Revision.Findings)
+	} else if strings.TrimSpace(req.Revise) != "" {
 		intentText = req.Revise
 	}
-	if req.Stage == "intake" && !req.Adopt && !req.resumed && strings.TrimSpace(intentText) != "" {
-		if _, err := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, intentText); err != nil {
-			s.failRun(rs, fmt.Errorf("record intent: %w", err))
-			return
+	if req.Stage == "intake" && !req.Adopt {
+		if !req.resumed {
+			if err := s.recordStageIntent(rs, projectRoot, req, intentText); err != nil {
+				s.failRun(rs, err)
+				return
+			}
+		} else if req.Revision != nil && req.Revision.Intent != "" {
+			// A revision finalized by recovery resumes without ever having
+			// started: its journal entry is still owed. Idempotent per run;
+			// a resumed run never fails over its provenance.
+			if id, _ := artifact.IntentIDForRun(projectRoot, rs.run.ID); id == "" {
+				if err := s.recordStageIntent(rs, projectRoot, req, intentText); err != nil {
+					rs.writer.AppendEvent("warning", map[string]interface{}{"detail": "intent revision not recorded: " + err.Error()})
+				}
+			}
 		}
 	}
 	if strings.TrimSpace(originalBrief) != "" {
@@ -1189,10 +1531,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// Empty Intake interviews the person. Once it succeeds, preserve those
 		// answers as the intention that actually produced the proposal.
 		if answers := rs.intentAnswers(); answers != "" {
-			if _, appendErr := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, answers); appendErr != nil {
+			id, appendErr := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, answers)
+			if appendErr != nil {
 				s.failRun(rs, fmt.Errorf("record interviewed intent: %w", appendErr))
 				return
 			}
+			rs.wmu.Lock()
+			rs.run.Intent = id
+			rs.wmu.Unlock()
 		}
 	}
 	if req.Stage == "intake" {
@@ -2663,7 +3009,34 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 	if err != nil {
 		return err
 	}
-	return artifact.DiscardProposal(entry.Path, artifact.Kind(kind))
+	runID := ""
+	if artifact.Kind(kind) == artifact.KindRequirements {
+		if prop, pErr := artifact.LoadProposed(entry.Path, artifact.KindRequirements); pErr == nil && prop != nil {
+			runID = prop.Front.RunID
+		}
+	}
+	// The proposal is the only handle on the run whose intent this closes:
+	// discarding it and then failing to record the outcome left the intent
+	// pending with nothing to retry from (review of #175). Both happen or
+	// neither does. intent.md is written atomically, so a failed resolution
+	// leaves it as it was; only the proposal needs restoring.
+	snap := snapshotDocs(entry.Path, artifact.ProposedPath(entry.Path, artifact.Kind(kind)))
+	if err := artifact.DiscardProposal(entry.Path, artifact.Kind(kind)); err != nil {
+		return err
+	}
+	// Discarding the newest draft of an intent's chain is its answer: the
+	// intent closes as not accepted. ResolveIntent ignores an older run and
+	// never downgrades an accepted intent (B-521).
+	if runID != "" {
+		if err := artifact.ResolveIntent(entry.Path, runID, "not accepted", nil); err != nil {
+			err = fmt.Errorf("discard %s proposal: record the intent's outcome: %w", kind, err)
+			if restoreErr := snap.restore(); restoreErr != nil {
+				return fmt.Errorf("%w (also failed to restore the proposal: %v)", err, restoreErr)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // taskBodyHash identifies the meaning of a task independently of the plan file.

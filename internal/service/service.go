@@ -4941,26 +4941,48 @@ func triageBugIDs(data map[string]interface{}) map[string]struct{} {
 // revision requested on its draft, or a sibling's proposal accepted over it.
 // Quietly a no-op when the run is not waiting: only a paused gate is moot.
 func (s *Service) resolveSuperseded(id, resolution string) {
+	_ = s.resolveSupersededRun(id, resolution, "")
+}
+
+// resolveSupersededRun is resolveSuperseded for a revision: when the
+// superseded intake serves continuingIntent — the intention the revision
+// carries on — the intent stays open. The person asked for the same thing
+// again with a correction; closing it as superseded with no requirements
+// orphaned the request the whole chain was answering (B-521).
+//
+// It reports whether the resolution is durable (review of #175): a revision
+// claims its parent through it, and a claim that silently failed — the
+// parent's log unwritable — left the parent paused and revisable again while
+// the revision ran. The run's state is written before anything else depends
+// on it, and restored in memory when that write fails.
+func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
 	if !ok || rs.run.Status != "paused" || rs.run.PendingKind != "gate" {
-		return
+		return nil
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
-		return
+		return fmt.Errorf("supersede %s: %w", id, err)
 	}
+	saved := *rs.run
 	setRunStatus(rs.run, "done", time.Now())
 	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-	if rs.run.Stage == "intake" {
-		_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "superseded", nil)
-	}
 	clearPending(rs.run)
+	if err := w.WriteState(); err != nil {
+		*rs.run = saved
+		return fmt.Errorf("supersede %s: %w", id, err)
+	}
+	if rs.run.Stage == "intake" {
+		if intentID, _ := artifact.IntentIDForRun(rs.projectPath, rs.run.ID); continuingIntent == "" || intentID != continuingIntent {
+			_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "superseded", nil)
+		}
+	}
 	w.AppendEvent("human", map[string]interface{}{"action": "superseded", "detail": resolution})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
-	_ = w.WriteState()
+	return nil
 }
 
 // RunLand records that an operator manually landed the work represented by a

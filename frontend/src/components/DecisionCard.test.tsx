@@ -38,7 +38,33 @@ describe("DecisionCard document gates", () => {
 
     expect(screen.getByTestId("change-note")).toHaveValue("Fix these deterministic proposal blockers:\n- unknown field Implementa");
     fireEvent.click(screen.getByTestId("request-changes-button"));
-    expect(onRequestChanges).toHaveBeenCalledWith("Fix these deterministic proposal blockers:\n- unknown field Implementa");
+    // B-521: the note as sent, and the same note split by who wrote it — an
+    // untouched engine seed is carried over, not the person's words.
+    expect(onRequestChanges).toHaveBeenCalledWith("Fix these deterministic proposal blockers:\n- unknown field Implementa", {
+      note: "", findings: "Fix these deterministic proposal blockers:\n- unknown field Implementa",
+    });
+  });
+
+  it("keeps what the person added apart from the seeded findings", async () => {
+    const onRequestChanges = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DecisionCard
+        next={["request_changes"]}
+        title="Proposal awaiting your decision"
+        consequence="revises the draft"
+        onAccept={() => {}}
+        onReject={() => {}}
+        onRequestChanges={onRequestChanges}
+        documentDissent={{ findings: [{ severity: "major", issue: "REQ-008 invents behavior", fix: "Remove it." }], blocking: true }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("change-note"), {
+      target: { value: "Use the guidebook wording.\n\n- [major] REQ-008 invents behavior Fix: Remove it." },
+    });
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+    expect(onRequestChanges).toHaveBeenCalledWith(expect.any(String), {
+      note: "Use the guidebook wording.", findings: "- [major] REQ-008 invents behavior Fix: Remove it.",
+    });
   });
 });
 
