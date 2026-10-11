@@ -161,6 +161,84 @@ func TestRealGuidebookReadsAsEnglish(t *testing.T) {
 	}
 }
 
+// Review of #173: "%PDF-" anywhere in the first kilobyte made a note about
+// the PDF format a PDF — pdftotext refused it and a text reference was lost.
+func TestTextMentioningThePDFHeaderStaysText(t *testing.T) {
+	note := []byte("# Export notes\n\nA valid file starts with the bytes `%PDF-1.7`; check the header.\n")
+	if isPDF(note) {
+		t.Error("a Markdown note mentioning %PDF- was sniffed as a PDF")
+	}
+	p := filepath.Join(t.TempDir(), "notes.md")
+	os.WriteFile(p, note, 0o644)
+	d, err := Load(p, "")
+	if err != nil || !d.Readable() || d.Kind != KindText || d.Text != string(note) {
+		t.Errorf("doc = kind %q readable %v reason %q", d.Kind, d.Readable(), d.Reason)
+	}
+}
+
+// A text file that does start with the header is routed to pdftotext; when
+// extraction fails on it, it is still text — with or without poppler.
+func TestTextStartingWithThePDFHeaderFallsBackToText(t *testing.T) {
+	body := []byte("%PDF- is the magic number of the format.\nThis file is plain prose.\n")
+	p := filepath.Join(t.TempDir(), "magic.txt")
+	os.WriteFile(p, body, 0o644)
+	for _, bin := range []string{pdftotext, "ducklab-no-such-pdftotext"} {
+		old := pdftotext
+		pdftotext = bin
+		d, err := Load(p, "")
+		pdftotext = old
+		if err != nil || !d.Readable() || d.Kind != KindText || d.Text != string(body) {
+			t.Errorf("pdftotext=%s: kind %q readable %v reason %q", bin, d.Kind, d.Readable(), d.Reason)
+		}
+	}
+}
+
+// A real PDF with a BOM, whitespace or junk ahead of the header still
+// extracts: readers accept it, so the sniffer must.
+func TestPDFWithLeadingJunkStillExtracts(t *testing.T) {
+	needPDFToText(t)
+	pdf, err := os.ReadFile(filepath.Join("testdata", "guide.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for name, lead := range map[string]string{"bom.pdf": "\xEF\xBB\xBF", "ws.pdf": "\n\n  ", "junk.pdf": "garbage from a mail gateway\n"} {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, append([]byte(lead), pdf...), 0o644)
+		d, err := Load(p, "")
+		if err != nil || d.Kind != KindPDF || !d.Readable() || !strings.Contains(d.Text, "Calculator guidebook page one") {
+			t.Errorf("%s: kind %q readable %v reason %q", name, d.Kind, d.Readable(), d.Reason)
+		}
+	}
+}
+
+// Review of #173: a cache entry read mid-write was marked Cached and served
+// truncated. An entry without the trailer — cut short however it happened —
+// is never trusted; the PDF is extracted again and the entry rewritten whole.
+func TestTruncatedCacheEntryIsNotTrusted(t *testing.T) {
+	needPDFToText(t)
+	src := filepath.Join("testdata", "guide.pdf")
+	raw, _ := os.ReadFile(src)
+	cache := t.TempDir()
+	entry := cachePathFor(cache, raw)
+	os.WriteFile(entry, []byte("--- page 1 ---\nCalcul"), 0o644)
+	d, err := Load(src, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Cached || !strings.Contains(d.Text, "toggle key switches fractions") {
+		t.Fatalf("truncated entry served: cached=%v text=%q", d.Cached, d.Text)
+	}
+	again, _ := Load(src, cache)
+	if !again.Cached || again.Text != d.Text {
+		t.Errorf("the rewritten entry was not served whole: cached=%v", again.Cached)
+	}
+	entries, _ := os.ReadDir(cache)
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(entry) {
+		t.Errorf("cache holds %v, want only the renamed entry (no temp files)", entries)
+	}
+}
+
 // zipFixture builds a small zip holding one named entry: an Office file is a
 // zip whose first directory says what it is.
 func zipFixture(t testing.TB, entry string) []byte {

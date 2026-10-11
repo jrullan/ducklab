@@ -105,7 +105,11 @@ func Load(path, cacheDir string) (Doc, error) {
 	switch {
 	case isPDF(raw):
 		d.Kind, d.Type = KindPDF, "PDF"
-		extractPDF(&d, raw, cacheDir)
+		if extractPDF(&d, raw, cacheDir) != nil && isText(raw) && !looksLikePDFBody(raw) {
+			// pdftotext refused a text file that only starts like a PDF:
+			// it is a text reference, and losing it is the worse error.
+			d = Doc{Path: path, Size: d.Size, Kind: KindText, Type: "text", Text: string(raw)}
+		}
 	case isText(raw):
 		d.Kind, d.Type = KindText, "text"
 		d.Text = string(raw)
@@ -116,14 +120,33 @@ func Load(path, cacheDir string) (Doc, error) {
 	return d, nil
 }
 
-// isPDF sniffs the header. The spec allows junk before it; readers accept it
-// within the first kilobyte.
+// isPDF sniffs the header. A header at the start (after a BOM or whitespace)
+// is a PDF. Readers also accept junk before it within the first kilobyte, but
+// a header that late counts only when the content is not text: a Markdown
+// note that mentions "%PDF-" near its top is a note about PDFs, and routing
+// it to pdftotext lost a readable reference (review of #173).
 func isPDF(raw []byte) bool {
+	if bytes.HasPrefix(trimLead(raw), pdfHeader) {
+		return true
+	}
 	head := raw
 	if len(head) > 1024 {
 		head = head[:1024]
 	}
-	return bytes.Contains(head, []byte("%PDF-"))
+	return bytes.Contains(head, pdfHeader) && !isText(raw)
+}
+
+var pdfHeader = []byte("%PDF-")
+
+// trimLead drops a UTF-8 BOM and leading whitespace.
+func trimLead(raw []byte) []byte {
+	return bytes.TrimLeft(bytes.TrimPrefix(raw, []byte("\xEF\xBB\xBF")), " \t\r\n\f")
+}
+
+// looksLikePDFBody reports PDF object syntax: a text file without it that
+// pdftotext refused is text that merely starts like a PDF.
+func looksLikePDFBody(raw []byte) bool {
+	return bytes.Contains(raw, []byte("endobj")) || bytes.Contains(raw, []byte("xref"))
 }
 
 // isText accepts UTF-8 or 8-bit text without NUL bytes or binary control
@@ -135,7 +158,10 @@ func isText(raw []byte) bool {
 	if bytes.IndexByte(raw, 0) >= 0 {
 		return false
 	}
-	if !strings.HasPrefix(http.DetectContentType(raw), "text/") {
+	// "application/pdf" is DetectContentType reading the first five bytes;
+	// whether the rest is text is decided below, like any other file — prose
+	// that opens with "%PDF-" is still prose (review of #173).
+	if ct := http.DetectContentType(raw); !strings.HasPrefix(ct, "text/") && ct != "application/pdf" {
 		return false
 	}
 	// DetectContentType reads 512 bytes; a binary tail must not pass.
@@ -186,28 +212,68 @@ func binaryType(raw []byte, path string) string {
 	return ct
 }
 
-// extractPDF fills d from the PDF's text, through the cache.
-func extractPDF(d *Doc, raw []byte, cacheDir string) {
-	sum := sha256.Sum256(raw)
+// extractPDF fills d from the PDF's text, through the cache. The error is
+// the extraction's own failure (pdftotext missing, refused, timed out); a
+// PDF with no text is not an error, only unreadable.
+func extractPDF(d *Doc, raw []byte, cacheDir string) error {
 	cachePath := ""
 	if cacheDir != "" {
-		cachePath = filepath.Join(cacheDir, hex.EncodeToString(sum[:16])+"."+cacheVersion+".txt")
-		if data, err := os.ReadFile(cachePath); err == nil {
+		cachePath = cachePathFor(cacheDir, raw)
+		if text, ok := readCache(cachePath); ok {
 			d.Cached = true
-			finishPDF(d, string(data))
-			return
+			finishPDF(d, text)
+			return nil
 		}
 	}
 	out, err := runPDFToText(d.Path)
 	if err != nil {
 		d.Reason = err.Error()
-		return
+		return err
 	}
 	text := pageMarked(out)
-	if cachePath != "" && os.MkdirAll(cacheDir, 0o755) == nil {
-		_ = os.WriteFile(cachePath, []byte(text), 0o644)
+	if cachePath != "" {
+		writeCache(cachePath, text)
 	}
 	finishPDF(d, text)
+	return nil
+}
+
+func cachePathFor(cacheDir string, raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return filepath.Join(cacheDir, hex.EncodeToString(sum[:16])+"."+cacheVersion+".txt")
+}
+
+// cacheTrailer closes every complete cache entry. A plain write let a
+// concurrent Load read a half-written entry, mark it Cached and serve a
+// truncated document (review of #173). Entries are written to a temp file
+// and renamed into place, so a reader sees all or nothing; the trailer is the
+// check that does not depend on that — an entry without it (cut by a crash,
+// a full disk, or a writer from before the rename) is never trusted, and the
+// PDF is extracted again.
+const cacheTrailer = "\n--- end of extraction ---\n"
+
+func readCache(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil || !bytes.HasSuffix(data, []byte(cacheTrailer)) {
+		return "", false
+	}
+	return string(data[:len(data)-len(cacheTrailer)]), true
+}
+
+func writeCache(path, text string) {
+	dir := filepath.Dir(path)
+	if os.MkdirAll(dir, 0o755) != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".extract-*.tmp")
+	if err != nil {
+		return
+	}
+	_, werr := tmp.WriteString(text + cacheTrailer)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil || os.Rename(tmp.Name(), path) != nil {
+		_ = os.Remove(tmp.Name())
+	}
 }
 
 func finishPDF(d *Doc, text string) {
