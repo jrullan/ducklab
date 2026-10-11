@@ -72,6 +72,37 @@ func TestSchemasAreReflectedFromDTOs(t *testing.T) {
 	}
 }
 
+// B-520 review: a stage reference is a path string or {path, role}; the
+// document must accept both, and role only as scope|background.
+func TestStageRefSchemaDocumentsBothWireShapes(t *testing.T) {
+	doc := BuildOpenAPI("0.3.0")
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	ref, _ := schemas["ServiceStageRef"].(map[string]any)
+	variants, _ := ref["oneOf"].([]any)
+	if len(variants) != 2 {
+		t.Fatalf("ServiceStageRef = %v, want a oneOf of two shapes", ref)
+	}
+	str, _ := variants[0].(map[string]any)
+	obj, _ := variants[1].(map[string]any)
+	if str["type"] != "string" || obj["type"] != "object" {
+		t.Fatalf("variants = %v", variants)
+	}
+	props, _ := obj["properties"].(map[string]any)
+	role, _ := props["role"].(map[string]any)
+	enum, _ := role["enum"].([]any)
+	if len(enum) != 2 || enum[0] != "scope" || enum[1] != "background" {
+		t.Errorf("role enum = %v", role)
+	}
+	req, _ := schemas["ServiceStageRequest"].(map[string]any)
+	reqProps, _ := req["properties"].(map[string]any)
+	refs, _ := reqProps["refs"].(map[string]any)
+	items, _ := refs["items"].(map[string]any)
+	if items["$ref"] != "#/components/schemas/ServiceStageRef" {
+		t.Errorf("refs items = %v", items)
+	}
+}
+
 // time.Time is a struct in Go but a string on the wire; documenting its fields
 // would describe a shape no client ever sees.
 // Publication state is part of the public contract: clients must be able to

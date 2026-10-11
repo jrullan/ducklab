@@ -1,7 +1,16 @@
+// A reference is a path string (background) or {path, role} (B-520).
+function item(value: unknown): string {
+  if (value && typeof value === "object" && typeof (value as { path?: unknown }).path === "string") {
+    const ref = value as { path: string; role?: unknown };
+    return ref.role === "scope" ? `${ref.path} (scope)` : ref.path;
+  }
+  return typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
+}
+
 function visible(value: unknown): string | null {
   if (typeof value === "string") return value.trim() || null;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.length ? value.map(String).join(", ") : null;
+  if (Array.isArray(value)) return value.length ? value.map(item).join(", ") : null;
   if (value && typeof value === "object") return JSON.stringify(value);
   return null;
 }

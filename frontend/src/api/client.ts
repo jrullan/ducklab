@@ -83,13 +83,18 @@ export interface ProjectDefaultsView {
   effective: string;
 }
 
+/** Mirrors service.StageRef: a plain path is a background reference; an
+ * object with role "scope" marks a reference that describes what to build. */
+export type StageRef = string | { path: string; role?: "scope" | "background" };
+
 /** Mirrors service.ProjectStartRequest. */
 export interface ProjectStartRequest {
   name: string;
   /** Absolute folder; empty means ~/Ducklab/<name-slug>. */
   path?: string;
   brief: string;
-  refs?: string[];
+  /** Plain path = background; {path, role: "scope"} = describes what to build (B-520). */
+  refs?: StageRef[];
   /** A kind of project to set up (B-459); empty sets nothing up. */
   preset?: string;
   git_name?: string;
@@ -1662,7 +1667,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; splitTask?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[]; supportProfile?: "auto" | "small" | "standard" } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; splitTask?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: StageRef[]; supportProfile?: "auto" | "small" | "standard" } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,

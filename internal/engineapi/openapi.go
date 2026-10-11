@@ -126,14 +126,31 @@ func schemaRef(v any, schemas map[string]any) map[string]any {
 		}
 	}
 	if t.Kind() == reflect.Struct && t.Name() != "" && !strings.HasPrefix(t.Name(), "listOf") {
-		name := schemaName(t)
-		if _, done := schemas[name]; !done {
-			schemas[name] = map[string]any{} // placeholder guards recursive types
-			schemas[name] = schemaFor(t, schemas)
-		}
-		return map[string]any{"$ref": "#/components/schemas/" + name}
+		return namedSchema(t, schemas)
 	}
 	return schemaFor(t, schemas)
+}
+
+// openAPISchemer is implemented by a DTO whose JSON is not its struct shape —
+// a custom (Un)MarshalJSON. Reflecting its fields would document one shape
+// while the handler accepts another (B-520: a reference is a path string OR
+// {path, role}), so the type states its own schema.
+type openAPISchemer interface {
+	OpenAPISchema() map[string]any
+}
+
+// namedSchema registers a named struct's schema once and returns its $ref.
+func namedSchema(t reflect.Type, schemas map[string]any) map[string]any {
+	name := schemaName(t)
+	if _, done := schemas[name]; !done {
+		schemas[name] = map[string]any{} // placeholder guards recursive types
+		if custom, ok := reflect.Zero(t).Interface().(openAPISchemer); ok {
+			schemas[name] = custom.OpenAPISchema()
+		} else {
+			schemas[name] = schemaFor(t, schemas)
+		}
+	}
+	return map[string]any{"$ref": "#/components/schemas/" + name}
 }
 
 func schemaName(t reflect.Type) string {
@@ -208,12 +225,7 @@ func elemSchema(t reflect.Type, schemas map[string]any) map[string]any {
 		return map[string]any{"type": "string", "format": "date-time"}
 	}
 	if t.Kind() == reflect.Struct && t.Name() != "" && t.PkgPath() != "" {
-		name := schemaName(t)
-		if _, done := schemas[name]; !done {
-			schemas[name] = map[string]any{}
-			schemas[name] = schemaFor(t, schemas)
-		}
-		return map[string]any{"$ref": "#/components/schemas/" + name}
+		return namedSchema(t, schemas)
 	}
 	return schemaFor(t, schemas)
 }

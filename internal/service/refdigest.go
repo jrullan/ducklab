@@ -205,21 +205,32 @@ func digestReferences(ctx context.Context, files []string, chunkChars int, model
 }
 
 // renderRefDigests is the digest-mode reference section of a stage prompt.
-func renderRefDigests(digests []refDigest, totalChars int, stageName string) string {
+func renderRefDigests(digests []refDigest, totalChars int, stageName string, roleOf func(string) string) string {
+	if roleOf == nil {
+		roleOf = func(string) string { return RefRoleBackground }
+	}
+	anyScope := false
+	for _, d := range digests {
+		// Scope is announced only for scope content the prompt carries.
+		if roleOf(d.Path) == RefRoleScope && d.Unreadable == "" {
+			anyScope = true
+		}
+	}
 	var b strings.Builder
 	b.WriteString("\n\n## Reference documents (digests)\n\n")
-	b.WriteString(refGuidance(stageName))
+	b.WriteString(refGuidance(stageName, anyScope))
 	fmt.Fprintf(&b, "The corpus (%d documents, %d chars) does not fit your context, so each "+
 		"document appears as a digest. The FULL text of every document is available: call "+
 		"the ref_read tool with the document's path whenever a section needs its exact "+
 		"detail — identifiers, rules, numbers. Do not guess detail a digest elides.\n",
 		len(digests), totalChars)
 	for _, d := range digests {
+		label := refRoleLabel(roleOf(d.Path), anyScope)
 		if d.Unreadable != "" {
-			fmt.Fprintf(&b, "\n### Reference: %s (unreadable)\n\n%s\n", d.Path, d.Unreadable)
+			fmt.Fprintf(&b, "\n### Reference: %s%s (unreadable)\n\n%s\n", d.Path, label, d.Unreadable)
 			continue
 		}
-		fmt.Fprintf(&b, "\n### Digest: %s (full text: %d chars — ref_read for detail)\n\n%s\n", d.Path, d.Chars, d.digest)
+		fmt.Fprintf(&b, "\n### Digest: %s%s (full text: %d chars — ref_read for detail)\n\n%s\n", d.Path, label, d.Chars, d.digest)
 	}
 	return b.String()
 }
@@ -227,16 +238,17 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string) str
 // stageReferences loads a stage's references in whichever mode fits the
 // architect seat, emits the run's reference events, and arms ref_read.
 // Returns the rendered section to append to the seed.
-func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refPaths []string, architect config.DucklingID) (string, error) {
+func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refs []StageRef, architect config.DucklingID) (string, error) {
 	// Out of the worktree (review of #173): extractions and digests are
 	// plaintext of the person's private references, and under .ducklab they
 	// were untracked files for `git add -A` and every clean-tree guard.
 	cacheDir := refCacheDir()
-	rendered, loaded, dropped, err := loadReferencesCached(ctx, refPaths, projCfg.References, stageName, cacheDir)
+	rendered, loaded, dropped, err := loadReferencesCached(ctx, refs, projCfg.References, stageName, cacheDir)
 	if err != nil {
 		return "", err
 	}
-	files, err := collectRefFiles(refPaths)
+	roleOf := refRoleOf(refs)
+	files, err := collectRefFiles(refPaths(refs))
 	if err != nil {
 		return "", err
 	}
@@ -277,7 +289,8 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		summarize := func(sctx context.Context, prompt string) (string, error) {
 			return s.refDigestCall(sctx, rs, architect, d.Model, d.Provider, d.Cost, p, prompt)
 		}
-		digests, derr2 := digestReferences(ctx, files, digestChunkChars(archCtx), d.Model, cacheDir, summarize, func(dg refDigest) {
+		// Scope first, like inline loading: the digest order is the prompt order.
+		digests, derr2 := digestReferences(ctx, scopeFirst(files, roleOf), digestChunkChars(archCtx), d.Model, cacheDir, summarize, func(dg refDigest) {
 			rs.writer.AppendEvent("reference_digested", map[string]interface{}{
 				"path": dg.Path, "chars": dg.Chars, "digest_chars": dg.DigestChars, "cached": dg.Cached,
 				"unreadable": dg.Unreadable,
@@ -286,12 +299,26 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		if derr2 != nil {
 			return "", derr2
 		}
-		rendered = renderRefDigests(digests, totalChars, stageName)
+		rendered = renderRefDigests(digests, totalChars, stageName, roleOf)
 		loaded = loaded[:0]
 		for _, dg := range digests {
-			loaded = append(loaded, refFile{Path: dg.Path, Chars: dg.Chars, Unreadable: dg.Unreadable})
+			rf := refFile{Path: dg.Path, Chars: dg.Chars, Unreadable: dg.Unreadable, text: dg.digest}
+			if dg.Unreadable != "" {
+				rf.text = dg.Unreadable
+			}
+			if roleOf(dg.Path) == RefRoleScope {
+				rf.Role = RefRoleScope
+			}
+			loaded = append(loaded, rf)
 		}
 		dropped = nil
+	}
+	// A scope reference that did not arrive whole is said, never silent
+	// (Codex on #174). Inline loading already wrote the note into its
+	// section; the digest section gets it here.
+	short := scopeShortfall(files, roleOf, loaded)
+	if mode == "digest" {
+		rendered += renderScopeShortfallNote(short)
 	}
 	unreadable = includedUnreadable(unreadable, loaded)
 	rs.writer.AppendEvent("references_loaded", map[string]interface{}{
@@ -300,7 +327,9 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 	if len(unreadable) > 0 {
 		warnUnreadableRefs(rs, unreadable)
 	}
+	warnScopeShortfall(rs, short)
 	rs.armRefs(files, mode)
+	rs.setRefEvidence(loaded)
 	return rendered, nil
 }
 

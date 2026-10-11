@@ -246,7 +246,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
   engine    start | stop | restart | status | log
   project   init | list | show | describe | set | status
   intent    show the append-only journal of human briefs
-  intake    draft requirements (--from <brief>, --ref <doc|dir>, --adopt)
+  intake    draft requirements (--from <brief>, --ref <doc|dir>, --ref-scope <doc|dir>, --adopt)
   spec      draft the spec from approved requirements
   plan      draft milestones and tasks from the spec
   artifact  lint --kind requirements|spec|plan <file>

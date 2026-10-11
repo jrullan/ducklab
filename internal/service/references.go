@@ -56,6 +56,13 @@ type refFile struct {
 	// Unreadable is the notice the model saw in place of a binary reference
 	// that could not be extracted.
 	Unreadable string `json:"unreadable,omitempty"`
+	// Role is "scope" when the person marked the reference as the intended
+	// product (B-520); empty is background.
+	Role string `json:"role,omitempty"`
+	// text is what the prompt carried for this reference (bounded extracted
+	// text, or the digest in digest mode). Not recorded: the record names,
+	// it does not copy.
+	text string
 }
 
 // refUnreadable is one reference the model could not read, for the warning.
@@ -138,8 +145,8 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 	return b.String()
 }
 
-func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
-	return loadReferencesCached(context.Background(), paths, caps, stageName, "")
+func loadReferences(refs []StageRef, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
+	return loadReferencesCached(context.Background(), refs, caps, stageName, "")
 }
 
 // loadReferencesCached is loadReferences with the PDF extraction cache.
@@ -147,14 +154,25 @@ func loadReferences(paths []string, caps config.References, stageName string) (r
 // text, and a binary that cannot be extracted travels as a notice — it used
 // to travel as its bytes, and a guidebook reached the architect as PDF
 // object syntax.
-func loadReferencesCached(ctx context.Context, paths []string, caps config.References, stageName, cacheDir string) (rendered string, loaded []refFile, dropped []string, err error) {
+func loadReferencesCached(ctx context.Context, refs []StageRef, caps config.References, stageName, cacheDir string) (rendered string, loaded []refFile, dropped []string, err error) {
 	caps = resolveRefCaps(caps)
-	files, err := collectRefFiles(paths)
+	files, err := collectRefFiles(refPaths(refs))
 	if err != nil {
 		return "", nil, nil, err
 	}
+	roleOf := refRoleOf(refs)
+	// Scope files load first (Codex on #174): the caps used to apply in
+	// alphabetical order, so with max_files 1 `a-background.md` loaded and
+	// `z-scope.md` dropped — while the prompt still announced a SCOPE
+	// reference nobody received. The person's explicit target is the last
+	// thing a cap may evict.
+	files = scopeFirst(files, roleOf)
 
-	var b strings.Builder
+	type entry struct {
+		rf   refFile
+		body string
+	}
+	var entries []entry
 	total := 0
 	for _, f := range files {
 		if len(loaded) >= caps.MaxFiles || total >= caps.TotalChars {
@@ -166,9 +184,14 @@ func loadReferencesCached(ctx context.Context, paths []string, caps config.Refer
 			dropped = append(dropped, f)
 			continue
 		}
+		role := ""
+		if roleOf(f) == RefRoleScope {
+			role = RefRoleScope
+		}
 		if !doc.Readable() {
-			fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, doc.Notice())
-			loaded = append(loaded, refFile{Path: f, Type: doc.Kind, Unreadable: doc.Notice()})
+			uf := refFile{Path: f, Type: doc.Kind, Unreadable: doc.Notice(), Role: role, text: doc.Notice()}
+			loaded = append(loaded, uf)
+			entries = append(entries, entry{rf: uf, body: doc.Notice()})
 			continue
 		}
 		// Caps count characters, so a cut never splits a rune.
@@ -182,44 +205,37 @@ func loadReferencesCached(ctx context.Context, paths []string, caps config.Refer
 			text = text[:caps.TotalChars-total]
 			truncated = true
 		}
-		fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, strings.TrimSpace(string(text)))
-		if truncated {
-			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
-		}
 		total += len(text)
-		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, Pages: doc.Pages}
+		body := strings.TrimSpace(string(text))
+		rf := refFile{Path: f, Chars: len(text), Truncated: truncated, Pages: doc.Pages, Role: role, text: body}
 		if doc.Kind == reftext.KindPDF {
 			rf.Type = doc.Kind
 		}
 		loaded = append(loaded, rf)
+		entries = append(entries, entry{rf: rf, body: body})
 	}
 	if len(loaded) == 0 {
 		return "", loaded, dropped, nil
 	}
-	head := "\n\n## Reference documents\n\n" + refGuidance(stageName)
-	return head + b.String(), loaded, dropped, nil
-}
-
-// refGuidance is stage-shaped. Intake's hardline ("never derive
-// requirements") exists because a bug-inbox snapshot once became fifteen
-// requirements — but read in a SPEC it told the architect to leave the
-// wiki's architecture, RBAC and audit detail out of the document, the
-// opposite of why the person attached it.
-func refGuidance(stageName string) string {
-	if stageName == "spec" || stageName == "plan" {
-		return "Provided by the person as design context. USE them: ground your sections in the " +
-			"detail they carry — architecture decisions, domain rules, exact identifiers, " +
-			"workflows — rather than restating the requirements more vaguely. Your document is " +
-			"judged against this detail: a section vaguer than the reference it draws on is " +
-			"unfinished. Two limits: the " +
-			"approved requirements define scope, so a reference's plans, wish lists or open " +
-			"problems never add sections; and where a reference and the code disagree, the code " +
-			"is the truth for as-built claims — note the disagreement instead of copying the claim.\n"
+	// The prompt announces scope only for scope content it actually carries.
+	anyScope := false
+	for _, e := range entries {
+		if e.rf.Role == RefRoleScope && e.rf.Unreadable == "" {
+			anyScope = true
+		}
 	}
-	return "Provided by the person as BACKGROUND, not as scope. Where a reference and the code " +
-		"disagree, the code is the truth for as-built claims — note the disagreement instead of " +
-		"copying the claim. A reference that lists open problems, pending feedback, plans or " +
-		"wishes describes WORK, not the product: never derive requirements from it — the first " +
-		"survey of MiEmpresa turned a bug-inbox snapshot into fifteen requirements about its " +
-		"fourteen bugs. Requirements state what the system IS.\n"
+	var b strings.Builder
+	for _, e := range entries {
+		role := RefRoleBackground
+		if e.rf.Role == RefRoleScope {
+			role = RefRoleScope
+		}
+		fmt.Fprintf(&b, "\n### Reference: %s%s\n\n%s\n", e.rf.Path, refRoleLabel(role, anyScope), e.body)
+		if e.rf.Truncated {
+			b.WriteString("\n[truncated — the full document exceeds the reference budget]\n")
+		}
+	}
+	b.WriteString(renderScopeShortfallNote(scopeShortfall(files, roleOf, loaded)))
+	head := "\n\n## Reference documents\n\n" + refGuidance(stageName, anyScope)
+	return head + b.String(), loaded, dropped, nil
 }

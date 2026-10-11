@@ -20,7 +20,7 @@ func TestLoadReferencesIsBoundedAndHonest(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
 	os.WriteFile(filepath.Join(dir, "sub", "deep.txt"), []byte("deep note"), 0o644)
 
-	rendered, loaded, dropped, err := loadReferences([]string{dir}, config.References{}, "intake")
+	rendered, loaded, dropped, err := loadReferences(backgroundRefs(dir), config.References{}, "intake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestLoadReferencesIsBoundedAndHonest(t *testing.T) {
 		t.Error("a binary was loaded as a reference")
 	}
 	// A path that does not exist refuses the launch, naming itself.
-	if _, _, _, err := loadReferences([]string{filepath.Join(dir, "nope.md")}, config.References{}, "intake"); err == nil || !strings.Contains(err.Error(), "nope.md") {
+	if _, _, _, err := loadReferences(backgroundRefs(filepath.Join(dir, "nope.md")), config.References{}, "intake"); err == nil || !strings.Contains(err.Error(), "nope.md") {
 		t.Errorf("missing reference not refused by name: %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestLoadReferencesHonoursProjectCaps(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "big.md"), []byte(strings.Repeat("x", refPerFileChars+500)), 0o644)
 	os.WriteFile(filepath.Join(dir, "second.md"), []byte("second"), 0o644)
 
-	_, loaded, dropped, err := loadReferences([]string{dir}, config.References{
+	_, loaded, dropped, err := loadReferences(backgroundRefs(dir), config.References{
 		PerFileChars: refPerFileChars + 1_000,
 		MaxFiles:     1,
 	}, "intake")
@@ -73,7 +73,7 @@ func TestReferenceGuidanceIsStageShaped(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "spec.md"), []byte("wiki detail"), 0o644)
 
-	intake, _, _, err := loadReferences([]string{dir}, config.References{}, "intake")
+	intake, _, _, err := loadReferences(backgroundRefs(dir), config.References{}, "intake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestReferenceGuidanceIsStageShaped(t *testing.T) {
 		t.Error("intake guidance lost its scope guard")
 	}
 	for _, stageName := range []string{"spec", "plan"} {
-		got, _, _, err := loadReferences([]string{dir}, config.References{}, stageName)
+		got, _, _, err := loadReferences(backgroundRefs(dir), config.References{}, stageName)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,9 +142,9 @@ func TestStageReferencesKeepThePresetAndResolveRelativeToTheProject(t *testing.T
 	if err := os.WriteFile(preset, []byte("web page constraints"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	refs := normalizeStageRefs(root, "intake", []string{"notes/design.md", ".ducklab/preset.md"})
+	refs := normalizeStageRefs(root, "intake", backgroundRefs("notes/design.md", ".ducklab/preset.md"))
 	wantDesign := filepath.Join(root, "notes", "design.md")
-	if len(refs) != 2 || refs[0] != wantDesign || refs[1] != preset {
+	if len(refs) != 2 || refs[0].Path != wantDesign || refs[1].Path != preset {
 		t.Fatalf("refs = %v, want [%s %s]", refs, wantDesign, preset)
 	}
 	if got := normalizeStageRefs(root, "spec", nil); len(got) != 0 {

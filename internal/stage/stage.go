@@ -98,6 +98,10 @@ type Params struct {
 	// stage renders operation output contracts; other artifacts need not repeat
 	// implementation-level wire shapes.
 	ReferenceContracts []capability.ReferenceContract
+	// ReferenceRoles names each loaded reference's role (scope | background)
+	// for the post-composition reviewer, which reads base, delta and
+	// candidate but not the reference section (B-520). Empty without refs.
+	ReferenceRoles string
 	// SplitTask replaces this one approved task with two narrowly-scoped,
 	// independently-owned sections through the plan amendment gate.
 	SplitTask string

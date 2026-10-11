@@ -45,7 +45,7 @@ func TestIntakeImageReferenceReachesASeeingArchitectAndIsNamedForABlindOne(t *te
 			}}}
 		}
 		run, err := s.StageStart(context.Background(), projectID, StageRequest{
-			Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img},
+			Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: backgroundRefs(img),
 			Ducklings: []string{"pato-uno"},
 		})
 		if err != nil {
@@ -97,7 +97,7 @@ func TestAcceptingTheStageCommitsItsReferenceImages(t *testing.T) {
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img}, Ducklings: []string{"pato-uno"},
+		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: backgroundRefs(img), Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestRejectingTheStageRemovesItsReferenceImages(t *testing.T) {
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: []string{img}, Ducklings: []string{"pato-uno"},
+		Stage: "intake", Mode: "solo", From: "A pixel perfect calculator.", Refs: backgroundRefs(img), Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
 		t.Fatal(err)

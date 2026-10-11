@@ -3558,7 +3558,7 @@
           },
           "refs": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ServiceStageRef"
             },
             "type": "array"
           }
@@ -4000,6 +4000,33 @@
         ],
         "type": "object"
       },
+      "ServiceStageRef": {
+        "oneOf": [
+          {
+            "description": "a path; the reference is background",
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "role": {
+                "enum": [
+                  "scope",
+                  "background"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ServiceStageRequest": {
         "properties": {
           "adopt": {
@@ -4034,7 +4061,7 @@
           },
           "refs": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ServiceStageRef"
             },
             "type": "array"
           },

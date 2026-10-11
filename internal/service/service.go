@@ -148,6 +148,10 @@ type runState struct {
 	refReads map[string]bool
 	// refMode is "inline" or "digest"; empty when the run has no references.
 	refMode string
+	// refEvidence is what the stage prompt carried for each reference — the
+	// bounded text inline, or the digest — so a reviewer that never sees the
+	// reference section can be shown the scope references' content (B-520).
+	refEvidence map[string]string
 }
 
 // armRefs records the run's reference corpus and mode for ref_read.

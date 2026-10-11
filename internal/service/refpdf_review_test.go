@@ -25,7 +25,7 @@ func runIntakeWithRefs(t *testing.T, s *Service, projectID string, refs []string
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A calculator.", Refs: refs, Ducklings: []string{"pato-uno"},
+		Stage: "intake", Mode: "solo", From: "A calculator.", Refs: backgroundRefs(refs...), Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
 		t.Fatal(err)

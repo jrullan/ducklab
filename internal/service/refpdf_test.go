@@ -64,7 +64,7 @@ func assertNoPDFSyntax(t *testing.T, where, s string) {
 func TestInlineReferenceCarriesThePDFsText(t *testing.T) {
 	pdf := pdfFixture(t)
 	info, _ := os.Stat(pdf)
-	rendered, loaded, _, err := loadReferences([]string{pdf}, config.References{}, "intake")
+	rendered, loaded, _, err := loadReferences(backgroundRefs(pdf), config.References{}, "intake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestReferenceDirectoryIncludesPDFs(t *testing.T) {
 // Inline: a binary that cannot be extracted is a notice, never bytes.
 func TestInlineBinaryReferenceIsANotice(t *testing.T) {
 	docx := docxFixture(t)
-	rendered, loaded, _, err := loadReferences([]string{docx}, config.References{}, "intake")
+	rendered, loaded, _, err := loadReferences(backgroundRefs(docx), config.References{}, "intake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDigestReadsPDFTextAndSkipsBinaries(t *testing.T) {
 	if digests[1].Unreadable == "" || !strings.Contains(digests[1].Unreadable, "Word document") {
 		t.Errorf("binary digest = %+v", digests[1])
 	}
-	section := renderRefDigests(digests, 100, "intake")
+	section := renderRefDigests(digests, 100, "intake", nil)
 	if !strings.Contains(section, "notes.docx: unreadable binary reference") {
 		t.Errorf("digest section lacks the notice:\n%s", section)
 	}
@@ -173,7 +173,7 @@ func TestStageWithUnreadableReferenceWarnsAndPromptsWithText(t *testing.T) {
 		}}}
 	}
 	run, err := s.StageStart(context.Background(), projectID, StageRequest{
-		Stage: "intake", Mode: "solo", From: "A calculator.", Refs: []string{pdf, docx},
+		Stage: "intake", Mode: "solo", From: "A calculator.", Refs: backgroundRefs(pdf, docx),
 		Ducklings: []string{"pato-uno"},
 	})
 	if err != nil {
@@ -211,4 +211,27 @@ func TestStageWithUnreadableReferenceWarnsAndPromptsWithText(t *testing.T) {
 	if len(loaded) != 1 || loaded[0].Data["unreadable"] == nil {
 		t.Fatalf("references_loaded = %+v", loaded)
 	}
+}
+
+// B-520 × B-519: a PDF marked scope reaches the composition reviewer as its
+// extracted words — the evidence is what the prompt carried, never bytes.
+func TestScopePDFEvidenceForReviewerIsExtractedText(t *testing.T) {
+	pdf := pdfFixture(t)
+	refs := []StageRef{{Path: pdf, Role: RefRoleScope}}
+	rendered, loaded, _, err := loadReferences(refs, config.References{}, "intake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "### Reference: "+pdf+" — role: SCOPE") {
+		t.Errorf("PDF scope reference not labelled:\n%s", rendered)
+	}
+	evidence := map[string]string{}
+	for _, f := range loaded {
+		evidence[f.Path] = f.text
+	}
+	review := renderReferenceRolesForReview([]string{pdf}, refRoleOf(refs), "intake", evidence, reviewEvidenceBudget(0))
+	if !strings.Contains(review, "toggle key switches fractions") {
+		t.Errorf("reviewer evidence lacks the PDF's extracted text:\n%s", review)
+	}
+	assertNoPDFSyntax(t, "reviewer evidence", review)
 }

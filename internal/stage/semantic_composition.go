@@ -58,6 +58,9 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 	}
 
 	prompt := buildArtifactCompositionReviewPrompt(p.ProjectRoot, kind, delta, base, proposed)
+	if roles := strings.TrimSpace(p.ReferenceRoles); roles != "" {
+		prompt += "\n\n" + roles + "\n"
+	}
 	raw, err := p.Execute(ctx, strategy.CompositionReviewScript(), prompt)
 	if err != nil {
 		return mechanical, nil, err
