@@ -113,9 +113,9 @@ func appendIntentSection(doc *Document, runID, submittedAt, outcome, brief strin
 	if legacy {
 		body += "\n_Imported from the historical run record; section-level links may be unavailable._\n"
 	}
-	body += "\n### Original brief\n\n" + strings.TrimSpace(brief)
+	body += "\n### Original brief\n\n" + fenceIntentText("brief", brief)
 	section := Section{ID: id, Title: title, Body: body}
-	parseSectionFields(&section, body)
+	parseSectionFields(&section, withoutIntentText(body), KindIntent, SectionScope)
 	doc.Sections = append(doc.Sections, section)
 	return &doc.Sections[len(doc.Sections)-1]
 }
@@ -240,7 +240,7 @@ func ResolveIntent(projectRoot, runID, outcome string, requirements []string) er
 	if len(requirements) > 0 {
 		sec.Body = setIntentField(sec.Body, "Requirements", strings.Join(requirements, ", "))
 	}
-	parseSectionFields(sec, sec.Body, KindIntent, SectionScope)
+	parseSectionFields(sec, withoutIntentText(sec.Body), KindIntent, SectionScope)
 	return writeIntent(projectRoot, doc)
 }
 
@@ -297,7 +297,7 @@ func AppendIntentRevision(projectRoot, intentID, runID, submittedAt, note, findi
 	body = setIntentField(body, "Outcome", "pending")
 	body = strings.TrimRight(body, "\n") + "\n\n" + renderIntentRevision(n, runID, submittedAt, note, findings)
 	sec.Body = body
-	parseSectionFields(sec, sec.Body, KindIntent, SectionScope)
+	parseSectionFields(sec, withoutIntentText(sec.Body), KindIntent, SectionScope)
 	return n, writeIntent(projectRoot, doc)
 }
 
@@ -314,10 +314,10 @@ func renderIntentRevision(n int, runID, submittedAt, note, findings string) stri
 	fmt.Fprintf(&b, "%s %d — %s\n\nSubmitted at %s.\n", intentRevisionHeading, n, runID, submittedAt)
 	note, findings = strings.TrimSpace(note), strings.TrimSpace(findings)
 	if note != "" {
-		b.WriteString("\n" + intentNoteHeading + "\n\n" + note + "\n")
+		b.WriteString("\n" + intentNoteHeading + "\n\n" + fenceIntentText("note", note) + "\n")
 	}
 	if findings != "" {
-		b.WriteString("\n" + intentFindingsHeading + "\n\n" + findings + "\n")
+		b.WriteString("\n" + intentFindingsHeading + "\n\n" + fenceIntentText("findings", findings) + "\n")
 	}
 	if note == "" && findings == "" {
 		b.WriteString("\n_Nothing new: the revision repeated earlier notes._\n")
@@ -389,7 +389,12 @@ func setIntentField(body, label, value string) string {
 func replaceIntentField(body, label, value string) (string, bool) {
 	prefix := "**" + label + ":**"
 	lines := strings.Split(body, "\n")
+	var fence intentFence
 	for i, line := range lines {
+		// A field line inside a person's words is their text, not ours.
+		if fence.opaque(line) {
+			continue
+		}
 		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
 			lines[i] = prefix + " " + value
 			return strings.Join(lines, "\n"), true

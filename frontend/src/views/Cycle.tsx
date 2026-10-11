@@ -1495,7 +1495,12 @@ function sectionsForStage(sections: readonly Section[], stage: string): Section[
 }
 
 function cleanSectionBody(body: string): string {
-  return body.replace(/\bAs-built:\s*yes\b\.?\s*/gi, "").trim();
+  return body
+    .replace(/\bAs-built:\s*yes\b\.?\s*/gi, "")
+    // B-521: the engine's fences around a person's words in intent.md are
+    // structure, not prose.
+    .replace(/^<!-- \/?ducklab:text[^\n]*-->[ \t]*$/gm, "")
+    .trim();
 }
 
 function summarySentence(section: Section): string {

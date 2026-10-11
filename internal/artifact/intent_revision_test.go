@@ -134,7 +134,7 @@ func TestRevisionOfAnOldShapeIntentReopensItAndLintsClean(t *testing.T) {
 	if !strings.Contains(sec.Body, "**Requirements:** -\n**Revisions:** r-new\n") {
 		t.Fatalf("Revisions did not join the header block:\n%s", sec.Body)
 	}
-	for _, want := range []string{"### Original brief\n\nUse this guide", "### Revision 1 — r-new", "#### The person's note\n\nKeep the guidebook wording.", "#### Reviewer findings carried over\n\n- [critical] The Ans sentence was deleted."} {
+	for _, want := range []string{"### Original brief\n\nUse this guide", "### Revision 1 — r-new", "#### The person's note\n\n<!-- ducklab:text note -->\nKeep the guidebook wording.", "#### Reviewer findings carried over\n\n<!-- ducklab:text findings -->\n- [critical] The Ans sentence was deleted."} {
 		if !strings.Contains(sec.Body, want) {
 			t.Fatalf("revision body lacks %q:\n%s", want, sec.Body)
 		}

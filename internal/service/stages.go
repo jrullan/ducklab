@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -165,8 +166,10 @@ func dropSaidLines(text, said string) string {
 
 // revisionPlan is what prepareRevision decided for StageStart.
 type revisionPlan struct {
-	// proposalRun wrote the draft on the table; the revision supersedes it.
+	// proposalRun wrote the draft on the table.
 	proposalRun string
+	// explicit is true when the request named its parent (revises_run).
+	explicit bool
 }
 
 // prepareRevision turns a revision request into its effective form before
@@ -197,6 +200,7 @@ func (s *Service) prepareRevision(projectRoot, projectID string, req *StageReque
 		plan.proposalRun = prop.Front.RunID
 	}
 	explicit := parent != ""
+	plan.explicit = explicit
 	if !explicit {
 		parent = plan.proposalRun
 	}
@@ -210,7 +214,7 @@ func (s *Service) prepareRevision(projectRoot, projectID string, req *StageReque
 		}
 	}
 	if explicit && (parentRun == nil || parentRun.ProjectID != projectID || parentRun.Stage != req.Stage) {
-		return plan, fmt.Errorf("revises_run %q is not a %s run of this project", parent, req.Stage)
+		return plan, refuseLaunch("revises_run %q is not a %s run of this project", parent, req.Stage)
 	}
 	said := ""
 	revision := &StageRevision{Parent: parent, Number: 1}
@@ -260,6 +264,81 @@ func (s *Service) prepareRevision(projectRoot, projectID string, req *StageReque
 	}
 	req.Revision = revision
 	return plan, nil
+}
+
+// revisedByPattern finds the revision that already claimed a run.
+var revisedByPattern = regexp.MustCompile(`\(revised by (r-[A-Za-z0-9-]+)\)`)
+
+// claimRevisionParent makes "revise this draft" a compare-and-set on the run
+// that wrote it (review of #175). An old tab, or a double-submit, used to pass
+// the parent check after the first request had already superseded it: two
+// revisions then edited whatever proposal was newest on disk while both
+// claimed the old run as parent, and their revision numbers collided.
+//
+// Under the parent's decision lock, the parent must still be answerable: not
+// already revised; when the request names it, the owner of the draft on the
+// table; and either paused at a gate that offers request_changes (it is
+// superseded here, its intent left open for the chain) or a failed draft with
+// no gate (the "Retry with this note" door), which is marked as revised. Any
+// other parent is refused before a run exists. The resolution names the
+// revision, so a late request is told which run to revise instead.
+func (s *Service) claimRevisionParent(projectRoot string, req StageRequest, plan revisionPlan, runID string) error {
+	parent := req.Revision.Parent
+	if parent == "" {
+		return nil
+	}
+	s.runsMu.RLock()
+	rs, ok := s.runs[parent]
+	s.runsMu.RUnlock()
+	if !ok {
+		if plan.explicit {
+			return refuseLaunch("revises_run %q is not a %s run of this project", parent, req.Stage)
+		}
+		// A proposal written by a run this engine does not know (an older
+		// engine's record): nothing to claim.
+		return nil
+	}
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	run := rs.snapshotRun()
+	if m := revisedByPattern.FindStringSubmatch(run.Resolution); m != nil {
+		return refuseLaunch("run %s was already revised by %s — revise the newest draft instead", parent, m[1])
+	}
+	proposalRun := ""
+	if prop, err := artifact.LoadProposed(projectRoot, stage.Name(req.Stage).Kind()); err == nil && prop != nil {
+		proposalRun = prop.Front.RunID
+	}
+	if plan.explicit && proposalRun != "" && proposalRun != parent {
+		return refuseLaunch("run %s's draft is no longer the one on the table — %s's is; revise that one", parent, proposalRun)
+	}
+	resolution := fmt.Sprintf("changes requested (revised by %s): %s", runID, composeRevision(req.Revision.Note, req.Revision.Findings))
+	switch {
+	case run.Status == "paused" && run.PendingKind == "gate":
+		if !slices.Contains(runNext(run), "request_changes") {
+			return refuseLaunch("run %s does not take changes now; it offers %v", parent, runNext(run))
+		}
+		// The draft on the table is answered; its intent is not. The person
+		// is still asking for the same thing, so a superseded run in a
+		// revision chain leaves the intent open (B-521).
+		s.resolveSupersededRun(parent, resolution, req.Revision.Intent)
+	case run.Status == "failed" && !run.Accepted:
+		w, err := s.ensureWriter(rs)
+		if err != nil {
+			return err
+		}
+		rs.wmu.Lock()
+		rs.run.Resolution = resolution
+		rs.wmu.Unlock()
+		w.AppendEvent("human", map[string]interface{}{"action": "revised", "detail": resolution})
+		_ = w.WriteState()
+	default:
+		if plan.explicit {
+			return refuseLaunch("run %s is %s and no longer takes changes", parent, run.Status)
+		}
+		// A rejected draft still on disk, revised without naming it: there
+		// is no gate left to claim.
+	}
+	return nil
 }
 
 // StageStart runs intake, spec or plan and leaves a proposal for the human.
@@ -468,11 +547,11 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// never learned. Resolved here, at the moment the person asks, not when
 	// the revision lands: the decision happened now, whatever the revision's
 	// fate.
-	if req.Revision != nil && revising.proposalRun != "" {
-		// The draft on the table is answered; its intent is not. The person
-		// is still asking for the same thing, so a superseded run in a
-		// revision chain leaves the intent open (B-521).
-		s.resolveSupersededRun(revising.proposalRun, "changes requested: "+composeRevision(req.Revision.Note, req.Revision.Findings), req.Revision.Intent)
+	runID := runlog.GenerateRunID()
+	if req.Revision != nil {
+		if err := s.claimRevisionParent(entry.Path, req, revising, runID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Recorded as what will actually run, not as a constant. A report that
@@ -481,7 +560,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	warning := bothSidesWarning(roster)
 	profile, profileSource, _ := s.stageSupportProfile(roster, req.SupportProfile)
 	run := &runlog.Run{
-		ID:                   runlog.GenerateRunID(),
+		ID:                   runID,
 		ProjectID:            projectID,
 		Stage:                req.Stage,
 		Mode:                 mode,
@@ -2850,6 +2929,12 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 			runID = prop.Front.RunID
 		}
 	}
+	// The proposal is the only handle on the run whose intent this closes:
+	// discarding it and then failing to record the outcome left the intent
+	// pending with nothing to retry from (review of #175). Both happen or
+	// neither does. intent.md is written atomically, so a failed resolution
+	// leaves it as it was; only the proposal needs restoring.
+	snap := snapshotDocs(entry.Path, artifact.ProposedPath(entry.Path, artifact.Kind(kind)))
 	if err := artifact.DiscardProposal(entry.Path, artifact.Kind(kind)); err != nil {
 		return err
 	}
@@ -2857,7 +2942,13 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 	// intent closes as not accepted. ResolveIntent ignores an older run and
 	// never downgrades an accepted intent (B-521).
 	if runID != "" {
-		_ = artifact.ResolveIntent(entry.Path, runID, "not accepted", nil)
+		if err := artifact.ResolveIntent(entry.Path, runID, "not accepted", nil); err != nil {
+			err = fmt.Errorf("discard %s proposal: record the intent's outcome: %w", kind, err)
+			if restoreErr := snap.restore(); restoreErr != nil {
+				return fmt.Errorf("%w (also failed to restore the proposal: %v)", err, restoreErr)
+			}
+			return err
+		}
 	}
 	return nil
 }

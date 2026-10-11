@@ -106,9 +106,9 @@ describe("Cycle", () => {
       sections: [{
         id: "INT-002", title: "Use this guide to fill in the gap",
         body: "**Run:** r-tpfn\n**Submitted at:** 2026-10-10T11:55:19Z\n**Outcome:** pending\n**Requirements:** -\n**Revisions:** r-eett, r-mrrq\n\n" +
-          "### Original brief\n\nUse this guide to fill in the gap.\n\n" +
-          "### Revision 1 — r-eett\n\nSubmitted at 2026-10-10T12:15:43Z.\n\n#### Reviewer findings carried over\n\n- [major] REQ-008 invents behavior\n\n" +
-          "### Revision 2 — r-mrrq\n\nSubmitted at 2026-10-11T17:17:45Z.\n\n#### The person's note\n\nKeep the guidebook wording.\n\n#### Reviewer findings carried over\n\n- [critical] The fraction paragraph was deleted",
+          "### Original brief\n\n<!-- ducklab:text brief -->\nUse this guide to fill in the gap.\n### Requirements\nKeep it whole.\n<!-- /ducklab:text -->\n\n" +
+          "### Revision 1 — r-eett\n\nSubmitted at 2026-10-10T12:15:43Z.\n\n#### Reviewer findings carried over\n\n<!-- ducklab:text findings -->\n- [major] REQ-008 invents behavior\n<!-- /ducklab:text -->\n\n" +
+          "### Revision 2 — r-mrrq\n\nSubmitted at 2026-10-11T17:17:45Z.\n\n#### The person's note\n\n<!-- ducklab:text note -->\nKeep the guidebook wording.\n<!-- /ducklab:text -->\n\n#### Reviewer findings carried over\n\n<!-- ducklab:text findings -->\n- [critical] The fraction paragraph was deleted\n<!-- /ducklab:text -->",
       }],
     };
     const client = clientWith((p) => {
@@ -123,6 +123,8 @@ describe("Cycle", () => {
     const chain = await screen.findByTestId("intent-chain");
     expect(within(chain).getByTestId("intent-chain-status")).toHaveTextContent("pending · 2 revisions");
     expect(within(chain).getByTestId("intent-chain-brief")).toHaveTextContent("Use this guide to fill in the gap.");
+    // A heading inside the brief is the person's Markdown, kept whole.
+    expect(within(chain).getByTestId("intent-chain-brief")).toHaveTextContent("Keep it whole.");
     const revisions = within(chain).getAllByTestId("intent-revision");
     expect(revisions.map((r) => r.getAttribute("data-run"))).toEqual(["r-eett", "r-mrrq"]);
     expect(within(revisions[0]!).queryByTestId("intent-revision-note")).toBeNull();

@@ -157,11 +157,11 @@ func TestIntakeRevisionChainStaysUnderOneIntentAndInheritsTheJob(t *testing.T) {
 	}
 	// Provenance: findings are labelled, the person's note is the person's.
 	rev1 := sec.Body[strings.Index(sec.Body, "### Revision 1"):strings.Index(sec.Body, "### Revision 2")]
-	if strings.Contains(rev1, "#### The person's note") || !strings.Contains(rev1, "#### Reviewer findings carried over\n\n- [major] REQ-001 invents") {
+	if strings.Contains(rev1, "#### The person's note") || !strings.Contains(rev1, "#### Reviewer findings carried over\n\n<!-- ducklab:text findings -->\n- [major] REQ-001 invents") {
 		t.Fatalf("revision 1 attributes findings wrongly:\n%s", rev1)
 	}
 	rev2 := sec.Body[strings.Index(sec.Body, "### Revision 2"):strings.Index(sec.Body, "### Revision 3")]
-	if !strings.Contains(rev2, "#### The person's note\n\nKeep the wording close to the guidebook.") {
+	if !strings.Contains(rev2, "#### The person's note\n\n<!-- ducklab:text note -->\nKeep the wording close to the guidebook.") {
 		t.Fatalf("revision 2 lost the person's note:\n%s", rev2)
 	}
 	// No snowball: the finding already forwarded is not recorded again.
