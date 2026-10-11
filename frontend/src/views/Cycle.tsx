@@ -1064,7 +1064,7 @@ export function Cycle({
                 ) : (
                   <>
                     <label className="mb-1 block text-xs text-ink-muted" htmlFor="cycle-refs">
-                      references — paths to .md/.txt files or folders, or images
+                      references — paths to .md/.txt/.pdf files or folders, or images
                       (.png/.jpg/.webp/.gif) of what it should look like, one per line
                       (documents load bounded into the prompt; the run records what was included)
                     </label>

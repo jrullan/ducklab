@@ -131,6 +131,9 @@ type ExecContext struct {
 	// only files ref_read may open. References live outside the project root
 	// on purpose; the tool is a bridge to THEM, not out of the sandbox.
 	RefPaths []string
+	// RefCacheDir is where PDF reference extractions are cached by content
+	// hash (B-519); "" extracts on every read.
+	RefCacheDir string
 	// OnRefRead marks a reference as opened, so the gate can name the ones
 	// that never were.
 	OnRefRead func(path string)

@@ -230,7 +230,7 @@ func toolList() []map[string]interface{} {
 				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
 				"revise":      str("optional: what to change about the stage's current draft — the retry of a failed or rejected intake/spec/plan run, with its redo note"),
-				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND references — absolute paths: .md/.txt documents or directories (loaded bounded into the prompt as context; they never add requirements), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
+				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "BACKGROUND references — absolute paths: .md/.txt/.pdf documents or directories (loaded bounded into the prompt as context — PDFs as their extracted text, and a binary the engine cannot read reaches the model only as a notice and warns the run; they never add requirements), and images (.png/.jpg/.webp/.gif) of what it should look like — copied into the project, shown to a seeing architect and citable as REF-IMG ids"},
 				"scope_refs":  scopeRefsProp(),
 			}, "project_id", "stage"),
 		},

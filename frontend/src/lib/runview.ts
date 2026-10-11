@@ -734,6 +734,23 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           done: true,
           messageOnly: true,
         });
+        // B-519: a reference the model could not read (a docx, a scanned
+        // PDF) reached it only as a notice. Said here, in the lane, where the
+        // person watches the run start — not only in the prompt.
+        const unreadable = Array.isArray(d.unreadable) ? (d.unreadable as Record<string, unknown>[]) : [];
+        unreadable.forEach((u, i) => {
+          blocks.push({
+            key: `refs-unreadable:${e.seq ?? blocks.length}:${i}`,
+            round: 0,
+            turn: -1,
+            role: "refs-warning",
+            duckling: "",
+            toolCalls: [],
+            text: String(u.notice ?? `${String(u.path ?? "a reference")}: unreadable binary reference`),
+            done: true,
+            messageOnly: true,
+          });
+        });
         break;
       }
       case "reference_digested": {
