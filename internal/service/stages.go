@@ -845,6 +845,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		ShellPolicy: projCfg.Shell,
 		Answers:     rs.answers(),
 		RefPaths:    rs.refFiles(),
+		RefCacheDir: refCacheDir(),
 		OnRefRead:   rs.markRefRead,
 		// The architect's survey guide may be a GLOBAL skill (repo-survey);
 		// without this the stage's skill_list showed project skills only.

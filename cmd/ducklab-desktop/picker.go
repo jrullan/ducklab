@@ -62,7 +62,7 @@ func (p *Picker) ChooseDirectory(title string) (string, error) {
 // referenceFilePattern is every file type a stage accepts as a reference:
 // the text the loader reads and the images the engine shows a seeing
 // architect (internal/service/refimages.go).
-const referenceFilePattern = "*.md;*.txt;*.json;*.png;*.jpg;*.jpeg;*.webp;*.gif"
+const referenceFilePattern = "*.md;*.txt;*.json;*.pdf;*.png;*.jpg;*.jpeg;*.webp;*.gif"
 
 func (p *Picker) ChooseFile(title string) (string, error) {
 	if title == "" {
@@ -75,7 +75,7 @@ func (p *Picker) ChooseFile(title string) (string, error) {
 		// Images are references too (B-457); the first filter is the default,
 		// so Browse… can pick either without the person switching filters.
 		AddFilter("Documents and images", referenceFilePattern).
-		AddFilter("Reference documents (*.md, *.txt, *.json)", "*.md;*.txt;*.json").
+		AddFilter("Reference documents (*.md, *.txt, *.json, *.pdf)", "*.md;*.txt;*.json;*.pdf").
 		AddFilter("Images (*.png, *.jpg, *.jpeg, *.webp, *.gif)", "*.png;*.jpg;*.jpeg;*.webp;*.gif").
 		SetTitle(title)
 	if home, err := os.UserHomeDir(); err == nil {

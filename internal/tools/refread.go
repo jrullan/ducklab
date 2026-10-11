@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/reftext"
 )
 
 // The full text behind a digest. In digest mode the prompt carries a bounded
@@ -65,11 +66,22 @@ func (t *RefRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		return ErrorResult("not one of this run's references: %s\navailable:\n%s",
 			in.Path, strings.Join(ectx.RefPaths, "\n")), nil
 	}
-	raw, err := os.ReadFile(target)
+	// Through reftext, never as bytes (B-519): a PDF is read as its extracted
+	// text, and a binary that cannot be read says so instead of pouring
+	// object syntax into the seat's context.
+	doc, err := reftext.Load(ctx, target, ectx.RefCacheDir)
 	if err != nil {
 		return ErrorResult("read %s: %v", target, err), nil
 	}
-	text := string(raw)
+	if ectx.OnRefRead != nil {
+		ectx.OnRefRead(target)
+	}
+	if !doc.Readable() {
+		return &Result{Content: doc.Notice()}, nil
+	}
+	// Offsets and counts are characters of the text, not bytes of the file:
+	// "chars N of M" must mean what it says, and a byte cut can split a rune.
+	text := []rune(doc.Text)
 	if in.Offset < 0 {
 		in.Offset = 0
 	}
@@ -87,12 +99,9 @@ func (t *RefRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		end = len(text)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "## %s (chars %d–%d of %d)\n\n%s", target, in.Offset, end, len(text), text[in.Offset:end])
+	fmt.Fprintf(&b, "## %s (chars %d–%d of %d)\n\n%s", target, in.Offset, end, len(text), string(text[in.Offset:end]))
 	if end < len(text) {
 		fmt.Fprintf(&b, "\n\n[continues — call ref_read again with offset=%d]", end)
-	}
-	if ectx.OnRefRead != nil {
-		ectx.OnRefRead(target)
 	}
 	return &Result{Content: b.String()}, nil
 }

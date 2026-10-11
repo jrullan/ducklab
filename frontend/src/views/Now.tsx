@@ -596,6 +596,13 @@ function RunningRow({ run, live }: { run: Run; live?: LiveSpend }) {
       {run.status === "queued" && run.queued_reason && (
         <p className="mt-1 text-xs text-ink-secondary">{run.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{run.queued_reason}</a> : run.queued_reason}</p>
       )}
+      {run.warning && (
+        // A live run's warning — an unreadable reference (B-519), a context
+        // that will not fit — is worth the person's eye before it finishes.
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs" data-testid="now-running-warning" style={{ color: "var(--status-serious)" }}>
+          ⚠ {run.warning}
+        </p>
+      )}
       {live && (
         <p className="mt-1 text-xs tabular-nums text-ink-muted" data-testid="now-running-spend">
           {tokens(live.tokens)}{live.limit?.tokens ? ` / ${tokens(live.limit.tokens)} tokens` : " tokens"}

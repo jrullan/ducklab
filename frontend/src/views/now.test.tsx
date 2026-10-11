@@ -231,6 +231,22 @@ describe("Now — the inbox", () => {
     expect(row.textContent).toContain("$0.4200");
   });
 
+  // B-519: a reference the model could not read must reach the person while
+  // the run is live, not after it proposes something unrelated.
+  it("shows a running run's warning, such as an unreadable reference", async () => {
+    seed([
+      { ...base, id: "r-refs", status: "running", verdict: "", pending_kind: undefined,
+        warning: "1 reference could not be read — the model saw only a notice: notes.docx: unreadable binary reference (Word document, 3 KB); its content is not text and cannot be extracted; ask the person for a text or PDF version" },
+      { ...base, id: "r-clean", status: "running", verdict: "", pending_kind: undefined },
+    ]);
+    render(<Now client={clientWith()} projectId="p" />);
+    await screen.findAllByTestId("now-running-row");
+    const warnings = screen.getAllByTestId("now-running-warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.textContent).toContain("notes.docx: unreadable binary reference (Word document");
+    expect(warnings[0]!.textContent).toContain("ask the person for a text or PDF version");
+  });
+
   it("shows a queued run's engine reason verbatim without requiring it on older records", async () => {
     seed([
       { ...base, id: "r-queued", status: "queued", verdict: "", pending_kind: undefined,

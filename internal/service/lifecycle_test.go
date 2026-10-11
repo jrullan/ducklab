@@ -24,7 +24,7 @@ import (
 func isolate(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
-	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		t.Setenv(k, filepath.Join(root, k))
 	}
 	t.Setenv("LocalAppData", filepath.Join(root, "local"))

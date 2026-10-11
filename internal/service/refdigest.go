@@ -22,10 +22,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/provider"
+	"github.com/jrullan/ducklab/internal/reftext"
 )
 
 const (
@@ -87,10 +89,13 @@ type refDigest struct {
 	Chars       int    `json:"chars"`
 	DigestChars int    `json:"digest_chars"`
 	Cached      bool   `json:"cached"`
-	digest      string
+	// Unreadable is the notice that stands in for a binary reference that
+	// could not be extracted; such a document is never summarized (B-519).
+	Unreadable string `json:"unreadable,omitempty"`
+	digest     string
 }
 
-// refCacheEntry is what .ducklab/refs-cache stores: a digest is paid for
+// refCacheEntry is what the reference cache (reftext.CacheDir) stores: a digest is paid for
 // once per document version per model, not once per run.
 type refCacheEntry struct {
 	Path   string `json:"path"`
@@ -146,12 +151,25 @@ func digestOneRef(ctx context.Context, path, text string, chunkChars int, summar
 func digestReferences(ctx context.Context, files []string, chunkChars int, model, cacheDir string, summarize refSummarizer, onFile func(refDigest)) ([]refDigest, error) {
 	var out []refDigest
 	for _, f := range files {
-		raw, err := os.ReadFile(f)
+		// The extraction shares the digest's cache directory (B-519): a PDF
+		// is summarized from its text, and a binary that cannot be read is
+		// never summarized — a model asked to digest object syntax returns a
+		// confident digest of nothing.
+		doc, err := reftext.Load(ctx, f, cacheDir)
 		if err != nil {
 			return nil, fmt.Errorf("reference %q: %w", f, err)
 		}
-		text := string(raw)
-		d := refDigest{Path: f, Chars: len(text)}
+		if !doc.Readable() {
+			d := refDigest{Path: f, Unreadable: doc.Notice(), digest: doc.Notice()}
+			d.DigestChars = len(d.digest)
+			if onFile != nil {
+				onFile(d)
+			}
+			out = append(out, d)
+			continue
+		}
+		text := doc.Text
+		d := refDigest{Path: f, Chars: utf8.RuneCountInString(text)}
 		key := refCacheKey(text, model)
 		cachePath := ""
 		if cacheDir != "" {
@@ -197,6 +215,10 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string) str
 		"detail — identifiers, rules, numbers. Do not guess detail a digest elides.\n",
 		len(digests), totalChars)
 	for _, d := range digests {
+		if d.Unreadable != "" {
+			fmt.Fprintf(&b, "\n### Reference: %s (unreadable)\n\n%s\n", d.Path, d.Unreadable)
+			continue
+		}
 		fmt.Fprintf(&b, "\n### Digest: %s (full text: %d chars — ref_read for detail)\n\n%s\n", d.Path, d.Chars, d.digest)
 	}
 	return b.String()
@@ -206,13 +228,34 @@ func renderRefDigests(digests []refDigest, totalChars int, stageName string) str
 // architect seat, emits the run's reference events, and arms ref_read.
 // Returns the rendered section to append to the seed.
 func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *config.Project, stageName string, refPaths []string, architect config.DucklingID) (string, error) {
-	rendered, loaded, dropped, err := loadReferences(refPaths, projCfg.References, stageName)
+	// Out of the worktree (review of #173): extractions and digests are
+	// plaintext of the person's private references, and under .ducklab they
+	// were untracked files for `git add -A` and every clean-tree guard.
+	cacheDir := refCacheDir()
+	rendered, loaded, dropped, err := loadReferencesCached(ctx, refPaths, projCfg.References, stageName, cacheDir)
 	if err != nil {
 		return "", err
 	}
 	files, err := collectRefFiles(refPaths)
 	if err != nil {
 		return "", err
+	}
+	// Sized by the text the model would read, not the file's bytes: a PDF
+	// of 684 KB is 78 KB of text, and a binary it cannot read is nothing.
+	totalChars := 0
+	var unreadable []refUnreadable
+	for _, f := range files {
+		doc, lerr := reftext.Load(ctx, f, cacheDir)
+		if lerr != nil {
+			continue
+		}
+		if !doc.Readable() {
+			unreadable = append(unreadable, refUnreadable{
+				Path: f, Type: doc.Type, Bytes: doc.Size, Reason: doc.Reason, Notice: doc.Notice(),
+			})
+			continue
+		}
+		totalChars += utf8.RuneCountInString(doc.Text)
 	}
 	mode := "inline"
 	archCtx := 0
@@ -221,12 +264,6 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 	}
 	// The digest decision reads the FULL corpus, not the capped render: the
 	// point of the mode is that caps stop deciding what the model considers.
-	totalChars := 0
-	for _, f := range files {
-		if info, serr := os.Stat(f); serr == nil {
-			totalChars += int(info.Size())
-		}
-	}
 	if refsNeedDigest(totalChars, archCtx) {
 		mode = "digest"
 		d, derr := s.ducklings.Get(architect)
@@ -240,10 +277,10 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		summarize := func(sctx context.Context, prompt string) (string, error) {
 			return s.refDigestCall(sctx, rs, architect, d.Model, d.Provider, d.Cost, p, prompt)
 		}
-		cacheDir := filepath.Join(rs.projectPath, ".ducklab", "refs-cache")
 		digests, derr2 := digestReferences(ctx, files, digestChunkChars(archCtx), d.Model, cacheDir, summarize, func(dg refDigest) {
 			rs.writer.AppendEvent("reference_digested", map[string]interface{}{
 				"path": dg.Path, "chars": dg.Chars, "digest_chars": dg.DigestChars, "cached": dg.Cached,
+				"unreadable": dg.Unreadable,
 			})
 		})
 		if derr2 != nil {
@@ -252,15 +289,73 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 		rendered = renderRefDigests(digests, totalChars, stageName)
 		loaded = loaded[:0]
 		for _, dg := range digests {
-			loaded = append(loaded, refFile{Path: dg.Path, Chars: dg.Chars})
+			loaded = append(loaded, refFile{Path: dg.Path, Chars: dg.Chars, Unreadable: dg.Unreadable})
 		}
 		dropped = nil
 	}
+	unreadable = includedUnreadable(unreadable, loaded)
 	rs.writer.AppendEvent("references_loaded", map[string]interface{}{
-		"files": loaded, "dropped": dropped, "mode": mode,
+		"files": loaded, "dropped": dropped, "mode": mode, "unreadable": unreadable,
 	})
+	if len(unreadable) > 0 {
+		warnUnreadableRefs(rs, unreadable)
+	}
 	rs.armRefs(files, mode)
 	return rendered, nil
+}
+
+// refCacheDir is the reference cache shared by inline loading, digests and
+// ref_read: outside every project (see reftext.CacheDir).
+func refCacheDir() string { return reftext.CacheDir() }
+
+// includedUnreadable keeps the unreadable references the prompt actually
+// carried as a notice. A file the inline caps dropped never reached the model
+// at all, and warning that "the model saw only a notice" for it was false
+// (review of #173); it is reported as dropped instead. Digest mode loads the
+// whole corpus, so there every unreadable file is included.
+func includedUnreadable(unreadable []refUnreadable, loaded []refFile) []refUnreadable {
+	shown := map[string]bool{}
+	for _, f := range loaded {
+		if f.Unreadable != "" {
+			shown[f.Path] = true
+		}
+	}
+	var out []refUnreadable
+	for _, u := range unreadable {
+		if shown[u.Path] {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// warnUnreadableRefs tells the person — on the run (Now, the run page, MCP
+// run_get) and in the event stream (the conversation lane) — that a
+// reference reached the model only as a notice. The model is told too, in
+// its prompt; before B-519 neither was, and an architect that never read a
+// word of a guidebook wrote a proposal as if it had.
+func warnUnreadableRefs(rs *runState, unreadable []refUnreadable) {
+	notices := make([]string, 0, len(unreadable))
+	for _, u := range unreadable {
+		notices = append(notices, u.Notice)
+	}
+	noun := "reference"
+	if len(unreadable) > 1 {
+		noun = "references"
+	}
+	detail := fmt.Sprintf("%d %s could not be read — the model saw only a notice: %s",
+		len(unreadable), noun, strings.Join(notices, " | "))
+	rs.wmu.Lock()
+	if rs.run.Warning == "" {
+		rs.run.Warning = detail
+	} else {
+		rs.run.Warning += " · " + detail
+	}
+	rs.wmu.Unlock()
+	rs.writer.WriteState()
+	rs.writer.AppendEvent("warning", map[string]interface{}{
+		"detail": detail, "kind": "unreadable_reference", "references": unreadable,
+	})
 }
 
 // refDigestCall is one distillation call, accounted like every other call
