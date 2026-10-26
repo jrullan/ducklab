@@ -35,9 +35,27 @@ type BugRequest struct {
 	Severity string `json:"severity"`
 	Reporter string `json:"reporter"`
 	Source   string `json:"source"`
-	// Proposal, on an edit, is the split the person wants promote to make.
-	// A pointer so three requests stay distinct: absent leaves the stored
-	// proposal alone, an empty list discards it, a list replaces it.
+}
+
+// BugEditRequest corrects a report. Every field is a pointer so an absent
+// field and an empty one stay two different requests, at every door.
+//
+// The edit used to share BugRequest's plain strings and guess presence: the
+// body changed only when a body or a title was non-empty. So {"body":""} —
+// clearing a wrong paragraph — answered success and kept the old text, and a
+// title-only edit erased the body (review of #179). The desktop's form always
+// sent both and never noticed; the MCP operator sends what it changes.
+type BugEditRequest struct {
+	// Title, when present and not blank, replaces the title. A blank one is
+	// ignored rather than refused: a report with no title cannot be listed,
+	// and the desktop form has always sent its trimmed field as is.
+	Title *string `json:"title,omitempty"`
+	// Body, when present, replaces the report text — empty included.
+	Body *string `json:"body,omitempty"`
+	// Severity, when present and not blank, must be a known level.
+	Severity *string `json:"severity,omitempty"`
+	// Proposal is the split the person wants promote to make: absent leaves
+	// the stored proposal alone, an empty list discards it, a list replaces it.
 	Proposal *[]bug.Portion `json:"proposal,omitempty"`
 }
 
@@ -400,18 +418,41 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			s.failRun(rs, err)
 			return
 		}
-		rs.writer.AppendEvent("turn_start", map[string]interface{}{
-			"round": 1, "turn": i, "role": string(config.RoleTriager),
-			"duckling": string(duckling), "bug": b.ID,
-		})
 		previousContract := ""
 		if previousTaskID := previousFixTask(b.History); previousTaskID != "" {
 			if task := s.findTask(ctx, rs.run.ProjectID, previousTaskID); task != nil {
 				previousContract = task.Title + "\n\n" + task.Body
 			}
 		}
-		out, err := runner(ctx, turn, duckling, triagePrompt(b, all, previousContract), belt,
-			strategy.TurnContext{Round: 1, Index: i})
+		prompt := triagePrompt(b, all, previousContract)
+		// One triager turn, recorded the same way whether it is the first
+		// answer or the repair of a proposal promote would refuse (B-523).
+		triageTurn := func(round int, prompt string) (*agent.Triage, error) {
+			rs.writer.AppendEvent("turn_start", map[string]interface{}{
+				"round": round, "turn": i, "role": string(config.RoleTriager),
+				"duckling": string(duckling), "bug": b.ID,
+			})
+			out, err := runner(ctx, turn, duckling, prompt, belt,
+				strategy.TurnContext{Round: round, Index: i})
+			if err != nil {
+				return nil, err
+			}
+			// What the triager said and did. Without this the run recorded a
+			// turn_start and a turn_end around nothing: the lane showed a
+			// participant with an empty bubble, and the reasoning — which IS the
+			// content of a triage — never left the process.
+			// true: the triager's loop wires OnToolCall like every other, so its
+			// calls are already on the record as they happened.
+			strategy.EmitTurnRecord(func(kind string, data map[string]interface{}) {
+				rs.writer.AppendEvent(kind, data)
+			}, round, i, config.RoleTriager, duckling, out, true)
+			rs.writer.AppendEvent("turn_end", map[string]interface{}{
+				"round": round, "turn": i, "role": string(config.RoleTriager),
+			})
+			t, _ := out.Parsed.(*agent.Triage)
+			return t, nil
+		}
+		t, err := triageTurn(1, prompt)
 		if err != nil {
 			// One bad bug does not poison the others: the rest of the batch
 			// still runs, and this one stays open for a person to look at.
@@ -420,40 +461,24 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			})
 			continue
 		}
-		// What the triager said and did. Without this the run recorded a
-		// turn_start and a turn_end around nothing: the lane showed a
-		// participant with an empty bubble, and the reasoning — which IS the
-		// content of a triage — never left the process.
-		// true: the triager's loop wires OnToolCall like every other, so its
-		// calls are already on the record as they happened.
-		strategy.EmitTurnRecord(func(kind string, data map[string]interface{}) {
-			rs.writer.AppendEvent(kind, data)
-		}, 1, i, config.RoleTriager, duckling, out, true)
-		rs.writer.AppendEvent("turn_end", map[string]interface{}{
-			"round": 1, "turn": i, "role": string(config.RoleTriager),
-		})
-		t, ok := out.Parsed.(*agent.Triage)
-		if !ok || t == nil {
+		if t == nil {
 			continue
 		}
-		p := map[string]interface{}{
-			"bug": b.ID, "severity": t.Severity, "reason": t.Reason,
-			"component": t.Component, "task_title": t.TaskTitle,
-			"suspected_files": t.SuspectedFiles,
-			"test_strategy":   t.TestStrategy, "test_reason": t.TestReason,
-		}
-		if len(t.Proposal) > 0 {
-			p["proposal"] = t.Proposal
-		}
-		if len(t.Deliverables) > 0 {
-			p["deliverables"] = t.Deliverables
-		}
-		if t.DuplicateOf != "" {
-			p["duplicate_of"] = t.DuplicateOf
-		}
-		if t.Reproducible != nil {
-			p["reproducible"] = *t.Reproducible
-		}
+		p := triageProposalMap(b.ID, t)
+		// The rule promote will hold this proposal to, asked now — while the
+		// triager is still here to answer it — instead of after a person
+		// accepted a split that can never become tasks (B-523).
+		first := p
+		p = s.settleTriageProposal(rs, projectRoot, p, func(problem string) (map[string]interface{}, error) {
+			revised, err := triageTurn(2, triageRepairPrompt(prompt, first, problem))
+			if err != nil {
+				return nil, err
+			}
+			if revised == nil {
+				return nil, fmt.Errorf("the triager's revision did not parse as a triage")
+			}
+			return triageProposalMap(b.ID, revised), nil
+		})
 		proposals = append(proposals, p)
 		rs.writer.AppendEvent("triage", p)
 	}
@@ -471,6 +496,13 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	rs.run.PendingData = map[string]interface{}{
 		"triaged": len(proposals), "proposals": proposals,
 	}
+	// Said at the gate, plainly, with the fix: a proposal promote would refuse
+	// must not pass as an ordinary green classification (B-523).
+	blockers := triagePromoteBlockers(proposals)
+	if len(blockers) > 0 {
+		rs.run.PendingData["promote_blockers"] = blockers
+		rs.run.PendingData["detail"] = triageBlockerDetail(blockers)
+	}
 
 	// Auto-apply under auto and yolo — with one law standing: a duplicate
 	// proposal always waits for a person, because a wrong duplicate CLOSES a
@@ -483,7 +515,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 				hasDuplicate = true
 			}
 		}
-		if !hasDuplicate && len(proposals) > 0 {
+		if !hasDuplicate && len(blockers) == 0 && len(proposals) > 0 {
 			rs.writer.WriteState()
 			if entry, err := s.entryFor(rs); err == nil {
 				if err := s.acceptRun(ctx, rs, entry, "", "auto-triage"); err == nil {
@@ -493,12 +525,18 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			// A failed auto-apply degrades to the ordinary human gate below.
 		} else if hasDuplicate {
 			rs.run.PendingData["detail"] = "auto-apply declined: a proposal closes a report as duplicate — that decision is yours"
+		} else if len(blockers) > 0 {
+			// An unattended accept would record a split nobody can promote and
+			// leave the loop stuck at promote with no one watching.
+			rs.run.PendingData["detail"] = "auto-apply declined: " + triageBlockerDetail(blockers)
 		}
 	}
 
-	rs.writer.AppendEvent("human_needed", map[string]interface{}{
-		"kind": "gate", "triaged": len(proposals),
-	})
+	needed := map[string]interface{}{"kind": "gate", "triaged": len(proposals)}
+	if len(blockers) > 0 {
+		needed["promote_blockers"] = blockers
+	}
+	rs.writer.AppendEvent("human_needed", needed)
 	rs.writer.WriteState()
 }
 
@@ -626,15 +664,12 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	// out T-001 in a project whose plan already had T-001 through T-010: the
 	// promoted task was invisible to every command, and the one the CLI told
 	// you to run was a different task with the same name.
-	var portions []agent.SplitProposal
-	if rec.Proposal != "" {
-		if err := json.Unmarshal([]byte(rec.Proposal), &portions); err != nil {
-			return nil, fmt.Errorf("read stored split proposal: %w", err)
-		}
-	}
-	promoted, err := preparePromotionPortions(entry.Path, rec, portions)
+	// The same judgement triage made before its gate (B-523). When it still
+	// refuses here, the refusal says how to get unstuck: the operator that
+	// met B-014's did not know the proposal could be edited.
+	promoted, err := promotionPortionsFor(entry.Path, rec)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w; %s", err, proposalEditHint)
 	}
 	reopenContext := promotionReopenEvidence(db, rec, history, note)
 	if actor == "" {
@@ -858,7 +893,7 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 			if len(globs) == 0 {
 				globs = verify.DefaultTestGlobs
 			}
-			return nil, fmt.Errorf("split proposal requires test or coverage work but no portion claims it; checked %s. Assign a path matching %s to exactly one portion, or add an acceptance slice such as %q to that portion before promoting", strings.Join(checked, "; "), strings.Join(globs, ", "), "Regression test covers <behavior>")
+			return nil, &unclaimedTestWorkError{msg: fmt.Sprintf("split proposal requires test or coverage work but no portion claims it; checked %s. Assign a path matching %s to exactly one portion, or add an acceptance slice such as %q to that portion before promoting", strings.Join(checked, "; "), strings.Join(globs, ", "), "Regression test covers <behavior>")}
 		}
 	}
 	if len(testPortions) > 1 {
@@ -1275,17 +1310,8 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 	// triage built; a run rehydrated from state.json carries what JSON made of
 	// it. Handling only the second meant the fix worked after an engine restart
 	// and not before, which is the worst of both.
-	var proposals []map[string]interface{}
-	switch v := raw.(type) {
-	case []map[string]interface{}:
-		proposals = v
-	case []interface{}:
-		for _, item := range v {
-			if m, ok := item.(map[string]interface{}); ok {
-				proposals = append(proposals, m)
-			}
-		}
-	default:
+	proposals := triageProposalList(raw)
+	if len(proposals) == 0 {
 		return 0, nil
 	}
 
@@ -1332,62 +1358,14 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 				}
 			}
 		}
-		// The half of the answer that says WHERE. It lived only in the run's
-		// event stream, so promoting the bug days later carried the reporter's
-		// prose and nothing the triage had worked out — and an implementer
-		// started from "the left edge label does not update" and a 1361-line
-		// file with the location already computed and thrown away.
-		if v, _ := p["component"].(string); v != "" {
-			rec.Component = v
-		}
-		if v, _ := p["task_title"].(string); v != "" {
-			rec.TaskTitle = v
-		}
-		if v, _ := p["test_strategy"].(string); v != "" {
-			rec.TestStrategy = v
-		}
-		if v, _ := p["test_reason"].(string); v != "" {
-			rec.TestReason = v
-		}
-		if v, _ := p["reason"].(string); v != "" {
-			rec.TriageReason = v
+		if err := applyTriageContract(rec, p); err != nil {
+			return applied, err
 		}
 		if invalidDuplicate != "" {
 			if rec.TriageReason != "" {
 				rec.TriageReason += "; "
 			}
 			rec.TriageReason += invalidDuplicate
-		}
-		if files, ok := p["suspected_files"].([]interface{}); ok {
-			var names []string
-			for _, f := range files {
-				if name, _ := f.(string); name != "" {
-					names = append(names, name)
-				}
-			}
-			rec.SuspectedFiles = strings.Join(names, "\n")
-		}
-		if files, ok := p["suspected_files"].([]string); ok {
-			rec.SuspectedFiles = strings.Join(files, "\n")
-		}
-		if items, ok := p["deliverables"].([]interface{}); ok {
-			var lines []string
-			for _, it := range items {
-				if line, _ := it.(string); strings.TrimSpace(line) != "" {
-					lines = append(lines, strings.TrimSpace(line))
-				}
-			}
-			rec.Deliverables = strings.Join(lines, "\n")
-		}
-		if items, ok := p["deliverables"].([]string); ok {
-			rec.Deliverables = strings.Join(items, "\n")
-		}
-		if proposal, ok := p["proposal"]; ok {
-			data, err := json.Marshal(proposal)
-			if err != nil {
-				return applied, fmt.Errorf("store split proposal: %w", err)
-			}
-			rec.Proposal = string(data)
 		}
 		if refreshing && strings.TrimSpace(rec.Proposal) == "" {
 			return applied, fmt.Errorf("retriage %s must produce a fresh proposal with acceptance slices before it can be promoted again", rec.ID)
@@ -1634,7 +1612,7 @@ func promotedTaskTitle(b *store.Bug) string {
 // Only the words. Status, task and duplicate belong to the loop and have their
 // own transitions; letting a form set them would put the loop's rules in two
 // places.
-func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugRequest) (*bug.Bug, error) {
+func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugEditRequest) (*bug.Bug, error) {
 	entry, entryErr := s.registry.Get(projectID)
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
@@ -1648,20 +1626,24 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 	}
 	needsFreshContract := entryErr == nil && bugNeedsRetriage(readBugAudit(entry.Path)[rec.ID])
 	freshContract := false
-	if t := strings.TrimSpace(req.Title); t != "" {
-		rec.Title = t
+	if req.Title != nil {
+		if t := strings.TrimSpace(*req.Title); t != "" {
+			rec.Title = t
+		}
 	}
 	// An empty body is a legitimate edit — someone clearing a wrong paragraph —
-	// so it is only left alone when the field was absent altogether. The title
+	// so it is left alone only when the field was absent altogether. The title
 	// is not: a report with no title cannot be listed.
-	if req.Body != "" || req.Title != "" {
-		rec.Body = strings.TrimSpace(req.Body)
+	if req.Body != nil {
+		rec.Body = strings.TrimSpace(*req.Body)
 	}
-	if sev := strings.ToLower(strings.TrimSpace(req.Severity)); sev != "" {
-		if !bug.ValidSeverity(sev) {
-			return nil, fmt.Errorf("unknown severity %q, want critical, high, normal or low", req.Severity)
+	if req.Severity != nil {
+		if sev := strings.ToLower(strings.TrimSpace(*req.Severity)); sev != "" {
+			if !bug.ValidSeverity(sev) {
+				return nil, fmt.Errorf("unknown severity %q, want critical, high, normal or low", *req.Severity)
+			}
+			rec.Severity = sev
 		}
-		rec.Severity = sev
 	}
 	// The split is the person's to write, correct or discard — the triager
 	// only recommends one. Until promote, that is: the portions became tasks
@@ -1695,6 +1677,13 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 		return nil, err
 	}
 	out := toBug(rec)
+	// The edit that exists to get a refused promote unstuck says whether it
+	// did, with promote's own words.
+	if entryErr == nil && rec.TaskID == "" && bug.Status(rec.Status) == bug.Triaged {
+		if _, err := promotionPortionsFor(entry.Path, rec); err != nil {
+			out.PromoteBlocker = err.Error()
+		}
+	}
 	if freshContract {
 		audit := bug.AuditEntry{
 			Bug: rec.ID, From: rec.Status, To: rec.Status, Actor: "human", Via: "contract-edit",

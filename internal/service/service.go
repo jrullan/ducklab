@@ -3188,11 +3188,23 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 	// the tree clean, and reported success — so Accept and Reject did the same
 	// thing and the whole triage was discarded with a green tick.
 	if rs.run.Stage == "triage" || rs.run.Stage == "operate" {
-		n, err := s.ApplyTriage(ctx, rs.run.ProjectID, rs.run.PendingData["proposals"])
+		proposals := triageProposalList(rs.run.PendingData["proposals"])
+		// B-523: an unattended accept of a split promote will refuse records a
+		// dead end with nobody watching. A person may still accept — the
+		// classification is worth keeping — and is told exactly what to fix.
+		if flagged := triagePromoteBlockers(proposals); len(flagged) > 0 && strings.HasPrefix(actor, "auto") {
+			return fmt.Errorf("%s", triageBlockerDetail(flagged))
+		}
+		n, err := s.ApplyTriage(ctx, rs.run.ProjectID, proposals)
 		if err != nil {
 			return err
 		}
-		rs.writer.AppendEvent("triage_applied", map[string]interface{}{"bugs": n})
+		applied := map[string]interface{}{"bugs": n}
+		if blockers := s.appliedTriageBlockers(rs.run.ProjectID, proposals); len(blockers) > 0 {
+			applied["promote_blockers"] = blockers
+			rs.run.Warning = "accepted, but " + triageBlockerDetail(blockers)
+		}
+		rs.writer.AppendEvent("triage_applied", applied)
 		s.resolveTriageSiblings(rs)
 		clearPending(rs.run)
 		rs.run.Accepted = true
