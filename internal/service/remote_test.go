@@ -146,12 +146,17 @@ func remoteReadyProject(t *testing.T) (*Service, string, string) {
 		t.Fatal(err)
 	}
 	id = opened.ID
+	// Push the branch the fixture is actually on, and name the bare remote's
+	// HEAD after it so a clone checks that branch out. Both used to come from
+	// init.defaultBranch, and `push origin master` failed wherever the
+	// developer's git said main (B-526).
+	branch := gitBranch(t, dir)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	cmd := exec.Command("git", "init", "--bare", remote)
+	cmd := exec.Command("git", "init", "--bare", "-b", branch, remote)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("init remote: %v: %s", err, out)
 	}
-	for _, args := range [][]string{{"remote", "add", "origin", remote}, {"push", "-u", "origin", "master"}} {
+	for _, args := range [][]string{{"remote", "add", "origin", remote}, {"push", "-u", "origin", branch}} {
 		cmd = exec.Command("git", args...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
