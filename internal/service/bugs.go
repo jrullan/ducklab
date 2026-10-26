@@ -406,6 +406,14 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 	if seat != "" {
 		run.Roster = map[string]string{string(config.RoleTriager): seat}
 	}
+	// The record carries its ceilings from birth (review of #176): a
+	// replacement recovered after its claim but before it ever ran resumed
+	// with an all-zero Limit — unlimited.
+	if projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); err == nil {
+		s.recordProjectLimits(run, projCfg)
+	} else {
+		s.recordProjectLimits(run, nil)
+	}
 	// A relaunch is written PREPARED and becomes real only once the original
 	// names it (review of #176). Ending the original first destroyed it when
 	// the replacement's record then failed to write: no new run, and the
@@ -704,7 +712,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		// #176): a fresh tracker recorded the spent tokens, turns and dollars
 		// as zero and put back the default caps — resume doubled the budget
 		// and undid any lift.
-		limits, tracker = trackerFromRecord(rs.snapshotRun())
+		limits, tracker = resumedTracker(rs.snapshotRun(), limits)
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)

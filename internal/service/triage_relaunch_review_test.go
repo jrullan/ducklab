@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -163,6 +164,9 @@ func TestACrashAfterTheRelaunchClaimFinalizesTheReplacementForResume(t *testing.
 	if got := mustDisk(t, root, original.run.ID); got.Status != "failed" || got.Verdict != "ABORTED" || !strings.Contains(got.Resolution, replacement) {
 		t.Fatalf("original after the claim = %s/%s %q, want ended and naming %s", got.Status, got.Verdict, got.Resolution, replacement)
 	}
+	// Review of #176 (4381603050): the replacement never ran, so it never
+	// recorded limits; resume read the all-zero Limit as unlimited.
+	assertProjectLimits(t, s, id, mustDisk(t, root, replacement), "recovered replacement record")
 	run := mustRun(t, s, replacement)
 	if run.Status != "paused" || !slices.Contains(runNext(run), "resume") {
 		t.Fatalf("claimed replacement after recovery = %s/%s next %v, want resumable", run.Status, run.PendingKind, runNext(run))
@@ -174,7 +178,7 @@ func TestACrashAfterTheRelaunchClaimFinalizesTheReplacementForResume(t *testing.
 	if _, err := s.RunResume(context.Background(), replacement); err != nil {
 		t.Fatal(err)
 	}
-	waitForStatus(t, s, replacement, "paused", "gate")
+	assertProjectLimits(t, s, id, waitForStatus(t, s, replacement, "paused", "gate"), "resumed replacement")
 	if got := triagedBugs(runEvents522(t, s, replacement)); !slices.Equal(got, ids[:2]) {
 		t.Fatalf("the finalized replacement triaged %v, want %v", got, ids[:2])
 	}
@@ -299,4 +303,72 @@ func TestAChatAfterARestartKeepsItsLedger(t *testing.T) {
 	if got.Budget.Limit.Turns != 400 {
 		t.Fatalf("the chat's recorded ceiling was replaced: %+v", got.Budget.Limit)
 	}
+}
+
+// assertProjectLimits checks a record carries the ceilings a run of the
+// project starts with — never the all-zero Limit budget reads as unlimited.
+func assertProjectLimits(t *testing.T, s *Service, projectID string, run *runlog.Run, what string) {
+	t.Helper()
+	cfg, err := s.projectConfig(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := s.projectLimits(cfg)
+	want := runlog.BudgetLimits{USD: b.MaxUSD, Tokens: b.MaxTokens, Turns: b.MaxTurns, WallclockS: b.MaxWallclockS}
+	if want == (runlog.BudgetLimits{}) {
+		t.Fatal("setup: the project has no ceilings to check against")
+	}
+	if run.Budget.Limit != want {
+		t.Fatalf("%s limits = %+v, want the project's %+v", what, run.Budget.Limit, want)
+	}
+}
+
+// Defensive half of 4381603050: a record from before limits were persisted at
+// birth (an older engine's claimed relaunch, a queued run) still has an
+// all-zero Limit. Never-started means nothing spent either; such a run gets
+// the project's ceilings, while a run that spent and then had every cap
+// lifted keeps its lifts.
+func TestAResumeOfANeverStartedRunWithoutCeilingsAppliesTheProjectBudget(t *testing.T) {
+	fresh := &budget.Budget{MaxUSD: 2, MaxTokens: 1000, MaxTurns: 10, MaxWallclockS: 600}
+	never := &runlog.Run{}
+	if got, _ := resumedTracker(never, fresh); got != fresh {
+		t.Fatalf("a never-started run without ceilings resumed with %+v, want the fresh budget", got)
+	}
+	lifted := &runlog.Run{Budget: runlog.BudgetState{Tokens: 40, Turns: 1}}
+	if got, tr := resumedTracker(lifted, fresh); *got != (budget.Budget{}) || tr.Spend.Snapshot().Tokens != 40 {
+		t.Fatalf("a run that spent and lifted every cap got %+v", got)
+	}
+	recorded := &runlog.Run{Budget: runlog.BudgetState{Limit: runlog.BudgetLimits{Tokens: 77}}}
+	if got, _ := resumedTracker(recorded, fresh); got.MaxTokens != 77 {
+		t.Fatalf("recorded ceilings were replaced: %+v", got)
+	}
+}
+
+// End to end: an older record's claimed replacement, recovered with no
+// ceilings at all, resumes under the project's budget.
+func TestARecoveredReplacementWithoutRecordedCeilingsResumesUnderTheProjectBudget(t *testing.T) {
+	s, id, root, _, original := pausedTriage(t, 2)
+	crashRelaunchAt(t, s, id, original.run.ID, "after-claim")
+	kids := relaunchesOf(t, root, original.run.ID)
+	if len(kids) != 1 {
+		t.Fatalf("setup: %d replacements", len(kids))
+	}
+	old := kids[0]
+	old.Budget.Limit = runlog.BudgetLimits{}
+	w, err := runlog.OpenWriter(root, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteState(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cleanupStartedRun(t, s, old.ID)
+	if _, err := s.RunResume(context.Background(), old.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertProjectLimits(t, s, id, waitForStatus(t, s, old.ID, "paused", "gate"), "resumed older replacement")
 }

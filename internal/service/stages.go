@@ -610,6 +610,10 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		run.RosterSources[string(role)] = "request"
 	}
 
+	// The record carries its ceilings from birth: a revision recovered after
+	// its claim but before it ever ran resumed with none — all-zero limits,
+	// which budget reads as unlimited (review of #176).
+	s.recordProjectLimits(run, projCfg)
 	// A revision is written PREPARED until its parent is claimed (review of
 	// #175): an engine that dies between this record and the claim leaves a
 	// child that recovery never reactivates — it reconciles it against the
@@ -1159,7 +1163,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// A resumed stage continues its own life: recorded ceilings, ledger
 		// seeded with what it already spent — a tracker reborn at zero would
 		// make "answer the question" a way to double the budget.
-		limits, tracker = trackerFromRecord(rs.run)
+		limits, tracker = resumedTracker(rs.snapshotRun(), limits)
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)

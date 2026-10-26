@@ -1137,6 +1137,43 @@ func recordLimits(rs *runState, b *budget.Budget) {
 	}
 }
 
+// projectLimits is the budget a run of this project starts with: the global
+// defaults under the project's own caps.
+func (s *Service) projectLimits(projCfg *config.Project) budget.Budget {
+	s.cfgMu.RLock()
+	defaults := budget.Budget{
+		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
+	}
+	s.cfgMu.RUnlock()
+	if projCfg == nil {
+		return defaults
+	}
+	return projectBudget(defaults, projCfg.Budget)
+}
+
+// recordProjectLimits writes a run's starting ceilings onto a record that has
+// not run yet, so the record alone can rebuild its tracker (B-522 review).
+func (s *Service) recordProjectLimits(run *runlog.Run, projCfg *config.Project) {
+	b := s.projectLimits(projCfg)
+	run.Budget.Limit = runlog.BudgetLimits{USD: b.MaxUSD, Tokens: b.MaxTokens, Turns: b.MaxTurns, WallclockS: b.MaxWallclockS}
+}
+
+// resumedTracker is the tracker a resumed run continues with: its record's,
+// unless the record never held ceilings at all — a run recovered before it
+// ever started (a claimed relaunch or revision the engine died launching, a
+// queued run) has an all-zero Limit, which budget reads as "unlimited". That
+// run gets fresh, the ceilings it would have started with (review of #176).
+//
+// Never-started is all-zero ceilings AND nothing spent: a run that has
+// spent something has had its limits recorded, so its zeros are lifts.
+func resumedTracker(run *runlog.Run, fresh *budget.Budget) (*budget.Budget, *budget.Tracker) {
+	if run.Budget.Limit == (runlog.BudgetLimits{}) && run.Budget.Tokens == 0 && run.Budget.Turns == 0 && run.Budget.USD == 0 && fresh != nil {
+		return fresh, budget.NewTracker(fresh)
+	}
+	return trackerFromRecord(run)
+}
+
 // trackerFromRecord rebuilds a resumed run's tracker from its record: the
 // ceilings recorded on it — including any a person lifted while it was paused
 // — and a ledger continuing from what it already spent. A tracker reborn at

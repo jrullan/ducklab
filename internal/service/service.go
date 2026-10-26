@@ -2090,7 +2090,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// was paused — and its ledger continues from what it already spent: a
 		// tracker reborn at zero would have made "resume" a way to double
 		// every budget, and the record would undercount the run's true cost.
-		recorded, resumed := trackerFromRecord(rs.run)
+		recorded, resumed := resumedTracker(rs.snapshotRun(), &b)
 		b, tracker = *recorded, resumed
 	}
 	rs.setTracker(tracker)

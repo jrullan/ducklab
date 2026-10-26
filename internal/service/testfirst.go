@@ -495,7 +495,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// with a fresh tracker — the budget card restarted its clock at zero
 		// (57 of 86 working minutes shown), and the ceilings the person had
 		// lifted while it waited came back, so they lifted them twice more.
-		limits, tracker = trackerFromRecord(rs.snapshotRun())
+		limits, tracker = resumedTracker(rs.snapshotRun(), limits)
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
