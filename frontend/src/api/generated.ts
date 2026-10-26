@@ -257,6 +257,11 @@ export interface DucklingDuckling {
   vision_status?: string;
 }
 
+export interface EngineapiabortRequest {
+  actor?: string;
+  reason?: string;
+}
+
 export interface EngineapiacceptRequest {
   human_verified?: number[];
   lane_widening?: string[];
@@ -351,6 +356,7 @@ export interface EngineapirejectReceipt {
 }
 
 export interface EngineapirejectRequest {
+  actor?: string;
   commit_sha?: string;
   reason?: string;
   resolution?: string;
@@ -374,6 +380,7 @@ export interface EngineapirestartRequest {
 export interface EngineapiresumeRequest {
   actor?: string;
   note?: string;
+  reason?: string;
 }
 
 export interface EngineapirosterSetRequest {

@@ -412,6 +412,13 @@ export const KNOWN_EVENT_TYPES = [
   "decomposition",
   "resolution",
   "human",
+  // The words a decider gave with accept, abort or resume, attributed
+  // (B-524): recorded rather than dropped, and shown in the run's lane.
+  "decision",
+  // How a recorded decision ended — taken, or refused with the error. The
+  // words are recorded before the door acts, so until this arrives the
+  // decision is an attempt (second review of #177).
+  "decision_outcome",
   // An advisor auto-answer is an operator-facing correction opportunity.
   "notification",
   "human_needed",

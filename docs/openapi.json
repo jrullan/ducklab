@@ -918,6 +918,17 @@
         ],
         "type": "object"
       },
+      "EngineapiabortRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "EngineapiacceptRequest": {
         "properties": {
           "human_verified": {
@@ -1223,6 +1234,9 @@
       },
       "EngineapirejectRequest": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "commit_sha": {
             "type": "string"
           },
@@ -1286,6 +1300,9 @@
             "type": "string"
           },
           "note": {
+            "type": "string"
+          },
+          "reason": {
             "type": "string"
           }
         },
@@ -8819,6 +8836,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiabortRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "204": {
             "description": "no content"
@@ -8832,7 +8859,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Abort"
+        "summary": "Abort; an optional reason is recorded with the decision"
       }
     },
     "/v1/runs/{id}/accept": {

@@ -83,8 +83,20 @@ type remoteRequest struct {
 	Title  string `json:"title,omitempty"`
 }
 
+// abortRequest is the optional abort body. No body aborts as it always did;
+// a reason is recorded with the abort, attributed to actor (B-524).
+type abortRequest struct {
+	Reason string `json:"reason,omitempty"`
+	// Actor names the decider when it is not a person: "mcp:<client>".
+	Actor string `json:"actor,omitempty"`
+}
+
 type rejectRequest struct {
-	Reason     string `json:"reason"`
+	Reason string `json:"reason"`
+	// Actor names the decider when it is not a person: "mcp:<client>". The
+	// MCP used to fold it into the reason, and the record said a person
+	// rejected what an operator did (review of #177).
+	Actor      string `json:"actor,omitempty"`
 	Resolution string `json:"resolution,omitempty"`
 	CommitSHA  string `json:"commit_sha,omitempty"`
 }
@@ -501,7 +513,8 @@ func routeTable() []Route {
 			Request: landRequest{}, Summary: "Record a manual landing", ClientMethod: "RunLand",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunLand }},
 		{Method: "POST", Path: "/v1/runs/{id}/abort", Auth: true,
-			Summary: "Abort", ClientMethod: "RunAbort",
+			Request: abortRequest{}, RequestOptional: true,
+			Summary: "Abort; an optional reason is recorded with the decision", ClientMethod: "RunAbort",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAbort }},
 		{Method: "POST", Path: "/v1/runs/{id}/resume", Auth: true,
 			Request: resumeRequest{}, RequestOptional: true, Response: runlog.Run{},

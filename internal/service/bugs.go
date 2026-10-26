@@ -1069,8 +1069,16 @@ func (s *Service) BugPromoteWithNote(ctx context.Context, projectID, bugID, acto
 	if bugNeedsRetriage(history) {
 		return nil, fmt.Errorf("%s was reopened because its previous fix did not hold; triage it again (or edit and save a fresh contract) before promoting new work", bugID)
 	}
-	if _, reopened := latestReopen(history); reopened && strings.TrimSpace(note) == "" {
+	_, reopened := latestReopen(history)
+	if reopened && strings.TrimSpace(note) == "" {
 		return nil, fmt.Errorf("%s was reopened; promotion requires a note saying what this attempt must address that the previous fix missed", bugID)
+	}
+	// The note is read only as a reopened bug's evidence. On any other bug
+	// it reached neither the task nor the audit — an adjustment typed there
+	// was silently lost (B-524).
+	if !reopened && strings.TrimSpace(note) != "" {
+		return nil, fmt.Errorf("%s was not reopened, and a promote note is read only for a reopened bug (what the new attempt must address that the previous fix missed); "+
+			"to change what the task asks, edit the bug's proposal with bug_edit, then promote without a note", bugID)
 	}
 	if bug.Status(rec.Status) == bug.Duplicate || bug.Status(rec.Status) == bug.WontFix ||
 		bug.Status(rec.Status) == bug.Closed {

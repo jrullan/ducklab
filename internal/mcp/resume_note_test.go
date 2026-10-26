@@ -25,7 +25,9 @@ func TestAResumeDecisionCarriesItsNote(t *testing.T) {
 		t.Errorf("engine got note %q from %q", eng.resumeNote, eng.resumeActor)
 	}
 	text, isErr := toolResultText(t, resps[2])
-	if !isErr || !strings.Contains(text, "note rides only a resume") {
+	// B-524 reworded the refusal to name what to do instead; it still names
+	// resume as the one action that carries a note.
+	if !isErr || !strings.Contains(text, "only resume carries a note") {
 		t.Errorf("a note on accept was not refused: %q", text)
 	}
 	if len(eng.accepted) != 0 {

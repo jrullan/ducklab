@@ -6,7 +6,7 @@ import { StatusChip } from "./StatusChip";
 import { Prose } from "./Prose";
 import { statusVar } from "../lib/colors";
 import { DeliverablesInline } from "./DeliverablesCard";
-import { humaniseContract, splitDeliverablesReport } from "../lib/runview";
+import { decisionLabel, humaniseContract, splitDeliverablesReport } from "../lib/runview";
 
 /**
  * One turn in the conversation.
@@ -88,6 +88,22 @@ export function ConversationTurn({
         <span className="h-px flex-1 bg-hairline" />
         <span>⇄ {block.text} · by {block.author ?? "the person"} — the conversation so far came along</span>
         <span className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
+  if (block.role === "decision") {
+    // B-524: words given with a decision are on the record, attributed —
+    // and they changed nothing about what was decided. The label says how
+    // the decision ended: a refused accept is not shown as an accept.
+    const refused = block.decisionOutcome?.outcome === "refused";
+    return (
+      <div
+        data-testid="decision-record"
+        data-outcome={block.decisionOutcome?.outcome ?? "recorded"}
+        className={`my-2 rounded-card border px-3 py-2 text-sm ${refused ? "border-serious" : "border-hairline"}`}
+      >
+        <span className="text-ink-muted">{decisionLabel(block)}: </span>
+        <span className="whitespace-pre-wrap text-ink">“{block.text}”</span>
       </div>
     );
   }
