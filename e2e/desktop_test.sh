@@ -10,6 +10,9 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d)
 export XDG_CONFIG_HOME="$WORK/config" XDG_DATA_HOME="$WORK/data" XDG_STATE_HOME="$WORK/state"
+# The developer's git config must not decide the result (B-526).
+export GIT_CONFIG_GLOBAL="$WORK/gitconfig" GIT_CONFIG_NOSYSTEM=1
+: > "$GIT_CONFIG_GLOBAL"
 mkdir -p "$XDG_CONFIG_HOME/ducklab"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m %s\n' "$1"; }
@@ -42,7 +45,7 @@ info "building"
 
 PROJ="$WORK/proj"
 cp -r "$ROOT/fixtures/fixture-go-red" "$PROJ"
-( cd "$PROJ" && git init -q . && git config user.email t@t && git config user.name t \
+( cd "$PROJ" && git init -q -b main . &&git config user.email t@t && git config user.name t \
   && git add -A && git commit -qm init )
 
 "$WORK/ducklab-engine" > "$WORK/engine.log" 2>&1 &
