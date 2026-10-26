@@ -4494,8 +4494,24 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
 	current := rs.snapshotRun()
-	if current.Accepted || relaunchedByPattern.MatchString(current.Resolution) {
-		return fmt.Errorf("run %q was already %s; there is nothing to abort", id, runDecided(current))
+	// The full decision check (review of #176, 4383362596): only accepted
+	// and relaunched were refused, so reject-then-abort both succeeded and
+	// the terminal record went from done/FAILED to failed/ABORTED.
+	//
+	// Accepted or relaunched: an error — the work landed, or continues in
+	// the replacement, and "abort" would claim otherwise. Already aborted or
+	// settled: a no-op that changes nothing — abort's intent (this run does
+	// no more work and lands nothing) already holds, and callers chain an
+	// abort after other steps (the desktop's "accept amendment and
+	// relaunch", a double-click, the board's abort button) without first
+	// checking whether the run already ended. Words given with it cannot be
+	// recorded on a decision that did not happen, so a reason refuses
+	// instead of being dropped (B-524).
+	if decided := runDecided(current); decided != "" {
+		if current.Accepted || relaunchedByPattern.MatchString(current.Resolution) || strings.TrimSpace(reason) != "" {
+			return fmt.Errorf("run %q was already %s; there is nothing to abort", id, decided)
+		}
+		return nil
 	}
 	wasQueued := current.Status == "queued"
 	// Recorded before the worker is cancelled: a log that refuses the
@@ -5459,8 +5475,11 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))
 	}
-	if reason := runDecided(rs.run); reason != "" && rs.run.Status != "done" {
-		return fmt.Errorf("run %q was already %s; there is nothing to reject", id, reason)
+	// Any earlier decision refuses this one, a settled run included: a
+	// second reject rewrote a finished run's verdict and appended a second
+	// run_end (review of #176).
+	if decided := runDecided(rs.run); decided != "" {
+		return fmt.Errorf("run %q was already %s; there is nothing to reject", id, decided)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
