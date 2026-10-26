@@ -613,6 +613,16 @@ func (c *Client) BugPromote(projectID, bugID, actor, note string) (map[string]in
 	return result, err
 }
 
+// BugEdit changes what a report says — title, body, severity, or the split
+// proposal promote will turn into tasks. Exactly the keys present change: an
+// empty body clears it, an empty proposal list discards the split, and an
+// absent key leaves that field alone.
+func (c *Client) BugEdit(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.put("/v1/projects/"+projectID+"/bugs/"+bugID, req, &result)
+	return result, err
+}
+
 // BugMove changes a bug's status. The actor signs the audit trail.
 func (c *Client) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
 	var result map[string]interface{}

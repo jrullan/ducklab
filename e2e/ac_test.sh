@@ -11,6 +11,8 @@ WORK=$(mktemp -d)
 export XDG_CONFIG_HOME="$WORK/config"
 export XDG_DATA_HOME="$WORK/data"
 export XDG_STATE_HOME="$WORK/state"
+# The developer's git config must not decide the result (B-526).
+. "$REPO_ROOT/e2e/hermetic_git.sh"
 mkdir -p "$XDG_CONFIG_HOME/ducklab" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
 
 # Minimal config: one keyless fake provider, so nothing reaches a real model.
@@ -86,7 +88,7 @@ info "building"
 # --- fixture project ---------------------------------------------------------
 PROJ="$WORK/proj"
 mkdir -p "$PROJ/.ducklab/runs"
-( cd "$PROJ" && git init -q . && git config user.email t@t && git config user.name t \
+( cd "$PROJ" && git init -q -b main . && git config user.email t@t && git config user.name t \
   && echo hi > README.md && git add -A && git commit -qm init )
 
 info "AC-3 / AC-4: engine starts, engine.json is 0600, health is open, rest is guarded"

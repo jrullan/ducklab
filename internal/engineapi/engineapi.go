@@ -1381,7 +1381,7 @@ func (s *Server) handleBugGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBugEdit(w http.ResponseWriter, r *http.Request) {
-	var req service.BugRequest
+	var req service.BugEditRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

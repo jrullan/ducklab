@@ -1336,6 +1336,15 @@ export type TriageProposal = {
   suspected_files?: string[];
   duplicate_of?: string;
   reproducible?: boolean;
+  /** The split promote would turn into tasks. */
+  proposal?: { title: string; acceptance?: string[]; owns?: string[] }[];
+  /** Promote's refusal of that split, checked before the gate (B-523). The
+   * B-014 gate passed a split promote then refused three times. */
+  promote_blocker?: string;
+  /** What to do about it, in words a person can act on. */
+  promote_fix?: string;
+  /** Who repaired a refused split before the gate, and how. */
+  proposal_repair?: string;
 };
 
 /**

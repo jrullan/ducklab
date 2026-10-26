@@ -305,6 +305,9 @@ export const KNOWN_EVENT_TYPES = [
   "distress_evidence",
   "triage_failed",
   "triage",
+  // A proposal promote would refuse, checked before the gate: repaired by the
+  // engine or the triager, or left unrepaired and flagged (B-523).
+  "triage_repair",
   "triage_applied",
   "bug_fixed",
   "tdd_build_started",

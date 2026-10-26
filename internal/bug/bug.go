@@ -165,6 +165,10 @@ type Bug struct {
 	// fix and nothing has been promoted since. Status alone cannot say it: a
 	// reopen returns the bug to triaged, and in_progress means a promotion.
 	Reopened bool `json:"reopened,omitempty"`
+	// PromoteBlocker is promote's refusal of the split as it now stands,
+	// returned by an edit so the editor learns at once whether the next
+	// promote will take it (B-525) rather than by trying it.
+	PromoteBlocker string `json:"promote_blocker,omitempty"`
 }
 
 // Task is one task a report was promoted into.
