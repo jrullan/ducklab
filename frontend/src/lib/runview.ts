@@ -85,6 +85,10 @@ export interface TurnBlock {
   incomplete?: boolean;
   /** Durable notes captured when this turn was interrupted and later resumed. */
   checkpointNotes?: string;
+  /** A recorded decision's fate (B-524). The words are recorded BEFORE the
+   * door acts, so the record is an attempt until its decision_outcome says
+   * taken or refused; absent on blocks that are not decision attempts. */
+  decisionOutcome?: { outcome: "pending" | "taken" | "refused"; error?: string };
   /** A later turn_start resumed this turn's checkpoint. */
   resumed?: boolean;
   /** What this turn was working on: a split's subtask, a tournament's
@@ -387,6 +391,21 @@ export function actorPhrase(actor: string): string {
   return a;
 }
 
+/** What the lane says above a decision's words: the act as it ended — never
+ * a finished "accept" for an attempt that was refused or never closed. */
+export function decisionLabel(block: Pick<TurnBlock, "subject" | "author" | "decisionOutcome">): string {
+  const who = block.author ?? "the person";
+  const act = block.subject ?? "";
+  switch (block.decisionOutcome?.outcome) {
+    case "pending":
+      return `${act} attempted — no outcome recorded · ${who}`;
+    case "refused":
+      return `${act} refused${block.decisionOutcome.error ? `: ${block.decisionOutcome.error}` : ""} · ${who}`;
+    default:
+      return `${act} · ${who}`;
+  }
+}
+
 export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   const blocks: TurnBlock[] = [];
   const byKey = new Map<string, TurnBlock>();
@@ -527,7 +546,57 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         open.delete(b ?? ({} as TurnBlock));
         break;
       }
+      case "decision": {
+        // B-524: what a decider said with accept, reject, abort or resume.
+        // Shown as a record, attributed — it never changed what was decided.
+        // It is written before the door acts, so it is an attempt until its
+        // outcome arrives (second review of #177).
+        const reason = String(d.reason ?? "");
+        if (reason) {
+          blocks.push({
+            key: `decision:${e.seq ?? blocks.length}`,
+            round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+            text: reason, done: true, messageOnly: true,
+            subject: String(d.action ?? ""), author: actorPhrase(String(d.actor ?? "")),
+            decisionOutcome: { outcome: "pending" },
+          });
+        }
+        break;
+      }
+      case "decision_outcome": {
+        // Closes the newest still-pending attempt of the same action. An
+        // accept refused after its words were recorded (the clean-checkout
+        // gate replay) read as a finished "accept · …" over a run still at
+        // its gate.
+        const action = String(d.action ?? "");
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i]!;
+          if (b.role === "decision" && b.subject === action && b.decisionOutcome?.outcome === "pending") {
+            b.decisionOutcome = d.outcome === "taken"
+              ? { outcome: "taken" }
+              : { outcome: "refused", error: String(d.error ?? "") };
+            break;
+          }
+        }
+        break;
+      }
       case "human": {
+        if (d.action === "reject") {
+          // A reject's words now arrive as their own attributed "decision"
+          // event; this event carries an actor and is not shown twice. One
+          // recorded before that has no actor: an MCP reject then folded
+          // "mcp:<client>: " into the reason, so it must not be credited to
+          // the person (review of #177) — it is shown unattributed.
+          if (d.actor === undefined && String(d.reason ?? "")) {
+            blocks.push({
+              key: `decision:${e.seq ?? blocks.length}`,
+              round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+              text: String(d.reason), done: true, messageOnly: true,
+              subject: "reject", author: "unattributed (recorded before decisions named their actor)",
+            });
+          }
+          break;
+        }
         // Answers are human events for replay compatibility, but automated
         // answers carry their recorded author and must never borrow the human
         // avatar without that attribution.
@@ -697,17 +766,33 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
       }
       case "checkpoint": {
         if (String(d.reason ?? "") === "resume") {
+          const note = typeof d.note === "string" ? d.note : "";
+          let shown = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const pb = blocks[i]!;
             if (pb.role === "pause") {
               if (pb.pause) {
                 pb.pause.resumed = true;
                 // What the person told the run as it resumed (B-493).
-                if (typeof d.note === "string" && d.note) pb.pause.note = d.note;
+                if (note) {
+                  pb.pause.note = note;
+                  shown = true;
+                }
               }
               break;
             }
             if (pb.role !== "pause" && !pb.messageOnly) break;
+          }
+          // A pause with no divider of its own (a question, a shutdown)
+          // still resumed with these words; they must not vanish from the
+          // lane (B-524).
+          if (note && !shown) {
+            blocks.push({
+              key: `decision:${e.seq ?? blocks.length}`,
+              round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+              text: note, done: true, messageOnly: true,
+              subject: "resume note", author: actorPhrase(String(d.actor ?? "")),
+            });
           }
         }
         break;

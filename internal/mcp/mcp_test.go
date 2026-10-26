@@ -32,6 +32,8 @@ type fakeEngine struct {
 	runs                map[string]map[string]interface{}
 	accepted            []string
 	acceptedAs          string
+	acceptedMsg         string
+	rejectedAs          string
 	rejected            []string
 	filed               []map[string]string
 	attached            string
@@ -53,6 +55,8 @@ type fakeEngine struct {
 	resumeCount         int
 	resumeNote          string
 	resumeActor         string
+	resumeReason        string
+	aborted             []string
 	projectStatus       map[string]interface{}
 	project             map[string]interface{}
 	remoteAction        string
@@ -170,16 +174,21 @@ func (f *fakeEngine) RunDiff(string) (string, string, string, error) { return "+
 func (f *fakeEngine) RunAcceptAs(id, msg, actor string) (map[string]interface{}, error) {
 	f.accepted = append(f.accepted, id)
 	f.acceptedAs = actor
+	f.acceptedMsg = msg
 	return map[string]interface{}{"accepted": true}, nil
 }
-func (f *fakeEngine) RunReject(id, reason string) error {
+func (f *fakeEngine) RunRejectAs(id, reason, actor string) error {
 	f.rejected = append(f.rejected, id+": "+reason)
+	f.rejectedAs = actor
 	return nil
 }
-func (f *fakeEngine) RunAbort(string) error { return nil }
-func (f *fakeEngine) RunResume(id, note, actor string) (map[string]interface{}, error) {
+func (f *fakeEngine) RunAbortAs(id, reason, actor string) error {
+	f.aborted = append(f.aborted, id+": "+reason+" ("+actor+")")
+	return nil
+}
+func (f *fakeEngine) RunResumeAs(id, note, reason, actor string) (map[string]interface{}, error) {
 	f.resumeCount++
-	f.resumeNote, f.resumeActor = note, actor
+	f.resumeNote, f.resumeReason, f.resumeActor = note, reason, actor
 	if f.budgetLifted == "" {
 		return map[string]interface{}{"id": id, "status": "paused"}, nil
 	}

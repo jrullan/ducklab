@@ -73,13 +73,18 @@ func toolList() []map[string]interface{} {
 			"name": "decide",
 			"description": "Decide a run waiting at its gate. `action` must come from the run's " +
 				"`next` list. `reason` is required and recorded — you are deciding as yourself, " +
-				"and the record will say so. request_changes sends the draft back with your note.",
+				"and the record will say so. The reason never changes what you decide: accept takes " +
+				"the proposal exactly as shown. Only request_changes acts on your words — its reason " +
+				"IS the change sent to the next draft. To change a triage proposal, accept the triage, " +
+				"then edit the bug's proposal with bug_edit before bug_promote.",
 			"inputSchema": obj(map[string]interface{}{
 				"run_id": str("the run id"),
 				"action": str("one of the run's next actions: accept, reject, request_changes, resume, abort"),
-				"reason": str("why, in one or two sentences; recorded with the decision"),
+				"reason": str("why, in one or two sentences; recorded with the decision. For request_changes it is " +
+					"the change itself; on every other action it is a record and changes nothing"),
 				"note": str("resume only, optional: an instruction the resumed run reads on its next turns, " +
-					"beside the note it was launched with — the fix you know, the path it got wrong"),
+					"beside the note it was launched with — the fix you know, the path it got wrong. " +
+					"Refused on every other action"),
 			}, "run_id", "action", "reason"),
 		},
 		{
@@ -314,7 +319,7 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("a triaged bug, B-..."),
-				"note":       str("required for a reopened bug: what the new attempt must address that the previous fix missed"),
+				"note":       str("required for a reopened bug: what the new attempt must address that the previous fix missed. Refused on any other bug — to change what the task asks, edit the proposal with bug_edit first"),
 			}, "project_id", "bug_id"),
 		},
 		{
@@ -1220,7 +1225,7 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 	// Only a resume carries a note to the run; on any other action it would
 	// be dropped without a word.
 	if strings.TrimSpace(note) != "" && action != "resume" {
-		return nil, fmt.Errorf("note rides only a resume; for %s put it in reason", action)
+		return nil, fmt.Errorf("%s", noteRefusal(action))
 	}
 	run, err := s.eng.RunGet(runID)
 	if err != nil {
@@ -1237,9 +1242,18 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 		if err != nil {
 			return nil, err
 		}
+		// B-524: an operator accepted a triage "with the person's
+		// adjustment" in its reason and reported the adjustment applied.
+		// The reply says what the reason did — and did not do.
+		if res == nil {
+			res = map[string]interface{}{}
+		}
+		stage, _ := run["stage"].(string)
+		res["decision"] = acceptedAsShown(stage)
 		return toolJSON(res), nil
 	case "reject":
-		if err := s.eng.RunReject(runID, actor+": "+reason); err != nil {
+		// The actor is a field, not a prefix on the reason (review of #177).
+		if err := s.eng.RunRejectAs(runID, reason, actor); err != nil {
 			return nil, err
 		}
 		return toolText("rejected", false), nil
@@ -1286,19 +1300,45 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 	case "resume":
 		// The reason explains the decision; the note, when given, is the
 		// instruction the resumed run reads (B-493).
-		out, err := s.eng.RunResume(runID, note, actor)
+		out, err := s.eng.RunResumeAs(runID, note, reason, actor)
 		if err != nil {
 			return nil, err
 		}
 		return toolJSON(out), nil
 	case "abort":
-		if err := s.eng.RunAbort(runID); err != nil {
+		if err := s.eng.RunAbortAs(runID, reason, actor); err != nil {
 			return nil, err
 		}
 		return toolText("aborted", false), nil
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
+}
+
+// noteRefusal names, for an action that takes no note, the door that does
+// carry the words (B-524).
+func noteRefusal(action string) string {
+	const only = "only resume carries a note (a paused build or test run, outside its gate)"
+	switch action {
+	case "accept":
+		return "accept takes no note: " + only + ". Accept's reason is recorded and changes nothing about what is accepted — " +
+			"the proposal is taken exactly as shown. To change a triage proposal, accept the triage, then edit the bug's " +
+			"proposal with bug_edit before bug_promote; to change a document draft, use request_changes with the change as its reason"
+	case "request_changes":
+		return "request_changes takes no note: " + only + ". Its reason IS the change sent to the next draft — put your words there"
+	case "reject", "abort":
+		return action + " takes no note: " + only + ". Put your words in reason; it is recorded with the " + action
+	}
+	return action + " takes no note: " + only
+}
+
+// acceptedAsShown is the accept reply's account of the reason.
+func acceptedAsShown(stage string) string {
+	msg := "accepted exactly as proposed; your reason is recorded as the decision and changed nothing"
+	if stage == "triage" || stage == "operate" {
+		msg += ". The triage proposal was applied as shown — to adjust it, edit the bug's proposal with bug_edit before bug_promote"
+	}
+	return msg
 }
 
 func offered(run map[string]interface{}, action string) bool {

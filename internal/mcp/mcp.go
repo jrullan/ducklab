@@ -37,9 +37,9 @@ type Engine interface {
 	RunGet(id string) (map[string]interface{}, error)
 	RunDiff(id string) (diff, tests, warning string, err error)
 	RunAcceptAs(id, message, actor string) (map[string]interface{}, error)
-	RunReject(id, reason string) error
-	RunAbort(id string) error
-	RunResume(id, note, actor string) (map[string]interface{}, error)
+	RunRejectAs(id, reason, actor string) error
+	RunAbortAs(id, reason, actor string) error
+	RunResumeAs(id, note, reason, actor string) (map[string]interface{}, error)
 	RunBudgetLift(id, kind, actor string) (map[string]interface{}, error)
 	RunAnswerAs(id, questionID, answer, actor string) error
 	ChatSwitch(id, duckling, actor string) (map[string]interface{}, error)

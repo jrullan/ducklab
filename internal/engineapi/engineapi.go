@@ -897,6 +897,9 @@ func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 // did; a note rides the run's next turns beside its launch note (B-493).
 type resumeRequest struct {
 	Note string `json:"note,omitempty"`
+	// Reason explains the decision and is recorded as a "decision" event;
+	// the run never reads it (B-524). Words for the run go in note.
+	Reason string `json:"reason,omitempty"`
 	// Actor names the speaker when it is not a person: "mcp:<client>".
 	Actor string `json:"actor,omitempty"`
 }
@@ -909,7 +912,7 @@ func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	run, err := s.svc.RunResumeWithNote(r.Context(), r.PathValue("id"), req.Note, req.Actor)
+	run, err := s.svc.RunResumeDecided(r.Context(), r.PathValue("id"), req.Note, req.Reason, req.Actor)
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -1808,7 +1811,12 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 		// a human decided what a model decided.
 		Actor string `json:"actor"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	raw, err := readDecisionBody(r, "accept")
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	_ = json.Unmarshal(raw, &body)
 	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, body.Actor, service.AcceptOptions{
 		ResolveAdditiveConflicts: body.ResolveAdditiveConflicts,
 		HumanVerified:            body.HumanVerified,
@@ -1824,7 +1832,12 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body rejectRequest
-	json.NewDecoder(r.Body).Decode(&body)
+	raw, err := readDecisionBody(r, "reject")
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	_ = json.Unmarshal(raw, &body)
 	// Keep reject a discard. A detailed note on a document gate is commonly an
 	// accidental use of that verb, though, so capture the stage before the
 	// discard closes the run and return a receipt that names the revision door.
@@ -1846,7 +1859,7 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("unknown resolution %q", body.Resolution))
 		return
 	}
-	if err := s.svc.RunReject(r.Context(), id, body.Reason); err != nil {
+	if err := s.svc.RunRejectAs(r.Context(), id, body.Reason, body.Actor); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
@@ -1891,7 +1904,19 @@ func (s *Server) handleRunLand(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunAbort(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.svc.RunAbort(r.Context(), id); err != nil {
+	raw, err := readDecisionBody(r, "abort")
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	var body abortRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &body); err != nil {
+			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	if err := s.svc.RunAbortAs(r.Context(), id, body.Reason, body.Actor); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
