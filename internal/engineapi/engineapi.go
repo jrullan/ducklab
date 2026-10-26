@@ -1859,7 +1859,7 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("unknown resolution %q", body.Resolution))
 		return
 	}
-	if err := s.svc.RunReject(r.Context(), id, body.Reason); err != nil {
+	if err := s.svc.RunRejectAs(r.Context(), id, body.Reason, body.Actor); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}

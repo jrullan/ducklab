@@ -704,6 +704,12 @@ func (c *Client) RunReject(id, reason string) error {
 	return c.post("/v1/runs/"+id+"/reject", map[string]string{"reason": reason}, nil)
 }
 
+// RunRejectAs rejects with the decider named as a field, never folded into
+// the reason: the record must not say a person rejected what an operator did.
+func (c *Client) RunRejectAs(id, reason, actor string) error {
+	return c.post("/v1/runs/"+id+"/reject", map[string]string{"reason": reason, "actor": actor}, nil)
+}
+
 // RunLand records an operator's manual landing through the reject resolution.
 func (c *Client) RunLand(id, sha, note string) error {
 	return c.post("/v1/runs/"+id+"/reject", map[string]string{"reason": note, "resolution": "landed", "commit_sha": sha}, nil)

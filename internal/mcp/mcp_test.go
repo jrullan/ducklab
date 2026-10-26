@@ -33,6 +33,7 @@ type fakeEngine struct {
 	accepted            []string
 	acceptedAs          string
 	acceptedMsg         string
+	rejectedAs          string
 	rejected            []string
 	filed               []map[string]string
 	attached            string
@@ -175,8 +176,9 @@ func (f *fakeEngine) RunAcceptAs(id, msg, actor string) (map[string]interface{},
 	f.acceptedMsg = msg
 	return map[string]interface{}{"accepted": true}, nil
 }
-func (f *fakeEngine) RunReject(id, reason string) error {
+func (f *fakeEngine) RunRejectAs(id, reason, actor string) error {
 	f.rejected = append(f.rejected, id+": "+reason)
+	f.rejectedAs = actor
 	return nil
 }
 func (f *fakeEngine) RunAbortAs(id, reason, actor string) error {

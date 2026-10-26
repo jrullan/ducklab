@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,4 +242,107 @@ func TestAPromoteNoteOnABugThatWasNotReopenedIsRefused(t *testing.T) {
 	if _, err := s.BugPromoteWithNote(context.Background(), id, "B-001", "mcp:opencode", ""); err != nil {
 		t.Fatalf("the same promote without a note: %v", err)
 	}
+}
+
+// Review of #177: the decision record was written after the decision, with
+// its error discarded — a run log that stopped accepting writes let accept,
+// abort and resume go through while the words vanished again, B-524 itself.
+// Every door now records first and refuses when the record fails: nothing is
+// decided, and the error says why.
+func TestADecisionWhoseReasonCannotBeRecordedIsNotTaken(t *testing.T) {
+	failing := func(t *testing.T) {
+		t.Helper()
+		saved := appendDecisionEvent
+		appendDecisionEvent = func(*runlog.Writer, map[string]interface{}) error {
+			return fmt.Errorf("disk full")
+		}
+		t.Cleanup(func() { appendDecisionEvent = saved })
+	}
+	gateRun := func(t *testing.T, s *Service, stage, pending string) (string, string) {
+		t.Helper()
+		id := projectWithBugs(t, s, BugRequest{Title: "canvas ignores touch"})
+		entry, _ := s.registry.Get(id)
+		recoveredRun(t, s, entry.Path, &runlog.Run{ID: "r-fail", ProjectID: id, TaskID: "T-001", Stage: stage, Mode: "solo",
+			Status: "paused", PendingKind: pending, Verdict: "UNVERIFIED", Subject: "B-001",
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+			PendingData: map[string]interface{}{"proposals": []interface{}{map[string]interface{}{
+				"bug": "B-001", "severity": "high", "reproducible": true, "reason": "actionable",
+			}}}})
+		return id, "r-fail"
+	}
+	cases := []struct {
+		door, stage, pending string
+		decide               func(s *Service, runID string) error
+	}{
+		{"accept", "triage", "gate", func(s *Service, id string) error {
+			_, err := s.RunAcceptAs(context.Background(), id, "no jsdom", "mcp:opencode")
+			return err
+		}},
+		{"accept", "test", "gate", func(s *Service, id string) error {
+			_, err := s.RunAcceptAs(context.Background(), id, "no jsdom", "mcp:opencode")
+			return err
+		}},
+		{"reject", "triage", "gate", func(s *Service, id string) error {
+			return s.RunRejectAs(context.Background(), id, "not a bug", "mcp:opencode")
+		}},
+		{"abort", "triage", "gate", func(s *Service, id string) error {
+			return s.RunAbortAs(context.Background(), id, "withdrawn", "mcp:opencode")
+		}},
+		{"abort", "build", "budget", func(s *Service, id string) error {
+			return s.RunAbortAs(context.Background(), id, "withdrawn", "mcp:opencode")
+		}},
+		{"resume", "build", "error", func(s *Service, id string) error {
+			_, err := s.RunResumeDecided(context.Background(), id, "", "the fix is known", "mcp:opencode")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.door+"/"+tc.stage+"/"+tc.pending, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			projectID, runID := gateRun(t, s, tc.stage, tc.pending)
+			failing(t)
+			err := tc.decide(s, runID)
+			if err == nil || !strings.Contains(err.Error(), "its reason could not be recorded") || !strings.Contains(err.Error(), "nothing was decided") {
+				t.Fatalf("%s with an unrecordable reason = %v, want a refusal", tc.door, err)
+			}
+			detail, gErr := s.RunGet(context.Background(), runID)
+			if gErr != nil {
+				t.Fatal(gErr)
+			}
+			if detail.Run.Status != "paused" || detail.Run.PendingKind != tc.pending || detail.Run.Accepted {
+				t.Fatalf("the refused %s changed the run: %s/%s accepted=%v", tc.door, detail.Run.Status, detail.Run.PendingKind, detail.Run.Accepted)
+			}
+			if tc.stage == "triage" {
+				bugs, _ := s.BugList(context.Background(), projectID, false)
+				if len(bugs) != 1 || bugs[0].Status != "open" {
+					t.Fatalf("the refused %s applied the triage: %+v", tc.door, bugs)
+				}
+			}
+		})
+	}
+}
+
+// Review of #177: the MCP folded its actor into reject's reason and the
+// engine recorded no actor, so the desktop credited an operator's reject to
+// the person. The actor is a field on both records; the reason is only the
+// reason.
+func TestARejectNamesItsActorApartFromItsReason(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithConfig(t, s, "p")
+	recoveredRun(t, s, dir, &runlog.Run{ID: "r-rej", ProjectID: id, Stage: "triage", Status: "paused",
+		PendingKind: "gate", StartedAt: time.Now().UTC().Format(time.RFC3339)})
+	if err := s.RunRejectAs(context.Background(), "r-rej", "not a bug", "mcp:codex"); err != nil {
+		t.Fatal(err)
+	}
+	wantDecision(t, s, "r-rej", "reject", "mcp:codex", "not a bug")
+	events, _ := runlog.ReadEvents(s.RunDir("r-rej"))
+	for _, e := range events {
+		if e.Type == "human" && e.Data["action"] == "reject" {
+			if e.Data["actor"] != "mcp:codex" || e.Data["reason"] != "not a bug" {
+				t.Fatalf("reject's human event = %v, want actor mcp:codex and the bare reason", e.Data)
+			}
+			return
+		}
+	}
+	t.Fatal("no reject event")
 }

@@ -542,15 +542,20 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "human": {
-        // A reject's reason is recorded on its human event; shown the same
-        // way as the other decisions' words (B-524).
-        if (d.action === "reject" && String(d.reason ?? "")) {
-          blocks.push({
-            key: `decision:${e.seq ?? blocks.length}`,
-            round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
-            text: String(d.reason), done: true, messageOnly: true,
-            subject: "reject", author: actorPhrase(String(d.actor ?? "")),
-          });
+        if (d.action === "reject") {
+          // A reject's words now arrive as their own attributed "decision"
+          // event; this event carries an actor and is not shown twice. One
+          // recorded before that has no actor: an MCP reject then folded
+          // "mcp:<client>: " into the reason, so it must not be credited to
+          // the person (review of #177) — it is shown unattributed.
+          if (d.actor === undefined && String(d.reason ?? "")) {
+            blocks.push({
+              key: `decision:${e.seq ?? blocks.length}`,
+              round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+              text: String(d.reason), done: true, messageOnly: true,
+              subject: "reject", author: "unattributed (recorded before decisions named their actor)",
+            });
+          }
           break;
         }
         // Answers are human events for replay compatibility, but automated

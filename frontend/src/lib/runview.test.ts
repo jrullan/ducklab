@@ -842,7 +842,10 @@ describe("decision records in the lane", () => {
     ["accept", ev("decision", 1, { action: "accept", actor: "mcp:opencode", reason: "no jsdom" }), "the MCP operator mcp:opencode"],
     ["abort", ev("decision", 1, { action: "abort", actor: "human", reason: "withdrawn" }), "the person"],
     ["resume", ev("decision", 1, { action: "resume", actor: "mcp:elena", reason: "the fix is known" }), "the MCP operator mcp:elena"],
-    ["reject", ev("human", 1, { action: "reject", reason: "mcp:codex: not a bug" }), "the person"],
+    // Review of #177: this row read an MCP reject off a "human" event with
+    // no actor and pinned "the person" as its author. The reject's words now
+    // arrive as an attributed decision event, like every other door's.
+    ["reject", ev("decision", 1, { action: "reject", actor: "mcp:codex", reason: "not a bug" }), "the MCP operator mcp:codex"],
   ])("shows a %s's words", (action, event, author) => {
     const turns = buildTurns([event]);
     expect(turns).toHaveLength(1);
@@ -850,6 +853,21 @@ describe("decision records in the lane", () => {
     expect(turns[0]!.subject).toBe(action);
     expect(turns[0]!.author).toBe(author);
     expect(turns[0]!.text).toBe(String(event.data?.reason));
+  });
+
+  it("never credits a reject to the person on the strength of a missing actor", () => {
+    // Current engine: the human event names its actor and the words come as
+    // a decision event — the human event adds no second block.
+    const current = buildTurns([
+      ev("decision", 1, { action: "reject", actor: "mcp:codex", reason: "not a bug" }),
+      ev("human", 2, { action: "reject", actor: "mcp:codex", reason: "not a bug" }),
+    ]);
+    expect(current.map((t) => t.author)).toEqual(["the MCP operator mcp:codex"]);
+    // A log written before actors were recorded: shown, unattributed.
+    const legacy = buildTurns([ev("human", 1, { action: "reject", reason: "mcp:codex: not a bug" })]);
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0]!.author).not.toBe("the person");
+    expect(legacy[0]!.author).toContain("unattributed");
   });
 
   it("records nothing for a decision without words", () => {

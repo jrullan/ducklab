@@ -27,8 +27,10 @@ func TestADecisionNoteOverHTTPIsRefusedNotDropped(t *testing.T) {
 	}{
 		{"accept", "triage", "edit the bug's proposal with bug_edit before promoting it", map[string]string{"message": "accepted", "actor": "mcp:opencode"}},
 		{"accept", "build", "only resume carries a note", map[string]string{"message": "accepted"}},
-		{"reject", "triage", "it is recorded with the rejection", map[string]string{"reason": "not a bug"}},
-		{"reject", "spec", "it is recorded with the rejection", map[string]string{"reason": "not a bug"}},
+		// Review of #177: reject names its actor as a field, like accept,
+		// resume and abort — never as a prefix on the reason.
+		{"reject", "triage", "it is recorded with the rejection", map[string]string{"reason": "not a bug", "actor": "mcp:opencode"}},
+		{"reject", "spec", "it is recorded with the rejection", map[string]string{"reason": "not a bug", "actor": "mcp:opencode"}},
 		{"abort", "triage", "it is recorded with the abort", map[string]string{"reason": "withdrawn", "actor": "mcp:opencode"}},
 		{"abort", "build", "it is recorded with the abort", map[string]string{"reason": "withdrawn", "actor": "mcp:opencode"}},
 	}
@@ -88,16 +90,16 @@ func TestADecisionNoteOverHTTPIsRefusedNotDropped(t *testing.T) {
 				}
 				return
 			}
-			if tc.action == "abort" {
+			if tc.action == "abort" || tc.action == "reject" {
 				events, _ := runlog.ReadEvents(s.RunDir(runID))
 				recorded := false
 				for _, e := range events {
-					if e.Type == "decision" && e.Data["action"] == "abort" && e.Data["reason"] == "withdrawn" && e.Data["actor"] == "mcp:opencode" {
+					if e.Type == "decision" && e.Data["action"] == tc.action && e.Data["reason"] == tc.body["reason"] && e.Data["actor"] == "mcp:opencode" {
 						recorded = true
 					}
 				}
 				if !recorded {
-					t.Error("abort's reason was not recorded as its decision")
+					t.Errorf("%s's reason was not recorded as its decision, attributed to its actor", tc.action)
 				}
 			}
 		})

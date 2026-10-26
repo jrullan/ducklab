@@ -1178,7 +1178,8 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 		res["decision"] = acceptedAsShown(stage)
 		return toolJSON(res), nil
 	case "reject":
-		if err := s.eng.RunReject(runID, actor+": "+reason); err != nil {
+		// The actor is a field, not a prefix on the reason (review of #177).
+		if err := s.eng.RunRejectAs(runID, reason, actor); err != nil {
 			return nil, err
 		}
 		return toolText("rejected", false), nil

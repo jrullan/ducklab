@@ -1231,6 +1231,9 @@
       },
       "EngineapirejectRequest": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "commit_sha": {
             "type": "string"
           },

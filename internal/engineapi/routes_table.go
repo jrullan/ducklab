@@ -92,7 +92,11 @@ type abortRequest struct {
 }
 
 type rejectRequest struct {
-	Reason     string `json:"reason"`
+	Reason string `json:"reason"`
+	// Actor names the decider when it is not a person: "mcp:<client>". The
+	// MCP used to fold it into the reason, and the record said a person
+	// rejected what an operator did (review of #177).
+	Actor      string `json:"actor,omitempty"`
 	Resolution string `json:"resolution,omitempty"`
 	CommitSHA  string `json:"commit_sha,omitempty"`
 }

@@ -355,6 +355,7 @@ export interface EngineapirejectReceipt {
 }
 
 export interface EngineapirejectRequest {
+  actor?: string;
   commit_sha?: string;
   reason?: string;
   resolution?: string;
