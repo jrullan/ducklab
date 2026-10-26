@@ -91,6 +91,18 @@ export function ConversationTurn({
       </div>
     );
   }
+  if (block.role === "decision") {
+    // B-524: words given with a decision are on the record, attributed —
+    // and they changed nothing about what was decided.
+    return (
+      <div data-testid="decision-record" className="my-2 rounded-card border border-hairline px-3 py-2 text-sm">
+        <span className="text-ink-muted">
+          {block.subject} · {block.author ?? "the person"}:{" "}
+        </span>
+        <span className="whitespace-pre-wrap text-ink">“{block.text}”</span>
+      </div>
+    );
+  }
   if (block.role === "pause" && block.pause) {
     return (
       <div

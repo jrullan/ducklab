@@ -527,7 +527,32 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         open.delete(b ?? ({} as TurnBlock));
         break;
       }
+      case "decision": {
+        // B-524: what a decider said with accept, abort or resume. Shown as
+        // a record, attributed — it never changed what was decided.
+        const reason = String(d.reason ?? "");
+        if (reason) {
+          blocks.push({
+            key: `decision:${e.seq ?? blocks.length}`,
+            round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+            text: reason, done: true, messageOnly: true,
+            subject: String(d.action ?? ""), author: actorPhrase(String(d.actor ?? "")),
+          });
+        }
+        break;
+      }
       case "human": {
+        // A reject's reason is recorded on its human event; shown the same
+        // way as the other decisions' words (B-524).
+        if (d.action === "reject" && String(d.reason ?? "")) {
+          blocks.push({
+            key: `decision:${e.seq ?? blocks.length}`,
+            round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+            text: String(d.reason), done: true, messageOnly: true,
+            subject: "reject", author: actorPhrase(String(d.actor ?? "")),
+          });
+          break;
+        }
         // Answers are human events for replay compatibility, but automated
         // answers carry their recorded author and must never borrow the human
         // avatar without that attribution.
@@ -697,17 +722,33 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
       }
       case "checkpoint": {
         if (String(d.reason ?? "") === "resume") {
+          const note = typeof d.note === "string" ? d.note : "";
+          let shown = false;
           for (let i = blocks.length - 1; i >= 0; i--) {
             const pb = blocks[i]!;
             if (pb.role === "pause") {
               if (pb.pause) {
                 pb.pause.resumed = true;
                 // What the person told the run as it resumed (B-493).
-                if (typeof d.note === "string" && d.note) pb.pause.note = d.note;
+                if (note) {
+                  pb.pause.note = note;
+                  shown = true;
+                }
               }
               break;
             }
             if (pb.role !== "pause" && !pb.messageOnly) break;
+          }
+          // A pause with no divider of its own (a question, a shutdown)
+          // still resumed with these words; they must not vanish from the
+          // lane (B-524).
+          if (note && !shown) {
+            blocks.push({
+              key: `decision:${e.seq ?? blocks.length}`,
+              round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
+              text: note, done: true, messageOnly: true,
+              subject: "resume note", author: actorPhrase(String(d.actor ?? "")),
+            });
           }
         }
         break;

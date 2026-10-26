@@ -1821,7 +1821,9 @@ function BugNext({
             type="button"
             data-testid="bug-next-promote"
             disabled={busy || (wasReopened && !promoteNote.trim())}
-            onClick={() => act(() => client.promoteBug(projectId, bug.id, promoteNote))}
+            // The engine reads a promote note only for a reopened bug and
+            // refuses it on any other (B-524); a stale draft is not sent.
+            onClick={() => act(() => client.promoteBug(projectId, bug.id, wasReopened ? promoteNote : ""))}
             className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
             {(bug.proposal?.length ?? 0) > 1 ? `Make it ${bug.proposal!.length} tasks` : "Make it a task"}

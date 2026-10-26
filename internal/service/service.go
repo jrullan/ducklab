@@ -3099,8 +3099,18 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 	// the landing and checkout sync made the commit durable. It never reverses
 	// the accept: on push failure the run keeps a worded warning naming the
 	// commit and the reason, with the existing push door as the retry (B-266).
+	// The decider's words as given: message is rewritten into a commit
+	// message below.
+	reason := message
 	defer func() {
 		if err == nil {
+			// The accept's words are its recorded reason on every path. A
+			// commit carried them in its body, but a triage, a git-less test
+			// and an artifact promote without a diff accepted with no record
+			// of them at all (B-524).
+			if w, wErr := s.ensureWriter(rs); wErr == nil {
+				appendDecision(w, "accept", actor, reason)
+			}
 			s.autopilotOnAccept(rs.run)
 			if rs.run.Accepted && rs.run.CommitSHA != "" {
 				s.publishAccept(ctx, rs)
@@ -4040,7 +4050,16 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 // Resume took no words and the start-time note existed only at launch, so the
 // only way to say it was abort-and-relaunch — which lost the chain's red test.
 func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string) (*runlog.Run, error) {
+	return s.RunResumeDecided(ctx, id, note, "", actor)
+}
+
+// RunResumeDecided is a resume with both of its words: the note is an
+// instruction the resumed run reads; the reason explains the decision and is
+// recorded as a "decision" event, never read by the run. An MCP operator's
+// required reason used to reach no record at all on resume (B-524).
+func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor string) (*runlog.Run, error) {
 	note = strings.TrimSpace(note)
+	reason = strings.TrimSpace(reason)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4063,9 +4082,11 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 	// A human gate is not a resume point — it is answered with accept/reject,
 	// not continued.
 	if current.PendingKind == "gate" {
-		if note != "" {
+		if note != "" || reason != "" {
 			// Returning the gate untouched would drop the words in silence.
-			return nil, fmt.Errorf("run %q waits at its gate, which a note cannot resume — accept, reject, or request changes with the note", id)
+			// Accept and reject take a reason, not a note; only a revision
+			// carries words into the next draft (B-524).
+			return nil, fmt.Errorf("run %q waits at its gate, which resume does not answer — accept or reject it (their reason is recorded), or request changes to send your words to the next draft", id)
 		}
 		return current, nil
 	}
@@ -4098,6 +4119,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		setRunStatus(rs.run, "running", time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
+		appendDecision(w, "resume", actor, reason)
 		w.AppendEvent("checkpoint", resumeCheckpointData(current, entry.Path, "", ""))
 		w.WriteState()
 		rs.wmu.Unlock()
@@ -4145,6 +4167,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
 		rs.run.Failure = ""
+		appendDecision(w, "resume", actor, reason)
 		w.AppendEvent("checkpoint", resumeCheckpointData(current, root, note, actor))
 		w.WriteState()
 		rs.wmu.Unlock()
@@ -4174,6 +4197,7 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 	// resuming answers it. Left in place, a resumed, working run went on
 	// wearing "Why it failed" over a live conversation.
 	rs.run.Failure = ""
+	appendDecision(w, "resume", actor, reason)
 	w.AppendEvent("checkpoint", resumeCheckpointData(current, root, note, actor))
 	w.WriteState()
 	rs.wmu.Unlock()
@@ -4397,6 +4421,13 @@ func (s *Service) smallSeatPairLiftWarning(run *runlog.Run) string {
 
 // RunAbort aborts a run.
 func (s *Service) RunAbort(ctx context.Context, id string) error {
+	return s.RunAbortAs(ctx, id, "", "")
+}
+
+// RunAbortAs is an abort with its decider and reason. The reason is recorded
+// as a "decision" event; an MCP operator's required reason used to be
+// dropped here without a word (B-524).
+func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4429,6 +4460,7 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	appendDecision(w, "abort", actor, reason)
 	return s.finishUnacceptedRun(rs, w, "failed", "ABORTED", "")
 }
 
@@ -4730,7 +4762,13 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	// of trying to inspect the worktree the winner has already removed.
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
-		return acceptedResult(rs.run), nil
+		res := acceptedResult(rs.run)
+		if strings.TrimSpace(msg) != "" {
+			// This call decided nothing, so its words were not recorded;
+			// the reply says so rather than returning as if they were.
+			res.Info += "; this call decided nothing, so its message was not recorded"
+		}
+		return res, nil
 	}
 	if rs.run.Status == "done" {
 		return nil, fmt.Errorf("run %q is already settled (%s); there is no acceptance decision pending", id, rs.run.Resolution)

@@ -714,6 +714,15 @@ func (c *Client) RunAbort(id string) error {
 	return c.post("/v1/runs/"+id+"/abort", nil, nil)
 }
 
+// RunAbortAs aborts with the decider named and its reason recorded as the
+// run's decision event (B-524). Without either it sends no body, as RunAbort.
+func (c *Client) RunAbortAs(id, reason, actor string) error {
+	if strings.TrimSpace(reason) == "" && strings.TrimSpace(actor) == "" {
+		return c.RunAbort(id)
+	}
+	return c.post("/v1/runs/"+id+"/abort", map[string]string{"reason": reason, "actor": actor}, nil)
+}
+
 // DucklingList lists ducklings.
 func (c *Client) DucklingList() ([]map[string]interface{}, error) {
 	var result struct {
@@ -888,9 +897,16 @@ type SSEEvent struct {
 // operator speaker ("mcp:<client>"), empty for a person. Without a note the
 // request carries no body, exactly as before.
 func (c *Client) RunResume(id, note, actor string) (map[string]interface{}, error) {
+	return c.RunResumeAs(id, note, "", actor)
+}
+
+// RunResumeAs is a resume with both of its words: note is an instruction the
+// resumed run reads; reason explains the decision and is recorded, never read
+// by the run (B-524). With neither, the request carries no body.
+func (c *Client) RunResumeAs(id, note, reason, actor string) (map[string]interface{}, error) {
 	var body interface{}
-	if strings.TrimSpace(note) != "" {
-		body = map[string]string{"note": note, "actor": actor}
+	if strings.TrimSpace(note) != "" || strings.TrimSpace(reason) != "" {
+		body = map[string]string{"note": note, "reason": reason, "actor": actor}
 	}
 	var result map[string]interface{}
 	err := c.post("/v1/runs/"+id+"/resume", body, &result)

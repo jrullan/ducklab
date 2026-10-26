@@ -834,3 +834,42 @@ describe("documentLabel", () => {
     expect(documentLabel("requirements")).toBe("requirements document");
   });
 });
+
+// B-524: words given with a decision are recorded, attributed, and shown —
+// an operator's "adjustment" in an accept reason was dropped without a trace.
+describe("decision records in the lane", () => {
+  it.each([
+    ["accept", ev("decision", 1, { action: "accept", actor: "mcp:opencode", reason: "no jsdom" }), "the MCP operator mcp:opencode"],
+    ["abort", ev("decision", 1, { action: "abort", actor: "human", reason: "withdrawn" }), "the person"],
+    ["resume", ev("decision", 1, { action: "resume", actor: "mcp:elena", reason: "the fix is known" }), "the MCP operator mcp:elena"],
+    ["reject", ev("human", 1, { action: "reject", reason: "mcp:codex: not a bug" }), "the person"],
+  ])("shows a %s's words", (action, event, author) => {
+    const turns = buildTurns([event]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.role).toBe("decision");
+    expect(turns[0]!.subject).toBe(action);
+    expect(turns[0]!.author).toBe(author);
+    expect(turns[0]!.text).toBe(String(event.data?.reason));
+  });
+
+  it("records nothing for a decision without words", () => {
+    expect(buildTurns([ev("decision", 1, { action: "accept", actor: "human", reason: "" }), ev("human", 2, { action: "reject", reason: "" })])).toHaveLength(0);
+  });
+
+  it("shows a resume note even when the pause drew no divider", () => {
+    const turns = buildTurns([
+      ev("human_needed", 1, { kind: "question" }),
+      ev("checkpoint", 2, { reason: "resume", note: "use fs_write", actor: "mcp:elena" }),
+    ]);
+    expect(turns.map((t) => [t.role, t.text])).toEqual([["decision", "use fs_write"]]);
+  });
+
+  it("keeps a resume note on its pause divider when there is one", () => {
+    const turns = buildTurns([
+      ev("human_needed", 1, { kind: "budget", detail: "budget" }),
+      ev("checkpoint", 2, { reason: "resume", note: "use fs_write" }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.pause?.note).toBe("use fs_write");
+  });
+});
