@@ -74,7 +74,8 @@ func runNext(r *runlog.Run) []string {
 			// kept offering a paused plan "resumible" prose and an
 			// abort-only menu.
 			switch r.Stage {
-			case "build", "test", "intake", "spec", "plan":
+			case "build", "test", "intake", "spec", "plan", "triage":
+				// A triage resumes with the bugs it has not finished (B-522).
 				return []string{"resume", "abort"}
 			}
 			return []string{"abort"}

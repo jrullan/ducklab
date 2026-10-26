@@ -1444,12 +1444,12 @@ func (s *Server) handleArtifactDiscard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
-	// The body is optional: empty triages the whole inbox, {bug_id} one bug.
-	var req struct {
-		BugID string `json:"bug_id"`
-	}
+	// The body is optional: empty triages the whole inbox, {bug_id} one bug,
+	// {bug_ids, ducklings, relaunch_of} relaunches a triage with another
+	// triager (B-522). The seat picks were sent by MCP and dropped here.
+	var req service.BugTriageRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"), req.BugID)
+	run, err := s.svc.BugTriageWith(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

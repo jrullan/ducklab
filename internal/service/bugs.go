@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -271,9 +272,80 @@ const MaxTriageBatch = 10
 // is applied until a person says so — especially duplicates, where being wrong
 // closes a real report.
 func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runlog.Run, error) {
+	return s.BugTriageWith(ctx, projectID, BugTriageRequest{BugID: bugID})
+}
+
+// BugTriageRequest is a triage launch. Every field is optional: the empty
+// request triages the inbox with the project's triager.
+type BugTriageRequest struct {
+	// BugID triages exactly that bug.
+	BugID string `json:"bug_id,omitempty"`
+	// BugIDs triages exactly these bugs (those that still need triage).
+	BugIDs []string `json:"bug_ids,omitempty"`
+	// Ducklings seats the triager for this run only; the first entry is the
+	// triager. MCP has sent this field since it learned per-run seat picks,
+	// and the engine dropped it on the floor.
+	Ducklings []string `json:"ducklings,omitempty"`
+	// RelaunchOf re-triages the bugs another triage run was given, with the
+	// seat named in Ducklings. The earlier run is aborted first when it has
+	// not ended: two triages of one bug would race to classify it.
+	RelaunchOf string `json:"relaunch_of,omitempty"`
+}
+
+// BugTriageWith launches a triage run for the request.
+//
+// B-522: the escalation card on a slow triage offered "Relaunch with stronger
+// seat", and nothing in the engine could relaunch a triage with any seat —
+// BugTriage took a bug id and nothing else. Relaunch is now a real door:
+// same bugs, the triager the person picked, the earlier run ended first.
+func (s *Service) BugTriageWith(ctx context.Context, projectID string, req BugTriageRequest) (*runlog.Run, error) {
+	l, err := s.prepareTriage(ctx, projectID, req)
+	if err != nil {
+		return nil, err
+	}
+	go s.executeTriage(l.ctx, l.rs, l.root, l.todo, l.all, nil)
+	return l.rs.run, nil
+}
+
+// triageLaunch is a registered triage run that has not started working.
+type triageLaunch struct {
+	rs        *runState
+	ctx       context.Context
+	root      string
+	todo, all []bug.Bug
+}
+
+func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTriageRequest) (*triageLaunch, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
+	}
+	seat := ""
+	if len(req.Ducklings) > 0 {
+		seat = strings.TrimSpace(req.Ducklings[0])
+		if seat != "" {
+			if _, err := s.ducklings.Get(config.DucklingID(seat)); err != nil {
+				return nil, fmt.Errorf("triager %q: %w", seat, err)
+			}
+		}
+	}
+	wanted := map[string]bool{}
+	for _, id := range req.BugIDs {
+		wanted[id] = true
+	}
+	if req.BugID != "" {
+		wanted[req.BugID] = true
+	}
+	if req.RelaunchOf != "" {
+		ids, err := s.triageRelaunchBugs(ctx, projectID, req.RelaunchOf)
+		if err != nil {
+			return nil, err
+		}
+		if len(wanted) == 0 {
+			for _, id := range ids {
+				wanted[id] = true
+			}
+		}
 	}
 	open, err := s.BugList(ctx, projectID, true)
 	if err != nil {
@@ -286,18 +358,30 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 	var todo []bug.Bug
 	for _, b := range open {
 		eligible := b.Status == bug.Open || (b.Status == bug.Triaged && b.NeedsTriage)
-		if eligible && (bugID == "" || b.ID == bugID) {
+		if eligible && (len(wanted) == 0 || wanted[b.ID]) {
 			todo = append(todo, b)
 		}
 	}
 	if len(todo) == 0 {
-		if bugID != "" {
-			return nil, fmt.Errorf("bug %s does not need triage", bugID)
+		if req.BugID != "" {
+			return nil, fmt.Errorf("bug %s does not need triage", req.BugID)
+		}
+		if len(wanted) > 0 {
+			return nil, fmt.Errorf("none of %s needs triage", strings.Join(slices.Sorted(maps.Keys(wanted)), ", "))
 		}
 		return nil, fmt.Errorf("no untriaged bugs")
 	}
 	if len(todo) > MaxTriageBatch {
 		todo = todo[:MaxTriageBatch]
+	}
+	bugIDs := make([]string, 0, len(todo))
+	for _, b := range todo {
+		bugIDs = append(bugIDs, b.ID)
+	}
+	if req.RelaunchOf != "" {
+		if err := s.endForRelaunch(ctx, req.RelaunchOf); err != nil {
+			return nil, err
+		}
 	}
 
 	run := &runlog.Run{
@@ -316,6 +400,9 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 		Autonomy:  s.triageAutonomy(entry.Path),
 		Subject:   triageSubject(todo),
 	}
+	if seat != "" {
+		run.Roster = map[string]string{string(config.RoleTriager): seat}
+	}
 	// Born running outside the queue: its active clock opens here or never.
 	setRunStatus(run, "running", time.Now())
 	writer, err := runlog.NewWriter(entry.Path, run)
@@ -331,15 +418,158 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 	s.runsMu.Lock()
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
-	writer.AppendEvent("run_start", map[string]interface{}{
-		"stage": "triage", "mode": "solo", "bugs": len(todo),
-	})
-
-	go s.executeTriage(runCtx, rs, entry.Path, todo, all)
-	return run, nil
+	// bug_ids is the run's work list on the record: resume continues it and
+	// a relaunch re-triages it. The count alone could do neither.
+	start := map[string]interface{}{
+		"stage": "triage", "mode": "solo", "bugs": len(todo), "bug_ids": bugIDs,
+	}
+	if req.RelaunchOf != "" {
+		start["relaunch_of"] = req.RelaunchOf
+	}
+	writer.AppendEvent("run_start", start)
+	return &triageLaunch{rs: rs, ctx: runCtx, root: entry.Path, todo: todo, all: all}, nil
 }
 
-func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot string, todo, all []bug.Bug) {
+// triageRelaunchBugs returns the bugs an earlier triage run was given.
+func (s *Service) triageRelaunchBugs(ctx context.Context, projectID, runID string) ([]string, error) {
+	s.runsMu.RLock()
+	prior, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", runID)
+	}
+	current := prior.snapshotRun()
+	if current.ProjectID != projectID || current.Stage != "triage" {
+		return nil, fmt.Errorf("run %s is not a triage of project %s", runID, projectID)
+	}
+	events, _ := runlog.ReadEvents(prior.runDir)
+	ids := triageWorkList(events)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("run %s does not record which bugs it triaged", runID)
+	}
+	return ids, nil
+}
+
+// endForRelaunch aborts the triage being relaunched when it has not ended.
+// Called only once the relaunch is known to have work: a refused relaunch
+// must not cost the person the run it would have replaced.
+func (s *Service) endForRelaunch(ctx context.Context, runID string) error {
+	s.runsMu.RLock()
+	prior, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	switch prior.snapshotRun().Status {
+	case "running", "paused", "queued":
+		if err := s.RunAbort(ctx, runID); err != nil {
+			return fmt.Errorf("end %s before relaunching it: %w", runID, err)
+		}
+	}
+	return nil
+}
+
+// triageWorkList reads a triage run's bugs from its record: run_start's
+// bug_ids, or — for runs recorded before that field — the bugs its turns named.
+func triageWorkList(events []*runlog.Event) []string {
+	var ids []string
+	for _, e := range events {
+		if e == nil || e.Type != "run_start" {
+			continue
+		}
+		if raw, ok := e.Data["bug_ids"].([]interface{}); ok {
+			for _, v := range raw {
+				if id, ok := v.(string); ok && id != "" {
+					ids = append(ids, id)
+				}
+			}
+			return ids
+		}
+	}
+	for _, e := range events {
+		if e == nil || e.Type != "turn_start" {
+			continue
+		}
+		if id, _ := e.Data["bug"].(string); id != "" && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// triageProgress reads what a triage run already finished: every bug whose
+// turn ended in a proposal or a recorded failure, and the proposals in order.
+func triageProgress(events []*runlog.Event) (map[string]bool, []map[string]interface{}) {
+	done := map[string]bool{}
+	var proposals []map[string]interface{}
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		id, _ := e.Data["bug"].(string)
+		switch e.Type {
+		case "triage":
+			if id != "" && !done[id] {
+				done[id] = true
+				proposals = append(proposals, e.Data)
+			}
+		case "triage_failed":
+			if id != "" {
+				done[id] = true
+			}
+		}
+	}
+	return done, proposals
+}
+
+// resumeTriage continues a paused triage with the bugs it has not finished.
+// A finished bug is never triaged twice: its proposal is already on the
+// record and rides into the gate with the new ones.
+func (s *Service) resumeTriage(ctx context.Context, rs *runState, current *runlog.Run, projectPath string, w *runlog.Writer) (*runlog.Run, error) {
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		return nil, err
+	}
+	ids := triageWorkList(events)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("a triage run that does not record its bugs cannot be resumed — abort it and triage again")
+	}
+	all, err := s.BugList(ctx, current.ProjectID, false)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]bug.Bug{}
+	for _, b := range all {
+		byID[b.ID] = b
+	}
+	var todo []bug.Bug
+	for _, id := range ids {
+		if b, ok := byID[id]; ok {
+			todo = append(todo, b)
+		}
+	}
+	done, prior := triageProgress(events)
+	runCtx, cancel := context.WithCancel(context.Background())
+	rs.wmu.Lock()
+	rs.cancel = cancel
+	rs.done = make(chan struct{})
+	setRunStatus(rs.run, "running", time.Now())
+	clearPending(rs.run)
+	rs.run.Failure = ""
+	w.AppendEvent("checkpoint", resumeCheckpointData(current, projectPath, "", ""))
+	w.WriteState()
+	rs.wmu.Unlock()
+	go s.executeTriage(runCtx, rs, projectPath, todo, all, &triageResume{done: done, proposals: prior})
+	return rs.snapshotRun(), nil
+}
+
+// triageResume is what a resumed triage already finished.
+type triageResume struct {
+	done      map[string]bool
+	proposals []map[string]interface{}
+}
+
+func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot string, todo, all []bug.Bug, resumed *triageResume) {
 	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
@@ -350,6 +580,15 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		return
 	}
 	roster, _ := s.resolveRoster(projCfg, "triage")
+	// A seat picked for this run (a relaunch with another triager) wins over
+	// the project's, and the seat that ran is on the record: the escalation
+	// card names it, scorecards count it, and resume keeps it.
+	rs.wmu.Lock()
+	if pinned := rs.run.Roster[string(config.RoleTriager)]; pinned != "" {
+		roster[config.RoleTriager] = config.DucklingID(pinned)
+	}
+	rs.run.Roster = map[string]string{string(config.RoleTriager): string(roster[config.RoleTriager])}
+	rs.wmu.Unlock()
 	limitsValue := projectBudget(budget.Budget{
 		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
@@ -371,7 +610,22 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	turnCaps := s.resolveTurnCaps("triage", 0)
 
 	proposals := make([]map[string]interface{}, 0, len(todo))
+	done := map[string]bool{}
+	if resumed != nil {
+		proposals = append(proposals, resumed.proposals...)
+		done = resumed.done
+	}
+	remaining := 0
+	for _, b := range todo {
+		if !done[b.ID] {
+			remaining++
+		}
+	}
 	for i, b := range todo {
+		if done[b.ID] {
+			continue
+		}
+		remaining--
 		turn := &strategy.Turn{
 			Role:     config.RoleTriager,
 			Toolbelt: "full", // narrowed to the triager's ceiling
@@ -413,11 +667,20 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		out, err := runner(ctx, turn, duckling, triagePrompt(b, all, previousContract), belt,
 			strategy.TurnContext{Round: 1, Index: i})
 		if err != nil {
+			// Aborted: the abort owns the record from here. Carrying on
+			// marked every remaining bug failed and then wrote the gate over
+			// the abort's verdict.
+			if ctx.Err() != nil {
+				return
+			}
 			// One bad bug does not poison the others: the rest of the batch
 			// still runs, and this one stays open for a person to look at.
 			rs.writer.AppendEvent("triage_failed", map[string]interface{}{
 				"bug": b.ID, "error": err.Error(),
 			})
+			if s.triageSafePoint(rs, remaining) {
+				return
+			}
 			continue
 		}
 		// What the triager said and did. Without this the run recorded a
@@ -434,6 +697,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		})
 		t, ok := out.Parsed.(*agent.Triage)
 		if !ok || t == nil {
+			if s.triageSafePoint(rs, remaining) {
+				return
+			}
 			continue
 		}
 		p := map[string]interface{}{
@@ -456,6 +722,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		}
 		proposals = append(proposals, p)
 		rs.writer.AppendEvent("triage", p)
+		if s.triageSafePoint(rs, remaining) {
+			return
+		}
 	}
 	recordSpend(rs, tracker)
 
@@ -500,6 +769,27 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		"kind": "gate", "triaged": len(proposals),
 	})
 	rs.writer.WriteState()
+}
+
+// triageSafePoint lands a requested pause between bugs. The bug just finished
+// is on the record (its proposal, or its failure); nothing spans two bugs, so
+// this is the triage's safe point.
+//
+// B-522: the history-duration check requested a pause on a triage and
+// nothing ever landed it — the card said "The run paused" while the next bug's
+// turn started. With no bug left, there is nothing to pause before: the
+// request is withdrawn on the record and the run goes to its gate.
+func (s *Service) triageSafePoint(rs *runState, remaining int) bool {
+	if remaining <= 0 {
+		s.withdrawPendingPause(rs, "the last bug's turn ended; the triage went to its gate instead of pausing")
+		return false
+	}
+	if !rs.pauseAfterTurn.Load() {
+		return false
+	}
+	// The spend lands before the pause writes the record it is part of.
+	recordSpend(rs, rs.tracker)
+	return s.pauseAtSafePoint(rs)
 }
 
 // triageAutonomy resolves what a triage run may decide alone: the project's

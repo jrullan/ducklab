@@ -210,6 +210,10 @@ type Run struct {
 	// overwritten if a stale copy was persisted — clients render buttons from
 	// this list and never encode the loop's rules themselves.
 	Next []string `json:"next,omitempty"`
+	// Escalation is the latest escalation card's truthful state (state:
+	// paused | pausing | continuing | ended, with role, seat, actions and any
+	// candidate). Derived by the engine on read, never authoritative on disk.
+	Escalation map[string]interface{} `json:"escalation,omitempty"`
 	// StageRequest is the persisted artifact-stage launch request, exposed on
 	// reads so an operator can replay an amendment without losing its shape.
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`

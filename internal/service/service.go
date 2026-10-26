@@ -2718,10 +2718,15 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 	counts := map[int]int{}
 	stuckItem, stuckReports, turns, redStreak, bestRed := 0, 0, 0, 0, 0
 	modeMedian := s.modeTurnMedian(rs.run.Mode, rs.run.ID)
+	// The seat this evidence is about is the one the run actually seated: a
+	// failed triage counted implementer turns (none), asked for implementer
+	// candidates against an empty seat, and offered to edit a task it did
+	// not have (B-522).
+	shape := escalationShapeFor(rs.snapshotRun())
 	for _, e := range events {
 		switch e.Type {
 		case "turn_start":
-			if role, _ := e.Data["role"].(string); role == "implementer" {
+			if role, _ := e.Data["role"].(string); role == shape.Role {
 				turns++
 			}
 		case "deliverables_report":
@@ -2790,11 +2795,14 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 		return
 	}
 	cards, _ := s.Scorecards(context.Background())
-	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), rs.run.Roster[string(config.RoleImplementer)], cards)
+	cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards)
 	if len(cands) == 0 {
 		return
 	}
-	rs.writer.AppendEvent("escalation_suggestion", map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0], "diagnoses": map[string]interface{}{"seat_at_capacity": map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body"}, "actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"}})
+	data := map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0],
+		"diagnoses": shape.diagnoses(map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "at-capacity and badly-briefed look identical; improve the task body")}
+	shape.stamp(data)
+	rs.writer.AppendEvent("escalation_suggestion", data)
 }
 
 // emitLaunchEscalation warns before this run's first model call when the same
@@ -2840,15 +2848,18 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 		return
 	}
 	cards, _ := s.Scorecards(context.Background())
-	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), current.Roster[string(config.RoleImplementer)], cards)
+	// Only task runs reach here (TaskID is required above), so the brief is
+	// a real diagnosis; the role still comes from the run, not a constant.
+	shape := escalationShapeFor(current)
+	cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards)
 	data := map[string]interface{}{
 		"point": "launch", "thresholds_fired": []string{"repeated_task_stage_failure"},
 		"prior_failed_or_aborted_runs": failures, "current_wilson_floor": floor,
 		"diagnoses": map[string]interface{}{"task_brief_quality": fmt.Sprintf(
 			"launch-time reminder from history, not evidence from this run: this task's %s stage has failed or been aborted here %d times; improve the task body before reseating",
 			current.Stage, failures)},
-		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
+	shape.stamp(data)
 	// A stronger candidate is useful reseating evidence, but its absence must
 	// not silence the task-level warning: improving the brief remains actionable.
 	if len(cands) > 0 {
@@ -4069,6 +4080,18 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 		}
 		return current, nil
 	}
+	// A triage continues its own work list: the bugs it has not finished,
+	// never the ones whose proposals are already on the record (B-522).
+	if current.Stage == "triage" {
+		if note != "" {
+			return nil, fmt.Errorf("a triage run takes no note on resume — resume it without one")
+		}
+		entry, err := s.entryFor(rs)
+		if err != nil {
+			return nil, err
+		}
+		return s.resumeTriage(ctx, rs, current, entry.Path, w)
+	}
 	// Document stages re-enter through their persisted request, which has no
 	// channel for a note: their instruction travels as a revision. Refused
 	// rather than resumed without the words the person typed.
@@ -4415,7 +4438,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	// A terminal abort must not return while the isolated checkout is still
 	// being used: callers commonly tear down the project immediately afterward.
 	// Queued runs have no goroutine (and thus no done close) until promoted.
-	if !wasQueued && done != nil && (current.Stage == "build" || current.Stage == "test") {
+	// A triage too: its worker writes the gate when its loop ends, and an
+	// abort that returned first was overwritten by it (B-522).
+	if !wasQueued && done != nil && (current.Stage == "build" || current.Stage == "test" || current.Stage == "triage") {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -4614,6 +4639,10 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// Always recomputed: the stored copy cannot be allowed to disagree with
 	// the rules.
 	run.Next = runNext(run)
+	// The truthful state of the latest escalation card — paused, pausing at
+	// its safe point, or continuing — for clients that read the run and not
+	// its event stream (MCP run_get). Derived on read like Next.
+	run.Escalation = escalationView(run, events)
 	return &RunDetail{
 		Run: run, Events: events, LandingOffer: offer,
 	}, nil
@@ -6226,37 +6255,62 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 	if rs.run.InterruptedTurn != nil {
 		stage = fmt.Sprintf("%s, round %d", rs.run.InterruptedTurn.Role, rs.run.InterruptedTurn.Round)
 	}
+	// What the card may say and offer depends on the run, not on the build
+	// loop this check was written for (B-522).
+	shape := escalationShapeFor(rs.run)
 	data := map[string]interface{}{
 		"point": "wallclock_history", "thresholds_fired": []string{"wallclock_over_history"},
 		"current_stage": stage,
 		"wallclock_s":   elapsed, "history_average_s": average, "history_runs": count,
 		"detail":    fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60),
-		"diagnoses": map[string]interface{}{"seat_at_capacity": "the current seat may be saturated", "task_brief_quality": "the brief may be too wide"},
-		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
+		"diagnoses": shape.diagnoses("the current seat may be saturated", "the brief may be too wide"),
 	}
-	rs.writer.AppendEvent("escalation_suggestion", data)
-	// Section-wise document updates are transactions held by the stage
-	// orchestrator: triage selects sections, then independent councils replace
-	// them in an in-memory candidate. A turn checkpoint can preserve one
-	// council conversation, but not that outer replacement ledger. Pausing a
-	// plan/spec/intake at a turn boundary therefore resumes into the wrong pass
-	// and can report "architect changed no sections" after approved work. Keep
-	// the advisory card, but let document transactions reach their human gate.
-	// Build/test work lives in a durable worktree and remains safely pausable.
-	if rs.run.Stage == "intake" || rs.run.Stage == "spec" || rs.run.Stage == "plan" {
+	shape.stamp(data)
+	// A stronger seat is named only with evidence for the role that ran. The
+	// card used to carry none at all, so its relaunch button was disabled
+	// forever with nothing to say why.
+	if cards, err := s.Scorecards(context.Background()); err == nil {
+		if cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards); len(cands) > 0 {
+			data["candidate"] = cands[0]
+			data["current_wilson_floor"] = floor
+		}
+	}
+	if !shape.Pausable {
+		// Keep the advisory card, but say on the card itself that nothing
+		// stopped: "The run paused" over a working run is the defect.
+		data["pause"] = "deferred"
+		data["pause_detail"] = shape.DeferDetail
+		rs.writer.AppendEvent("escalation_suggestion", data)
 		rs.writer.AppendEvent("pause_deferred", map[string]interface{}{
-			"kind": "history_duration", "detail": "document transaction continues to its human gate",
+			"kind": "history_duration", "detail": shape.DeferDetail,
 		})
 		return
 	}
+	data["pause"] = "requested"
+	data["pause_detail"] = shape.PauseDetail
+	rs.writer.AppendEvent("escalation_suggestion", data)
 	// Pause at the next safe point, not now: the turn in flight finishes
-	// and its work lands on the record before the run stops (I9). The
-	// turn_end hook files the card and cancels.
+	// and its work lands on the record before the run stops (I9). Every
+	// pausable run kind calls pauseAtSafePoint at its own boundary — the
+	// build loop and test-first at turn_end, triage after each bug.
 	rs.wmu.Lock()
 	rs.pausePending = data
 	rs.wmu.Unlock()
 	rs.pauseAfterTurn.Store(true)
-	rs.writer.AppendEvent("pause_requested", map[string]interface{}{"kind": "history_duration", "detail": "pausing when the current turn ends"})
+	rs.writer.AppendEvent("pause_requested", map[string]interface{}{"kind": "history_duration", "detail": shape.PauseDetail})
+}
+
+// withdrawPendingPause gives up a requested pause that has no safe point left
+// to land at — the run's last unit of work just ended — and says so on the
+// record, so the card does not keep promising a pause that will never come.
+func (s *Service) withdrawPendingPause(rs *runState, detail string) {
+	if rs == nil || rs.writer == nil || !rs.pauseAfterTurn.CompareAndSwap(true, false) {
+		return
+	}
+	rs.wmu.Lock()
+	rs.pausePending = nil
+	rs.wmu.Unlock()
+	rs.writer.AppendEvent("pause_deferred", map[string]interface{}{"kind": "history_duration", "detail": detail})
 }
 
 // pauseAtSafePoint lands a requested pause once the turn in flight has

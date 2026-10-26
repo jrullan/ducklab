@@ -2100,6 +2100,10 @@
           "ended_at": {
             "type": "string"
           },
+          "escalation": {
+            "additionalProperties": {},
+            "type": "object"
+          },
           "execution_root": {
             "type": "string"
           },
@@ -2769,6 +2773,29 @@
           "source",
           "title"
         ],
+        "type": "object"
+      },
+      "ServiceBugTriageRequest": {
+        "properties": {
+          "bug_id": {
+            "type": "string"
+          },
+          "bug_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "relaunch_of": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "ServiceCandidate": {
@@ -6075,6 +6102,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceBugTriageRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -6095,7 +6132,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Triage the open bugs"
+        "summary": "Triage the open bugs, or relaunch a triage's bugs with another triager"
       }
     },
     "/v1/projects/{id}/bugs/{bug}": {

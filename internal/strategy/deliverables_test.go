@@ -192,6 +192,9 @@ func TestStalledDeliverableEmitsEscalationSuggestionOnlyAfterTheThirdReport(t *t
 		return &agent.Outcome{Text: `{"deliverables":[{"id":1,"status":"done"},{"id":2,"status":"` + status + `"}]}`}
 	}
 	params := &ExecuteParams{
+		// A task run: the brief-repair alternative exists only where there
+		// is a task brief (B-522).
+		TaskID:       "T-107",
 		Prompt:       "Task T-107",
 		Deliverables: []string{"first", "stalled item"},
 		Rounds:       3,
@@ -283,7 +286,7 @@ func TestNoStrongerCandidateEmitsNoEscalationSuggestion(t *testing.T) {
 		CurrentLowerBound:    61,
 		OnEvent:              func(kind string, _ map[string]interface{}) { suggested = kind == "escalation_suggestion" },
 	}
-	emitEscalationSuggestion(params, escalationEvidence{StuckItem: 2, StuckReports: 3}, "failed_run")
+	emitEscalationSuggestion(params, escalationEvidence{StuckItem: 2, StuckReports: 3}, "failed_run", config.RoleImplementer)
 	if suggested {
 		t.Fatal("equal Wilson floor must not produce an escalation suggestion")
 	}
