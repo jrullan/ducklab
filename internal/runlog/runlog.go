@@ -224,6 +224,11 @@ type Run struct {
 	// changes, and Revision its place in the chain (1 for the first).
 	RevisesRun string `json:"revises_run,omitempty"`
 	Revision   int    `json:"revision,omitempty"`
+	// RelaunchOf is the triage run this one re-triages with another seat. The
+	// replacement is written prepared until the original's record names it
+	// ("relaunched as <id>"), so recovery can tell a real replacement from one
+	// an engine died preparing (B-522 review).
+	RelaunchOf string `json:"relaunch_of,omitempty"`
 	// InterruptedTurn is the last turn stopped by a pausing interruption.
 	InterruptedTurn *InterruptedTurn `json:"interrupted_turn,omitempty"`
 	// RemoteReceipts are the publication receipts recorded for this accepted

@@ -241,6 +241,17 @@ func reconcilePreparedRevision(projectRoot, runDir string, run *runlog.Run) bool
 			}
 		}
 	}
+	// A triage relaunch is prepared the same way (review of #176): real only
+	// when the original's record says it was relaunched as this run. One
+	// the engine died preparing must not survive as a second live triage of
+	// the same bugs beside the original.
+	if run.RelaunchOf != "" {
+		if original, err := runlog.ReadState(runlog.RunDirFor(projectRoot, run.RelaunchOf)); err == nil {
+			if m := relaunchedByPattern.FindStringSubmatch(original.Resolution); m != nil && m[1] == run.ID {
+				named = true
+			}
+		}
+	}
 	if named {
 		setRunStatus(run, "running", time.Now())
 		return true
@@ -250,6 +261,9 @@ func reconcilePreparedRevision(projectRoot, runDir string, run *runlog.Run) bool
 	}
 	setRunStatus(run, "failed", time.Now())
 	run.Failure = "abandoned: the engine stopped before this revision claimed " + run.RevisesRun + "; revise that run again"
+	if run.RelaunchOf != "" {
+		run.Failure = "abandoned: the engine stopped before this relaunch claimed " + run.RelaunchOf + "; relaunch that run again"
+	}
 	run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	return true
 }

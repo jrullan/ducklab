@@ -644,6 +644,7 @@ export interface RunlogRun {
   project_id?: string;
   queued_reason?: string;
   redo_note?: RunlogRedoNote;
+  relaunch_of?: string;
   remote_receipts?: Record<string, unknown>[];
   resolution?: string;
   resume_notes?: RunlogResumeNote[];

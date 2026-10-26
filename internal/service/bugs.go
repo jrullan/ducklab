@@ -341,11 +341,19 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 		if err != nil {
 			return nil, err
 		}
-		if len(wanted) == 0 {
-			for _, id := range ids {
-				wanted[id] = true
-			}
+		// A relaunch re-triages the SAME bugs (review of #176): explicit ids
+		// beside relaunch_of used to win silently, so "relaunch B-001's
+		// triage" with bug_id=B-002 ended B-001's run and triaged B-002.
+		// Naming them is allowed only when they are exactly that work list.
+		original := map[string]bool{}
+		for _, id := range ids {
+			original[id] = true
 		}
+		if len(wanted) > 0 && !maps.Equal(wanted, original) {
+			return nil, fmt.Errorf("relaunch_of %s re-triages its own bugs (%s); bug_id/bug_ids name %s — drop them, or triage those bugs without relaunch_of",
+				req.RelaunchOf, strings.Join(ids, ", "), strings.Join(slices.Sorted(maps.Keys(wanted)), ", "))
+		}
+		wanted = original
 	}
 	open, err := s.BugList(ctx, projectID, true)
 	if err != nil {
@@ -378,11 +386,6 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 	for _, b := range todo {
 		bugIDs = append(bugIDs, b.ID)
 	}
-	if req.RelaunchOf != "" {
-		if err := s.endForRelaunch(ctx, req.RelaunchOf); err != nil {
-			return nil, err
-		}
-	}
 
 	run := &runlog.Run{
 		ID:        runlog.GenerateRunID(),
@@ -403,11 +406,48 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 	if seat != "" {
 		run.Roster = map[string]string{string(config.RoleTriager): seat}
 	}
-	// Born running outside the queue: its active clock opens here or never.
-	setRunStatus(run, "running", time.Now())
+	// A relaunch is written PREPARED and becomes real only once the original
+	// names it (review of #176). Ending the original first destroyed it when
+	// the replacement's record then failed to write: no new run, and the
+	// paused triage gone. Same shape as a document revision claiming its
+	// parent (B-521): prepare, claim durably, then run — and recovery
+	// discards a prepared replacement its original does not name.
+	if req.RelaunchOf != "" {
+		run.RelaunchOf = req.RelaunchOf
+		setRunStatus(run, runStatusPrepared, time.Now())
+	} else {
+		// Born running outside the queue: its active clock opens here or never.
+		setRunStatus(run, "running", time.Now())
+	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
 		return nil, err
+	}
+	// bug_ids is the run's work list on the record: resume continues it and
+	// a relaunch re-triages it. The count alone could do neither. Written
+	// before the claim, so a replacement recovery finalizes can resume.
+	start := map[string]interface{}{
+		"stage": "triage", "mode": "solo", "bugs": len(todo), "bug_ids": bugIDs,
+	}
+	if req.RelaunchOf != "" {
+		start["relaunch_of"] = req.RelaunchOf
+	}
+	if err := writer.AppendEvent("run_start", start); err != nil {
+		discardUnstartedRun(writer)
+		return nil, fmt.Errorf("record the triage's work list: %w", err)
+	}
+	if req.RelaunchOf != "" {
+		triageRelaunchCrashPoint("before-claim")
+		if err := s.claimTriageRelaunch(ctx, req.RelaunchOf, run.ID); err != nil {
+			discardUnstartedRun(writer)
+			return nil, err
+		}
+		triageRelaunchCrashPoint("after-claim")
+		// Claimed: the original's record names this run, so it is real. A
+		// failed write here is harmless — recovery finalizes a prepared
+		// replacement its original names.
+		setRunStatus(run, "running", time.Now())
+		_ = writer.WriteState()
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs := &runState{
@@ -418,15 +458,6 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 	s.runsMu.Lock()
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
-	// bug_ids is the run's work list on the record: resume continues it and
-	// a relaunch re-triages it. The count alone could do neither.
-	start := map[string]interface{}{
-		"stage": "triage", "mode": "solo", "bugs": len(todo), "bug_ids": bugIDs,
-	}
-	if req.RelaunchOf != "" {
-		start["relaunch_of"] = req.RelaunchOf
-	}
-	writer.AppendEvent("run_start", start)
 	return &triageLaunch{rs: rs, ctx: runCtx, root: entry.Path, todo: todo, all: all}, nil
 }
 
@@ -450,23 +481,96 @@ func (s *Service) triageRelaunchBugs(ctx context.Context, projectID, runID strin
 	return ids, nil
 }
 
-// endForRelaunch aborts the triage being relaunched when it has not ended.
-// Called only once the relaunch is known to have work: a refused relaunch
-// must not cost the person the run it would have replaced.
-func (s *Service) endForRelaunch(ctx context.Context, runID string) error {
+// triageRelaunchCrashPoint marks the two boundaries of a relaunch that an
+// engine death must not corrupt: the replacement prepared but the original
+// unclaimed, and the original claimed but the replacement not yet running.
+// A no-op in the engine; tests stop the launch there to exercise recovery.
+var triageRelaunchCrashPoint = func(string) {}
+
+// relaunchedByPattern finds the replacement that already claimed a triage.
+var relaunchedByPattern = regexp.MustCompile(`relaunched as (r-[A-Za-z0-9-]+)`)
+
+// claimTriageRelaunch ends the triage being relaunched and names its
+// replacement on its record, as one durable step: the write of the original's
+// state is the moment the replacement becomes real. Under the original's
+// decision lock, so an accept racing the relaunch cannot both win.
+//
+// If that write fails, the original is put back: a paused triage stays
+// paused; one whose worker was already stopped is left paused on the error,
+// resumable with its finished bugs intact. Never failed with no successor.
+func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replacementID string) error {
 	s.runsMu.RLock()
-	prior, ok := s.runs[runID]
+	prior, ok := s.runs[originalID]
 	s.runsMu.RUnlock()
 	if !ok {
-		return fmt.Errorf("run %q not found", runID)
+		return fmt.Errorf("run %q not found", originalID)
 	}
-	switch prior.snapshotRun().Status {
-	case "running", "paused", "queued":
-		if err := s.RunAbort(ctx, runID); err != nil {
-			return fmt.Errorf("end %s before relaunching it: %w", runID, err)
+	prior.decisionMu.Lock()
+	defer prior.decisionMu.Unlock()
+	before := prior.snapshotRun()
+	if m := relaunchedByPattern.FindStringSubmatch(before.Resolution); m != nil {
+		return fmt.Errorf("run %s was already relaunched as %s — relaunch that one instead", originalID, m[1])
+	}
+	resolution := "relaunched as " + replacementID
+	live := before.Status == "running" || before.Status == "paused" || before.Status == "queued"
+	if live {
+		// Stop the worker before writing over its record: a triage writes its
+		// gate when its loop ends, and would overwrite the claim.
+		prior.wmu.Lock()
+		cancel, done := prior.cancel, prior.done
+		prior.wmu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if done != nil && before.Status != "queued" {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				<-done
+			}
 		}
 	}
+	w, err := s.ensureWriter(prior)
+	if err != nil {
+		return s.restoreUnclaimed(prior, before, fmt.Errorf("end %s before relaunching it: %w", originalID, err))
+	}
+	if live {
+		err = s.finishUnacceptedRun(prior, w, "failed", "ABORTED", resolution)
+	} else {
+		prior.wmu.Lock()
+		prior.run.Resolution = resolution
+		prior.wmu.Unlock()
+		err = w.WriteState()
+	}
+	if err != nil {
+		return s.restoreUnclaimed(prior, before, fmt.Errorf("end %s before relaunching it: %w", originalID, err))
+	}
+	w.AppendEvent("human", map[string]interface{}{"action": "relaunched", "detail": resolution})
 	return nil
+}
+
+// restoreUnclaimed puts back a triage whose relaunch claim did not persist.
+func (s *Service) restoreUnclaimed(rs *runState, before *runlog.Run, cause error) error {
+	rs.wmu.Lock()
+	status := before.Status
+	rs.run.Verdict, rs.run.Resolution, rs.run.EndedAt = before.Verdict, before.Resolution, before.EndedAt
+	rs.run.PendingKind, rs.run.PendingSince, rs.run.PendingData = before.PendingKind, before.PendingSince, before.PendingData
+	rs.run.Failure = before.Failure
+	if status == "running" || status == "queued" {
+		// Its worker is already stopped: say so, and let resume continue it.
+		status = "paused"
+		rs.run.PendingKind = "error"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.Failure = "relaunch failed (" + cause.Error() + ") — resume continues this triage with the bugs it has not finished"
+	}
+	setRunStatus(rs.run, status, time.Now())
+	w := rs.writer
+	rs.wmu.Unlock()
+	if w != nil && !w.Closed() {
+		w.AppendEvent("relaunch_failed", map[string]interface{}{"detail": cause.Error()})
+		_ = w.WriteState()
+	}
+	return cause
 }
 
 // triageWorkList reads a triage run's bugs from its record: run_start's
@@ -595,6 +699,13 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	}, projCfg.Budget)
 	limits := &limitsValue
 	tracker := budget.NewTracker(limits)
+	if resumed != nil {
+		// A resumed triage continues its own ledger and ceilings (review of
+		// #176): a fresh tracker recorded the spent tokens, turns and dollars
+		// as zero and put back the default caps — resume doubled the budget
+		// and undid any lift.
+		limits, tracker = trackerFromRecord(rs.snapshotRun())
+	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}

@@ -354,6 +354,7 @@ export const KNOWN_EVENT_TYPES = [
   "proposal_structure_notices",
   "pause_requested",
   "pause_deferred",
+  "relaunch_failed",
   "dedupe",
   "superseded_tasks_consumed",
   "no_gate",

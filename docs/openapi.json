@@ -2192,6 +2192,9 @@
           "redo_note": {
             "$ref": "#/components/schemas/RunlogRedoNote"
           },
+          "relaunch_of": {
+            "type": "string"
+          },
           "remote_receipts": {
             "items": {
               "additionalProperties": {},
