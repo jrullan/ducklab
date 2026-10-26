@@ -295,7 +295,9 @@ func toolList() []map[string]interface{} {
 			"name": "bug_triage",
 			"description": "Classify bugs: severity, duplicates, suspected files. One bug when bug_id is " +
 				"given, every open one otherwise. The classifications are proposals on a run that may " +
-				"wait at its gate — check status and decide it like any other.",
+				"wait at its gate — check status and decide it like any other. Each split proposal is checked against " +
+				"the rule bug_promote enforces before the gate; one that still fails is listed in run_get " +
+				"pending_data.promote_blockers with its fix (bug_edit after accepting, or reject and triage again).",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id":  str("the project id"),
 				"bug_id":      str("optional: triage exactly this bug"),
@@ -306,12 +308,60 @@ func toolList() []map[string]interface{} {
 			}, "project_id"),
 		},
 		{
-			"name":        "bug_promote",
-			"description": "Turn a triaged bug into a task on the board. The task carries the report and the triage's analysis.",
+			"name": "bug_promote",
+			"description": "Turn a triaged bug into a task on the board. The task carries the report and the triage's analysis. " +
+				"If it is refused because of the bug's split proposal (for example \"split proposal requires test or coverage work but no portion claims it\"), " +
+				"do not call bug_promote again unchanged: show the person the refusal, fix the proposal with bug_edit once they agree, then promote.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("a triaged bug, B-..."),
 				"note":       str("required for a reopened bug: what the new attempt must address that the previous fix missed"),
+			}, "project_id", "bug_id"),
+		},
+		{
+			"name": "bug_edit",
+			"description": "Change what a bug says, or its split proposal, before it becomes tasks. " +
+				"USE IT WHEN: (1) bug_promote was refused because of the proposal — for example " +
+				"\"split proposal requires test or coverage work but no portion claims it\" — or a triage gate " +
+				"(run_get pending_data.promote_blockers) says a proposal cannot be promoted as written; " +
+				"(2) the person asks to adjust the title, body, severity or the proposal. " +
+				"ASK FIRST: you are rewriting the person's report and the contract the fix will be held to, so " +
+				"say what you will change and edit only after they agree. " +
+				"HOW: send only the fields you change. `proposal` REPLACES the whole split — read the current one " +
+				"from bug_list and send every portion, changed or not; an empty list removes the split. " +
+				"To satisfy the test rule, give the test work to the portion that owns the behavior under test: " +
+				"add a test path (e.g. tests/...) to its owns, or make one of its acceptance slices " +
+				"\"Regression test covers <behavior>\". The answer's promote_blocker, when present, is promote's " +
+				"refusal of the split as it now stands; when absent, call bug_promote. " +
+				"Errors are the engine's own words: read them, correct the input, and try again.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"bug_id":     str("the bug, B-... — not yet promoted (status open or triaged)"),
+				"title":      str("optional: the new one-line title"),
+				"body":       str("optional: the new report text; replaces the old text (\"\" clears it). Leave it out to keep the text"),
+				"severity":   str("optional: critical | high | normal | low"),
+				"proposal": map[string]interface{}{
+					"type": "array",
+					"description": "optional: the COMPLETE new split, one entry per task promote will create. " +
+						"Replaces the stored split; [] removes it (promote then makes one task).",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"title": str("what this task does, one line"),
+							"acceptance": map[string]interface{}{
+								"type": "array", "items": map[string]interface{}{"type": "string"},
+								"minItems": 1, "maxItems": 2,
+								"description": "1 or 2 checkable outcomes, e.g. \"Regression test covers pointer drag\"",
+							},
+							"owns": map[string]interface{}{
+								"type": "array", "items": map[string]interface{}{"type": "string"},
+								"minItems":    1,
+								"description": "repository-relative paths this task may write; no path in two portions",
+							},
+						},
+						"required": []string{"title", "acceptance", "owns"},
+					},
+				},
 			}, "project_id", "bug_id"),
 		},
 		{
@@ -934,6 +984,30 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolJSON(run), nil
 	case "bug_promote":
 		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client, a.str("note"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "bug_edit":
+		projectID, bugID := a.str("project_id"), a.str("bug_id")
+		req := map[string]interface{}{}
+		for _, field := range []string{"title", "body", "severity"} {
+			if _, present := a[field]; present {
+				req[field] = a.str(field)
+			}
+		}
+		if _, present := a["proposal"]; len(req) == 0 && !present {
+			return nil, fmt.Errorf("nothing to change; next: give title, body, severity or proposal")
+		}
+		// Presence is the contract: the engine changes exactly the fields
+		// sent, so a title-only edit keeps the body and {"body":""} clears it.
+		if proposal, present := a["proposal"]; present {
+			if proposal == nil {
+				proposal = []interface{}{}
+			}
+			req["proposal"] = proposal
+		}
+		out, err := s.eng.BugEdit(projectID, bugID, req)
 		if err != nil {
 			return nil, err
 		}

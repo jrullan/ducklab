@@ -22,10 +22,10 @@ func TestAReportCanBeCorrected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{
-		Title:    "dragging a vertex does not update the left edge label",
-		Body:     "In the default triangle, drag the top vertex.",
-		Severity: "critical",
+	got, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{
+		Title:    ptrTo("dragging a vertex does not update the left edge label"),
+		Body:     ptrTo("In the default triangle, drag the top vertex."),
+		Severity: ptrTo("critical"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAnUnknownSeverityIsRefused(t *testing.T) {
 	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Severity: "urgent"}); err == nil {
+	if _, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Severity: ptrTo("urgent")}); err == nil {
 		t.Error("an invented severity was accepted")
 	}
 }

@@ -2179,6 +2179,34 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                     {t.suspected_files.join(" · ")}
                   </p>
                 )}
+                {(t.proposal ?? []).length > 0 && (
+                  <ol className="mt-1 space-y-1 text-xs" data-testid="triage-proposal-split">
+                    {t.proposal!.map((p, i) => (
+                      <li key={i}>
+                        <span className="text-ink">{i + 1}. {p.title}</span>
+                        {(p.acceptance ?? []).length > 0 && (
+                          <span className="text-ink-secondary"> — {p.acceptance!.join("; ")}</span>
+                        )}
+                        {(p.owns ?? []).length > 0 && (
+                          <span className="font-mono text-ink-muted"> · owns {p.owns!.join(", ")}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {t.proposal_repair && (
+                  <p className="mt-1 text-xs text-ink-muted" data-testid="triage-proposal-repair">{t.proposal_repair}</p>
+                )}
+                {/* B-523: B-014's gate looked green, and promote then refused
+                    the split three times. The refusal belongs here, where the
+                    decision is made, with what to do about it. */}
+                {t.promote_blocker && (
+                  <div role="alert" data-testid="triage-promote-blocker" className="mt-1 rounded border border-critical p-2 text-xs">
+                    <p className="font-medium text-critical">promote will refuse this split as written</p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-ink-secondary">{t.promote_blocker}</p>
+                    {t.promote_fix && <p className="mt-0.5 whitespace-pre-wrap text-ink">fix: {t.promote_fix}</p>}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

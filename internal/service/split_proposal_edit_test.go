@@ -28,7 +28,7 @@ func TestAPersonCanAuthorEditAndDiscardASplitProposal(t *testing.T) {
 		{Title: "Persist the avatar on profile save", Acceptance: []string{"a saved avatar is present after reload"}, Owns: []string{"internal/profile/persist.go"}},
 		{Title: "Refresh the avatar cache after profile save", Acceptance: []string{"the cache serves the newly saved avatar"}, Owns: []string{"internal/profile/cache.go"}},
 	}
-	got, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &authored})
+	got, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &authored})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestAPersonCanAuthorEditAndDiscardASplitProposal(t *testing.T) {
 	}
 
 	// An edit that says nothing about the proposal leaves it alone.
-	got, err = s.BugEdit(context.Background(), id, "B-001", BugRequest{Severity: "high"})
+	got, err = s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Severity: ptrTo("high")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAPersonCanAuthorEditAndDiscardASplitProposal(t *testing.T) {
 	// Correcting one portion replaces the split as a whole: what is stored is
 	// what the form showed.
 	edited := []bug.Portion{{Title: "Persist and cache the avatar", Acceptance: []string{"a saved avatar is present after reload", "the cache serves it"}, Owns: []string{"internal/profile/persist.go", "internal/profile/cache.go"}}}
-	got, err = s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &edited})
+	got, err = s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &edited})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAPersonCanAuthorEditAndDiscardASplitProposal(t *testing.T) {
 
 	// An empty list is the person discarding the split: promote makes one task.
 	none := []bug.Portion{}
-	got, err = s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &none})
+	got, err = s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &none})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestAPersonEditedSplitPromotesLikeATriagerStoredOne(t *testing.T) {
 	corrected := append([]bug.Portion(nil), bugs[0].Proposal...)
 	corrected[1].Title = "Refresh the avatar cache after profile save"
 	corrected[1].Owns = []string{"internal/profile/cache.go"}
-	if _, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &corrected}); err != nil {
+	if _, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &corrected}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +200,7 @@ func TestASplitProposalIsHeldToTheTriageContract(t *testing.T) {
 		}, "lanes must be disjoint"},
 	}
 	for _, tc := range cases {
-		_, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &tc.portions})
+		_, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &tc.portions})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
 		}
@@ -227,20 +227,20 @@ func TestASplitProposalCannotBeEditedOncePromoted(t *testing.T) {
 		t.Fatal(err)
 	}
 	late := []bug.Portion{{Title: "a", Acceptance: []string{"x"}, Owns: []string{"a.go"}}}
-	_, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &late})
+	_, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &late})
 	if err == nil || !strings.Contains(err.Error(), "consumed") {
 		t.Fatalf("err = %v, want the promoted refusal", err)
 	}
 	// The words are still the person's to correct.
-	if _, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Title: "two things broke on save"}); err != nil {
+	if _, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Title: ptrTo("two things broke on save")}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // Three requests, three meanings: absent leaves the split alone, [] discards
 // it, a list replaces it. The wire shape has to keep them apart.
-func TestBugRequestKeepsAbsentAndEmptyProposalsApart(t *testing.T) {
-	var absent, empty, some BugRequest
+func TestBugEditRequestKeepsAbsentAndEmptyProposalsApart(t *testing.T) {
+	var absent, empty, some BugEditRequest
 	if err := json.Unmarshal([]byte(`{"title":"x"}`), &absent); err != nil || absent.Proposal != nil {
 		t.Fatalf("absent: %+v %v", absent.Proposal, err)
 	}

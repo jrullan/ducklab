@@ -535,7 +535,7 @@ func routeTable() []Route {
 			Summary: "Read one bug's full report", ClientMethod: "BugGet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleBugGet }},
 		{Method: "PUT", Path: "/v1/projects/{id}/bugs/{bug}", Auth: true,
-			Request:      service.BugRequest{},
+			Request:      service.BugEditRequest{},
 			Summary:      "Correct what a report says. A bug could be moved, triaged and promoted but never edited.",
 			ClientMethod: "BugEdit",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBugEdit }},
