@@ -28,10 +28,18 @@ var appendDecisionEvent = func(w *runlog.Writer, data map[string]interface{}) er
 // when this fails (review of #177): recording after the fact, with the error
 // swallowed, let a log that stopped accepting writes drop the words again
 // while the decision went through.
-func appendDecision(w *runlog.Writer, action, actor, reason string) error {
+//
+// Recorded first, the event is an ATTEMPT: the door can still refuse after
+// it (accept's clean-checkout gate replay, reject's tree restore). The
+// returned closer writes a "decision_outcome" event — taken, or refused with
+// the error — and every caller defers it over its own result. Without it the
+// lane read "accept · …" over a run still waiting at its gate (second review
+// of #177). A closer that cannot write leaves the attempt without an
+// outcome, which the lane shows as exactly that, never as taken.
+func appendDecision(w *runlog.Writer, action, actor, reason string) (func(error), error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return nil
+		return func(error) {}, nil
 	}
 	err := fmt.Errorf("no run log")
 	if w != nil {
@@ -40,7 +48,13 @@ func appendDecision(w *runlog.Writer, action, actor, reason string) error {
 		})
 	}
 	if err != nil {
-		return fmt.Errorf("%s not taken: its reason could not be recorded (%v); nothing was decided — retry once the run log accepts writes", action, err)
+		return func(error) {}, fmt.Errorf("%s not taken: its reason could not be recorded (%v); nothing was decided — retry once the run log accepts writes", action, err)
 	}
-	return nil
+	return func(result error) {
+		data := map[string]interface{}{"action": action, "outcome": "taken"}
+		if result != nil {
+			data["outcome"], data["error"] = "refused", result.Error()
+		}
+		_ = w.AppendEvent("decision_outcome", data)
+	}, nil
 }

@@ -85,6 +85,10 @@ export interface TurnBlock {
   incomplete?: boolean;
   /** Durable notes captured when this turn was interrupted and later resumed. */
   checkpointNotes?: string;
+  /** A recorded decision's fate (B-524). The words are recorded BEFORE the
+   * door acts, so the record is an attempt until its decision_outcome says
+   * taken or refused; absent on blocks that are not decision attempts. */
+  decisionOutcome?: { outcome: "pending" | "taken" | "refused"; error?: string };
   /** A later turn_start resumed this turn's checkpoint. */
   resumed?: boolean;
   /** What this turn was working on: a split's subtask, a tournament's
@@ -387,6 +391,21 @@ export function actorPhrase(actor: string): string {
   return a;
 }
 
+/** What the lane says above a decision's words: the act as it ended — never
+ * a finished "accept" for an attempt that was refused or never closed. */
+export function decisionLabel(block: Pick<TurnBlock, "subject" | "author" | "decisionOutcome">): string {
+  const who = block.author ?? "the person";
+  const act = block.subject ?? "";
+  switch (block.decisionOutcome?.outcome) {
+    case "pending":
+      return `${act} attempted — no outcome recorded · ${who}`;
+    case "refused":
+      return `${act} refused${block.decisionOutcome.error ? `: ${block.decisionOutcome.error}` : ""} · ${who}`;
+    default:
+      return `${act} · ${who}`;
+  }
+}
+
 export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   const blocks: TurnBlock[] = [];
   const byKey = new Map<string, TurnBlock>();
@@ -528,8 +547,10 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "decision": {
-        // B-524: what a decider said with accept, abort or resume. Shown as
-        // a record, attributed — it never changed what was decided.
+        // B-524: what a decider said with accept, reject, abort or resume.
+        // Shown as a record, attributed — it never changed what was decided.
+        // It is written before the door acts, so it is an attempt until its
+        // outcome arrives (second review of #177).
         const reason = String(d.reason ?? "");
         if (reason) {
           blocks.push({
@@ -537,7 +558,25 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
             round: 0, turn: -1, role: "decision", duckling: "", toolCalls: [],
             text: reason, done: true, messageOnly: true,
             subject: String(d.action ?? ""), author: actorPhrase(String(d.actor ?? "")),
+            decisionOutcome: { outcome: "pending" },
           });
+        }
+        break;
+      }
+      case "decision_outcome": {
+        // Closes the newest still-pending attempt of the same action. An
+        // accept refused after its words were recorded (the clean-checkout
+        // gate replay) read as a finished "accept · …" over a run still at
+        // its gate.
+        const action = String(d.action ?? "");
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i]!;
+          if (b.role === "decision" && b.subject === action && b.decisionOutcome?.outcome === "pending") {
+            b.decisionOutcome = d.outcome === "taken"
+              ? { outcome: "taken" }
+              : { outcome: "refused", error: String(d.error ?? "") };
+            break;
+          }
         }
         break;
       }

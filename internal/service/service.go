@@ -3185,9 +3185,11 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 		if wErr != nil {
 			return wErr
 		}
-		if err := appendDecision(dw, "accept", actor, message); err != nil {
-			return err
+		closeDecision, dErr := appendDecision(dw, "accept", actor, message)
+		if dErr != nil {
+			return dErr
 		}
+		defer func() { closeDecision(err) }()
 	}
 
 	// A stage run's human gate is the decision to promote its document. There
@@ -4074,7 +4076,9 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 // instruction the resumed run reads; the reason explains the decision and is
 // recorded as a "decision" event, never read by the run. An MCP operator's
 // required reason used to reach no record at all on resume (B-524).
-func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor string) (*runlog.Run, error) {
+func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor string) (_ *runlog.Run, err error) {
+	closeDecision := func(error) {}
+	defer func() { closeDecision(err) }()
 	note = strings.TrimSpace(note)
 	reason = strings.TrimSpace(reason)
 	s.runsMu.RLock()
@@ -4129,7 +4133,7 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 			return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", current.Stage)
 		}
 		sreq.resumed = true
-		if err := appendDecision(w, "resume", actor, reason); err != nil {
+		if closeDecision, err = appendDecision(w, "resume", actor, reason); err != nil {
 			return nil, err
 		}
 		runCtx, cancel := context.WithCancel(context.Background())
@@ -4155,7 +4159,7 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 		if cfgErr != nil {
 			return nil, cfgErr
 		}
-		if err := appendDecision(w, "resume", actor, reason); err != nil {
+		if closeDecision, err = appendDecision(w, "resume", actor, reason); err != nil {
 			return nil, err
 		}
 		if note != "" {
@@ -4199,7 +4203,7 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 		return rs.snapshotRun(), nil
 	}
 
-	if err := appendDecision(w, "resume", actor, reason); err != nil {
+	if closeDecision, err = appendDecision(w, "resume", actor, reason); err != nil {
 		return nil, err
 	}
 	if note != "" {
@@ -4450,7 +4454,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 // RunAbortAs is an abort with its decider and reason. The reason is recorded
 // as a "decision" event; an MCP operator's required reason used to be
 // dropped here without a word (B-524).
-func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) error {
+func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err error) {
+	closeDecision := func(error) {}
+	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4466,7 +4472,7 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) erro
 		if err != nil {
 			return err
 		}
-		if err := appendDecision(w, "abort", actor, reason); err != nil {
+		if closeDecision, err = appendDecision(w, "abort", actor, reason); err != nil {
 			return err
 		}
 	}
@@ -5393,7 +5399,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 // no actor, so the desktop attributed an operator's reject to the person
 // (review of #177). The reason is recorded as a "decision" event before the
 // tree is restored; a log that refuses it refuses the reject.
-func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) error {
+func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (err error) {
+	closeDecision := func(error) {}
+	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5413,7 +5421,7 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) err
 	// Runs paused by an older engine may still carry a materialized accept-time
 	// rebase. Reject remains the abort door for that durable legacy state before
 	// normal snapshot restoration and cleanup run.
-	if err := appendDecision(w, "reject", actor, reason); err != nil {
+	if closeDecision, err = appendDecision(w, "reject", actor, reason); err != nil {
 		return err
 	}
 	rebaseInProgress, _ := rs.run.PendingData["rebase_in_progress"].(bool)

@@ -48,6 +48,95 @@ func wantDecision(t *testing.T, s *Service, runID, action, actor, reason string)
 	if len(got) != 1 || got[0]["action"] != action || got[0]["actor"] != actor || got[0]["reason"] != reason {
 		t.Fatalf("decision events = %v, want one %s by %s with reason %q", got, action, actor, reason)
 	}
+	// The record is an attempt until it is closed (second review of #177).
+	if out := outcomeEvents(t, s, runID); len(out) != 1 || out[0]["action"] != action || out[0]["outcome"] != "taken" {
+		t.Fatalf("decision outcomes = %v, want one %s taken", out, action)
+	}
+}
+
+func outcomeEvents(t *testing.T, s *Service, runID string) []map[string]interface{} {
+	t.Helper()
+	events, err := runlog.ReadEvents(s.RunDir(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]interface{}
+	for _, e := range events {
+		if e.Type == "decision_outcome" {
+			out = append(out, e.Data)
+		}
+	}
+	return out
+}
+
+// Second review of #177: the words are recorded before the door acts, and
+// the door can still refuse after that — accept's own work (here the triage
+// it applies), reject's and abort's tree restore. The record then read as an
+// accept that never happened. Each recorded attempt is closed: refused, with
+// the error, and the run is still where it was.
+func TestARecordedDecisionThatFailsIsClosedAsRefused(t *testing.T) {
+	cases := []struct {
+		door   string
+		setup  func(t *testing.T, s *Service) string
+		decide func(s *Service, runID string) error
+	}{
+		{"accept", func(t *testing.T, s *Service) string {
+			id, dir := projectWithConfig(t, s, "p")
+			gitProject(t, dir)
+			// Its worktree is gone: every guard before the record passes,
+			// and landing it — after the words are recorded — fails.
+			gone := filepath.Join(t.TempDir(), "removed-worktree")
+			recoveredRun(t, s, dir, &runlog.Run{ID: "r-late", ProjectID: id, TaskID: "T-001", Stage: "build", Status: "paused",
+				PendingKind: "gate", Verdict: "PASSED", StartedAt: time.Now().UTC().Format(time.RFC3339),
+				WorktreePath: gone, ExecutionRoot: gone, GateRoot: gone, Branch: "ducklab/T-001-build", BaseSHA: "0123456789abcdef0123456789abcdef01234567"})
+			return "r-late"
+		}, func(s *Service, id string) error {
+			_, err := s.RunAcceptAs(context.Background(), id, "no jsdom", "mcp:opencode")
+			return err
+		}},
+		{"reject", restoreFailingRun, func(s *Service, id string) error {
+			return s.RunRejectAs(context.Background(), id, "not a bug", "mcp:opencode")
+		}},
+		{"abort", restoreFailingRun, func(s *Service, id string) error {
+			return s.RunAbortAs(context.Background(), id, "withdrawn", "mcp:opencode")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.door, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			runID := tc.setup(t, s)
+			err := tc.decide(s, runID)
+			if err == nil {
+				t.Fatalf("%s succeeded; the fixture must make it fail after the words are recorded", tc.door)
+			}
+			if got := decisionEvents(t, s, runID); len(got) != 1 || got[0]["action"] != tc.door {
+				t.Fatalf("decision events = %v, want the recorded %s attempt", got, tc.door)
+			}
+			out := outcomeEvents(t, s, runID)
+			if len(out) != 1 || out[0]["action"] != tc.door || out[0]["outcome"] != "refused" || out[0]["error"] != err.Error() {
+				t.Fatalf("decision outcomes = %v, want one %s refused with %q", out, tc.door, err)
+			}
+			if tc.door == "accept" {
+				detail, _ := s.RunGet(context.Background(), runID)
+				if detail.Run.Accepted || detail.Run.Status != "paused" || detail.Run.PendingKind != "gate" {
+					t.Fatalf("the refused accept moved the run: %+v", detail.Run)
+				}
+			}
+		})
+	}
+}
+
+// restoreFailingRun is a paused build in a git project whose recorded tree
+// snapshot does not exist, so restoring it — after a reject's or abort's
+// words are recorded — fails.
+func restoreFailingRun(t *testing.T, s *Service) string {
+	t.Helper()
+	id, dir := projectWithConfig(t, s, "p")
+	gitProject(t, dir)
+	recoveredRun(t, s, dir, &runlog.Run{ID: "r-late", ProjectID: id, TaskID: "T-001", Stage: "build", Status: "paused",
+		PendingKind: "gate", Verdict: "PASSED", StartedAt: time.Now().UTC().Format(time.RFC3339),
+		TreeSnapshot: "0123456789abcdef0123456789abcdef01234567"})
+	return "r-late"
 }
 
 // B-524: an MCP operator accepted triage r-20261026-183029-kxck with the
