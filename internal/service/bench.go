@@ -194,7 +194,12 @@ func materialise(dir string, task bench.Task) error {
 	// and the run's diff is exactly what the model did. Adding a second commit
 	// here failed with "nothing to commit" and took the whole first bench with
 	// it — five cells, five identical harness errors, no measurement.
-	if err := vcs.New(dir).Init(); err != nil {
+	//
+	// The cell's project config defaults to base_branch=main; HEAD starts on
+	// that same branch rather than the machine's init.defaultBranch, as
+	// project init does (B-467, B-526).
+	base := config.DefaultProject("", "").Git.BaseBranch
+	if err := vcs.New(dir).InitWithIdentityOnBranch("", "", base); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
 	return nil

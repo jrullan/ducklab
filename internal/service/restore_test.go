@@ -17,8 +17,12 @@ import (
 // gitProject turns a bare test dir into a repo with one committed file.
 func gitProject(t *testing.T, dir string) *vcs.Git {
 	t.Helper()
+	// The branch is named, not inherited from init.defaultBranch: acceptance
+	// resolves its line of record as origin/HEAD, else main/master, else the
+	// current branch, so a fixture born on another name accepts onto the
+	// ducklab/T-* checkout instead (B-526). ProjectInit also starts on main.
 	for _, args := range [][]string{
-		{"init"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"init", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
 	} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
