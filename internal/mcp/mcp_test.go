@@ -63,6 +63,7 @@ type fakeEngine struct {
 	lastRosterUnpin     string
 	rosterViews         map[string]map[string]interface{}
 	bugMoveCalls        int
+	edited              []map[string]interface{}
 	adoptedGateProject  string
 	adoptedGateActor    string
 	answerActor         string
@@ -893,6 +894,20 @@ func (f *fakeEngine) BugPromote(projectID, bugID, actor, note string) (map[strin
 func (f *fakeEngine) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
 	f.bugMoveCalls++
 	return map[string]interface{}{"status": status}, nil
+}
+
+func (f *fakeEngine) BugGet(projectID, bugID string) (map[string]interface{}, error) {
+	for _, b := range f.bugs {
+		if b["id"] == bugID {
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("bug not found")
+}
+
+func (f *fakeEngine) BugEdit(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.edited = append(f.edited, req)
+	return map[string]interface{}{"id": bugID}, nil
 }
 
 func (f *fakeEngine) ProjectNext(projectID string) ([]map[string]interface{}, error) {

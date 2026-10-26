@@ -40,6 +40,7 @@ export interface BugBug {
   id?: string;
   needs_triage?: boolean;
   next?: string[];
+  promote_blocker?: string;
   proposal?: BugPortion[];
   reopened?: boolean;
   reporter?: string;

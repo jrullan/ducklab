@@ -613,6 +613,23 @@ func (c *Client) BugPromote(projectID, bugID, actor, note string) (map[string]in
 	return result, err
 }
 
+// BugGet reads one bug's full report.
+func (c *Client) BugGet(projectID, bugID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/bugs/"+bugID, &result)
+	return result, err
+}
+
+// BugEdit changes what a report says — title, body, severity, or the split
+// proposal promote will turn into tasks. A proposal key that is present
+// replaces the stored split (an empty list discards it); an absent one leaves
+// it alone.
+func (c *Client) BugEdit(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.put("/v1/projects/"+projectID+"/bugs/"+bugID, req, &result)
+	return result, err
+}
+
 // BugMove changes a bug's status. The actor signs the audit trail.
 func (c *Client) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
 	var result map[string]interface{}

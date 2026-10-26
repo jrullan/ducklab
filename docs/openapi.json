@@ -124,6 +124,9 @@
             },
             "type": "array"
           },
+          "promote_blocker": {
+            "type": "string"
+          },
           "proposal": {
             "items": {
               "$ref": "#/components/schemas/BugPortion"
