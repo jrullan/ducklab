@@ -2741,7 +2741,7 @@
         ],
         "type": "object"
       },
-      "ServiceBugRequest": {
+      "ServiceBugEditRequest": {
         "properties": {
           "body": {
             "type": "string"
@@ -2751,6 +2751,20 @@
               "$ref": "#/components/schemas/BugPortion"
             },
             "type": "array"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ServiceBugRequest": {
+        "properties": {
+          "body": {
+            "type": "string"
           },
           "reporter": {
             "type": "string"
@@ -6161,7 +6175,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceBugRequest"
+                "$ref": "#/components/schemas/ServiceBugEditRequest"
               }
             }
           },

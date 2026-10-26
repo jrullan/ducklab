@@ -346,7 +346,7 @@ func TestBugEditReportsWhetherPromoteWillTakeTheSplit(t *testing.T) {
 		{Title: "Canvas", Acceptance: []string{"canvas has touch-action: none"}, Owns: []string{"index.html"}},
 		{Title: "Guard", Acceptance: []string{"check.sh allows pointer handlers"}, Owns: []string{"scripts/check.sh"}},
 	}
-	out, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &still})
+	out, err := s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &still})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestBugEditReportsWhetherPromoteWillTakeTheSplit(t *testing.T) {
 		{Title: "Canvas", Acceptance: []string{"canvas has touch-action: none", "Regression test covers pointer drag"}, Owns: []string{"index.html"}},
 		{Title: "Guard", Acceptance: []string{"check.sh allows pointer handlers"}, Owns: []string{"scripts/check.sh"}},
 	}
-	out, err = s.BugEdit(context.Background(), id, "B-001", BugRequest{Proposal: &fixed})
+	out, err = s.BugEdit(context.Background(), id, "B-001", BugEditRequest{Proposal: &fixed})
 	if err != nil {
 		t.Fatal(err)
 	}

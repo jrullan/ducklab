@@ -35,9 +35,27 @@ type BugRequest struct {
 	Severity string `json:"severity"`
 	Reporter string `json:"reporter"`
 	Source   string `json:"source"`
-	// Proposal, on an edit, is the split the person wants promote to make.
-	// A pointer so three requests stay distinct: absent leaves the stored
-	// proposal alone, an empty list discards it, a list replaces it.
+}
+
+// BugEditRequest corrects a report. Every field is a pointer so an absent
+// field and an empty one stay two different requests, at every door.
+//
+// The edit used to share BugRequest's plain strings and guess presence: the
+// body changed only when a body or a title was non-empty. So {"body":""} —
+// clearing a wrong paragraph — answered success and kept the old text, and a
+// title-only edit erased the body (review of #179). The desktop's form always
+// sent both and never noticed; the MCP operator sends what it changes.
+type BugEditRequest struct {
+	// Title, when present and not blank, replaces the title. A blank one is
+	// ignored rather than refused: a report with no title cannot be listed,
+	// and the desktop form has always sent its trimmed field as is.
+	Title *string `json:"title,omitempty"`
+	// Body, when present, replaces the report text — empty included.
+	Body *string `json:"body,omitempty"`
+	// Severity, when present and not blank, must be a known level.
+	Severity *string `json:"severity,omitempty"`
+	// Proposal is the split the person wants promote to make: absent leaves
+	// the stored proposal alone, an empty list discards it, a list replaces it.
 	Proposal *[]bug.Portion `json:"proposal,omitempty"`
 }
 
@@ -1594,7 +1612,7 @@ func promotedTaskTitle(b *store.Bug) string {
 // Only the words. Status, task and duplicate belong to the loop and have their
 // own transitions; letting a form set them would put the loop's rules in two
 // places.
-func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugRequest) (*bug.Bug, error) {
+func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugEditRequest) (*bug.Bug, error) {
 	entry, entryErr := s.registry.Get(projectID)
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
@@ -1608,20 +1626,24 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 	}
 	needsFreshContract := entryErr == nil && bugNeedsRetriage(readBugAudit(entry.Path)[rec.ID])
 	freshContract := false
-	if t := strings.TrimSpace(req.Title); t != "" {
-		rec.Title = t
+	if req.Title != nil {
+		if t := strings.TrimSpace(*req.Title); t != "" {
+			rec.Title = t
+		}
 	}
 	// An empty body is a legitimate edit — someone clearing a wrong paragraph —
-	// so it is only left alone when the field was absent altogether. The title
+	// so it is left alone only when the field was absent altogether. The title
 	// is not: a report with no title cannot be listed.
-	if req.Body != "" || req.Title != "" {
-		rec.Body = strings.TrimSpace(req.Body)
+	if req.Body != nil {
+		rec.Body = strings.TrimSpace(*req.Body)
 	}
-	if sev := strings.ToLower(strings.TrimSpace(req.Severity)); sev != "" {
-		if !bug.ValidSeverity(sev) {
-			return nil, fmt.Errorf("unknown severity %q, want critical, high, normal or low", req.Severity)
+	if req.Severity != nil {
+		if sev := strings.ToLower(strings.TrimSpace(*req.Severity)); sev != "" {
+			if !bug.ValidSeverity(sev) {
+				return nil, fmt.Errorf("unknown severity %q, want critical, high, normal or low", *req.Severity)
+			}
+			rec.Severity = sev
 		}
-		rec.Severity = sev
 	}
 	// The split is the person's to write, correct or discard — the triager
 	// only recommends one. Until promote, that is: the portions became tasks

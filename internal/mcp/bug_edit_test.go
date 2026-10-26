@@ -77,9 +77,8 @@ func TestBugEditTellsASmallModelWhenAndWithWhoseConsent(t *testing.T) {
 	}
 }
 
-// Only what the operator changes reaches the engine — and the engine rewrites
-// the body whenever a title arrives, so a title-only edit carries the current
-// text instead of erasing the report.
+// Only what the operator changes reaches the engine: presence is the contract
+// at every door, so a title-only edit sends no body and the report keeps it.
 func TestBugEditSendsOnlyWhatChangesAndKeepsTheReport(t *testing.T) {
 	eng := &fakeEngine{bugs: []map[string]interface{}{{"id": "B-001", "body": "steps to reproduce"}}}
 	resps := drive(t, eng, initFrame,
@@ -91,8 +90,8 @@ func TestBugEditSendsOnlyWhatChangesAndKeepsTheReport(t *testing.T) {
 	if len(eng.edited) != 3 {
 		t.Fatalf("engine edits = %d, want 3: %#v", len(eng.edited), eng.edited)
 	}
-	if eng.edited[0]["title"] != "sharper title" || eng.edited[0]["body"] != "steps to reproduce" {
-		t.Errorf("title-only edit = %#v, want the current body carried along", eng.edited[0])
+	if _, sent := eng.edited[0]["body"]; eng.edited[0]["title"] != "sharper title" || sent {
+		t.Errorf("title-only edit = %#v, want the title and no body", eng.edited[0])
 	}
 	if _, sent := eng.edited[0]["proposal"]; sent {
 		t.Errorf("an edit without a proposal touched the split: %#v", eng.edited[0])
@@ -140,7 +139,7 @@ func TestBugEditOverMCPUnsticksTheB014Promote(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := svc.BugAdd(context.Background(), project.ID, service.BugRequest{Title: "touch devices cannot drag vertices"}); err != nil {
+	if _, err := svc.BugAdd(context.Background(), project.ID, service.BugRequest{Title: "touch devices cannot drag vertices", Body: "steps to reproduce"}); err != nil {
 		t.Fatal(err)
 	}
 	// The stored proposal exactly as calculator B-014's triage left it.
@@ -178,6 +177,10 @@ func TestBugEditOverMCPUnsticksTheB014Promote(t *testing.T) {
 		callFrame(3, "bug_edit", args(tooMany)),
 		callFrame(4, "bug_edit", args(fixed)),
 		callFrame(5, "bug_promote", args("")),
+		// Review of #179: presence is the contract through every door.
+		callFrame(6, "bug_edit", args(`,"title":"pointer drag broke on touch"`)),
+		callFrame(7, "bug_edit", args(`,"body":"better steps"`)),
+		callFrame(8, "bug_edit", args(`,"body":""`)),
 	)
 	text, isErr := toolResultText(t, resps[1])
 	if !isErr || !strings.Contains(text, "split proposal requires test or coverage work but no portion claims it") || !strings.Contains(text, "bug_edit") {
@@ -194,6 +197,17 @@ func TestBugEditOverMCPUnsticksTheB014Promote(t *testing.T) {
 	text, isErr = toolResultText(t, resps[4])
 	if isErr || !strings.Contains(text, `"tasks"`) {
 		t.Fatalf("promote after edit = %q (error=%v), want the two tasks", text, isErr)
+	}
+	for i, want := range []struct{ title, body string }{
+		{"pointer drag broke on touch", "steps to reproduce"}, // title-only keeps the body
+		{"pointer drag broke on touch", "better steps"},       // body-only keeps the title
+		{"pointer drag broke on touch", ""},                   // {"body":""} clears it
+	} {
+		text, isErr := toolResultText(t, resps[5+i])
+		var got struct{ Title, Body string }
+		if isErr || json.Unmarshal([]byte(text), &got) != nil || got.Title != want.title || got.Body != want.body {
+			t.Errorf("edit %d = %q (error=%v), want title %q body %q", 6+i, text, isErr, want.title, want.body)
+		}
 	}
 }
 

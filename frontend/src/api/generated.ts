@@ -803,9 +803,15 @@ export interface ServiceBudgetView {
   wallclock_escalation_multiplier?: number;
 }
 
-export interface ServiceBugRequest {
+export interface ServiceBugEditRequest {
   body?: string;
   proposal?: BugPortion[];
+  severity?: string;
+  title?: string;
+}
+
+export interface ServiceBugRequest {
+  body?: string;
   reporter?: string;
   severity?: string;
   source?: string;

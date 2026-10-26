@@ -337,7 +337,7 @@ func toolList() []map[string]interface{} {
 				"project_id": str("the project id"),
 				"bug_id":     str("the bug, B-... — not yet promoted (status open or triaged)"),
 				"title":      str("optional: the new one-line title"),
-				"body":       str("optional: the new report text; replaces the old text"),
+				"body":       str("optional: the new report text; replaces the old text (\"\" clears it). Leave it out to keep the text"),
 				"severity":   str("optional: critical | high | normal | low"),
 				"proposal": map[string]interface{}{
 					"type": "array",
@@ -995,19 +995,8 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if _, present := a["proposal"]; len(req) == 0 && !present {
 			return nil, fmt.Errorf("nothing to change; next: give title, body, severity or proposal")
 		}
-		// The engine rewrites the body whenever a title arrives (the desktop's
-		// form always sends both). A title-only edit from an operator must not
-		// erase the report, so the current text rides along.
-		if _, hasTitle := req["title"]; hasTitle {
-			if _, hasBody := req["body"]; !hasBody {
-				current, err := s.eng.BugGet(projectID, bugID)
-				if err != nil {
-					return nil, err
-				}
-				body, _ := current["body"].(string)
-				req["body"] = body
-			}
-		}
+		// Presence is the contract: the engine changes exactly the fields
+		// sent, so a title-only edit keeps the body and {"body":""} clears it.
 		if proposal, present := a["proposal"]; present {
 			if proposal == nil {
 				proposal = []interface{}{}
