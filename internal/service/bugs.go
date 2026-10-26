@@ -534,8 +534,15 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	prior.decisionMu.Lock()
 	defer prior.decisionMu.Unlock()
 	before := prior.snapshotRun()
-	if m := relaunchedByPattern.FindStringSubmatch(before.Resolution); m != nil {
-		return fmt.Errorf("run %s was already relaunched as %s — relaunch that one instead", originalID, m[1])
+	// A compare-and-set on the original's decision (review of #176,
+	// 4381761698): only "another relaunch won" was checked here, so an
+	// accept that took the lock between prepare and claim lost to the
+	// claim — the accepted run's resolution was overwritten and a second
+	// triage started on bugs whose proposals were already applied. Any
+	// decision that consumed the run refuses the claim; the caller then
+	// discards the prepared replacement.
+	if reason := runDecided(before); reason != "" {
+		return fmt.Errorf("run %s was already %s — there is nothing to relaunch", originalID, reason)
 	}
 	resolution := "relaunched as " + replacementID
 	live := before.Status == "running" || before.Status == "paused" || before.Status == "queued"
@@ -573,6 +580,27 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	}
 	w.AppendEvent("human", map[string]interface{}{"action": "relaunched", "detail": resolution})
 	return nil
+}
+
+// runDecided names the decision that already consumed a run, or "" when none
+// has: accepted, relaunched, aborted, or settled (rejected or finished). A
+// run that merely failed on its own is undecided — relaunching it is how a
+// person recovers it. Every decision door asks this under the run's
+// decisionMu, so two decisions cannot both win.
+func runDecided(r *runlog.Run) string {
+	switch {
+	case r == nil:
+		return ""
+	case r.Accepted:
+		return "accepted"
+	case relaunchedByPattern.MatchString(r.Resolution):
+		return relaunchedByPattern.FindString(r.Resolution)
+	case r.Status == "failed" && r.Verdict == "ABORTED":
+		return "aborted"
+	case r.Status == "done":
+		return "settled (" + r.Verdict + ")"
+	}
+	return ""
 }
 
 // restoreUnclaimed puts back a triage whose relaunch claim did not persist.

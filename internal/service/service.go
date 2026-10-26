@@ -4438,7 +4438,17 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
+	// Abort is a decision like accept, reject and relaunch, and takes the
+	// same lock (review of #176): an abort interleaved with a relaunch claim
+	// rewrote the claimed original's resolution, and recovery then dropped
+	// the replacement as unclaimed. A run another decision consumed is not
+	// aborted over it.
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
 	current := rs.snapshotRun()
+	if current.Accepted || relaunchedByPattern.MatchString(current.Resolution) {
+		return fmt.Errorf("run %q was already %s; there is nothing to abort", id, runDecided(current))
+	}
 	wasQueued := current.Status == "queued"
 	rs.wmu.Lock()
 	cancel := rs.cancel
@@ -4775,6 +4785,12 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 	if rs.run.Status == "done" {
 		return nil, fmt.Errorf("run %q is already settled (%s); there is no acceptance decision pending", id, rs.run.Resolution)
+	}
+	// A relaunch or an abort already decided this run (review of #176): an
+	// accept arriving after a triage was relaunched applied proposals the
+	// replacement was re-triaging.
+	if reason := runDecided(rs.run); reason != "" {
+		return nil, fmt.Errorf("run %q was already %s; there is no acceptance decision pending", id, reason)
 	}
 	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
@@ -5366,6 +5382,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))
+	}
+	if reason := runDecided(rs.run); reason != "" && rs.run.Status != "done" {
+		return fmt.Errorf("run %q was already %s; there is nothing to reject", id, reason)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
