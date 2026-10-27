@@ -4426,6 +4426,13 @@ func resumeRequest(run *runlog.Run) RunRequest {
 // reviewer die on exactly its hundredth call and resuming it into the same
 // ceiling.
 func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.Run, error) {
+	return s.RunBudgetLiftAs(ctx, id, kind, "human")
+}
+
+// RunBudgetLiftAs is RunBudgetLift with the lifter named: an operator's lift
+// was recorded "by: human" because the actor the MCP sent never reached
+// here (B-530 audit).
+func (s *Service) RunBudgetLiftAs(ctx context.Context, id, kind, actor string) (*runlog.Run, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -4451,7 +4458,7 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 		// The atomic is what a loop already in flight reads before its next
 		// call; the record is what a resume re-enters with.
 		rs.capLifted.Store(true)
-		data := map[string]interface{}{"kind": kind, "was": was, "by": "human"}
+		data := map[string]interface{}{"kind": kind, "was": was, "by": resumeActor(actor)}
 		if warning := s.smallSeatPairLiftWarning(rs.run); warning != "" {
 			data["warning"] = warning
 			w.AppendEvent("warning", map[string]interface{}{"detail": warning})
@@ -4494,7 +4501,7 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 		rs.run.Budget.Limit.WallclockS = 0
 	}
 	w.AppendEvent("budget_lifted", map[string]interface{}{
-		"kind": kind, "was": was, "by": "human",
+		"kind": kind, "was": was, "by": resumeActor(actor),
 	})
 	// Marshalled under the run's lock: a lift lands while a paused question's
 	// advisor is still writing its advice into PendingData (found by the
@@ -4714,6 +4721,7 @@ func (rs *runState) snapshotRun() *runlog.Run {
 	clone.StageRequest = cloneAnyMap(rs.run.StageRequest)
 	clone.ChainBuild = cloneAnyMap(rs.run.ChainBuild)
 	clone.ResumeNotes = slices.Clone(rs.run.ResumeNotes)
+	clone.ApprovalRequests = slices.Clone(rs.run.ApprovalRequests)
 	if rs.run.Spend != nil {
 		clone.Spend = make(map[string]runlog.DucklingSpend, len(rs.run.Spend))
 		for k, v := range rs.run.Spend {
@@ -5011,27 +5019,11 @@ func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg
 	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
-	if required := humanVerificationIDs(rs.run.PendingData); len(required) > 0 {
-		confirmed := map[int]bool{}
-		for _, id := range options.HumanVerified {
-			confirmed[id] = true
-		}
-		var missing []string
-		for _, id := range required {
-			if !confirmed[id] {
-				missing = append(missing, fmt.Sprint(id))
-			}
-		}
-		if len(missing) > 0 {
-			return nil, fmt.Errorf("manual verification is still required for acceptance slice(s) %s", strings.Join(missing, ", "))
-		}
-		rs.writer.AppendEvent("human_verification_confirmed", map[string]interface{}{
-			"actor": actor, "slices": required,
-		})
-	}
 	// Refusals are decisions about custody and verification, not ephemeral HTTP
 	// errors. Keep their cause and all roots in events.jsonl so a later audit can
 	// establish why no commit landed even after the client has disconnected.
+	// Registered before the manual-verification check so a refused human-only
+	// confirmation is on the record with its real actor too (B-530).
 	defer func() {
 		// An interrupted accept was not refused: nothing was decided, and its
 		// accept_settled event says "interrupted" with the cause (B-529).
@@ -5053,6 +5045,30 @@ func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg
 		})
 		_ = w.WriteState()
 	}()
+	if required := humanVerificationIDs(rs.run.PendingData); len(required) > 0 {
+		confirmed := map[int]bool{}
+		for _, id := range options.HumanVerified {
+			confirmed[id] = true
+		}
+		// "A person verified this by hand" is the person's statement to make.
+		// An agent claiming it was the same false record as B-530's lane
+		// widening; it asks the person through an approval request instead.
+		if len(options.HumanVerified) > 0 && actor != "human" {
+			return nil, fmt.Errorf("manual verification is confirmed by a person; actor %q cannot confirm it — %s", actor, humanOnlyHint)
+		}
+		var missing []string
+		for _, id := range required {
+			if !confirmed[id] {
+				missing = append(missing, fmt.Sprint(id))
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("manual verification is still required for acceptance slice(s) %s", strings.Join(missing, ", "))
+		}
+		rs.writer.AppendEvent("human_verification_confirmed", map[string]interface{}{
+			"actor": actor, "slices": required,
+		})
+	}
 	entry, err := s.entryFor(rs)
 	if err != nil {
 		return nil, err
@@ -5067,7 +5083,7 @@ func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg
 	}
 	if len(options.LaneWidening) > 0 {
 		if actor != "human" {
-			return nil, fmt.Errorf("lane widening requires direct human approval; actor %q may accept the existing contract but may not amend the accepted plan", actor)
+			return nil, fmt.Errorf("lane widening requires direct human approval; actor %q may accept the existing contract but may not amend the accepted plan — %s", actor, humanOnlyHint)
 		}
 		// This is a separate, durable decision made before Accept. If a later
 		// acceptance guard refuses (review dissent, rebase conflict, or another
@@ -5701,7 +5717,7 @@ func (s *Service) RunAnswerWithLane(ctx context.Context, id, questionID, answer 
 // operator could approve the amendment — and an oracle dispute — as a person).
 func (s *Service) RunAnswerWithLaneAs(ctx context.Context, id, questionID, answer string, requested []string, actor string) error {
 	if actor != "" && actor != "human" {
-		return fmt.Errorf("widening a task lane amends the accepted plan; a person must approve it in the desktop, not %s", actor)
+		return fmt.Errorf("widening a task lane amends the accepted plan; a person must approve it in the desktop, not %s — %s", actor, humanOnlyHint)
 	}
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
@@ -5850,7 +5866,7 @@ func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author,
 	}
 	if strings.HasPrefix(questionID, tools.OracleQuestionPrefix) && decider != "" && decider != "human" {
 		rs.wmu.Unlock()
-		return fmt.Errorf("this question disputes the test-first oracle; a person must answer it in the desktop or the CLI, not %s", decider)
+		return fmt.Errorf("this question disputes the test-first oracle; a person must answer it in the desktop or the CLI, not %s — %s", decider, humanOnlyHint)
 	}
 	// The question's text travels with the answer: the id survives only an
 	// exact re-ask, and the replayed prompt needs the words.

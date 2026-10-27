@@ -302,6 +302,38 @@ export interface RedoNote {
   editable: boolean;
 }
 
+/** An agent's ask that the person make a decision only a person may make
+ * (B-530). The person approves or declines it; approved, the decision runs as
+ * the person's and the record keeps both actors. */
+export interface ApprovalRequest {
+  id: string;
+  /** "accept" or "answer". */
+  action: string;
+  /** The agent's why — typically what the person agreed to in chat. */
+  reason: string;
+  pending_kind: string;
+  pending_since?: string;
+  message?: string;
+  lane_widening?: string[];
+  human_verified?: number[];
+  question_id?: string;
+  answer?: string;
+  widen_lane?: string[];
+  requested_by: string;
+  requested_at: string;
+  /** pending | approved (decision in flight) | declined | landed | failed | superseded | interrupted */
+  status: string;
+  decided_by?: string;
+  decided_at?: string;
+  decline_reason?: string;
+  outcome?: string;
+}
+
+export interface ApprovalDecision {
+  request: ApprovalRequest;
+  accept?: AcceptResult;
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -384,6 +416,8 @@ export interface Run {
   /** What the person added when resuming a paused run, oldest first; it rides
    * the run's prompt beside the launch note (B-493). */
   resume_notes?: { note: string; actor?: string; pending_kind?: string; at: string }[];
+  /** Agents' asks for the person's decision on this run, oldest first (B-530). */
+  approval_requests?: ApprovalRequest[];
   /** The actions a person may legally take on this run, in the order to offer
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
@@ -1646,6 +1680,23 @@ export class EngineClient {
   }
   reject(id: string, reason = "") {
     return this.request<void>("POST", `/v1/runs/${id}/reject`, { reason });
+  }
+  /** The person confirms an agent's approval request (B-530): the decision
+   * runs as the person's, recorded with the requesting agent beside it. */
+  approveRequest(runId: string, requestId: string) {
+    return this.request<ApprovalDecision>(
+      "POST",
+      `/v1/runs/${runId}/approval-requests/${requestId}/approve`,
+      {},
+    );
+  }
+  /** The person declines an agent's approval request; nothing is decided. */
+  declineRequest(runId: string, requestId: string, reason = "") {
+    return this.request<ApprovalRequest>(
+      "POST",
+      `/v1/runs/${runId}/approval-requests/${requestId}/decline`,
+      { reason },
+    );
   }
   land(id: string, commitSha: string, note = "") {
     return this.request<void>("POST", `/v1/runs/${id}/land`, { commit_sha: commitSha, note });

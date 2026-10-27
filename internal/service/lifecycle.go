@@ -178,6 +178,11 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			if changed, err := s.reconcileAcceptedRun(rs); err == nil && changed {
 				repaired++
 			}
+			// After the accepted-run repair, so an approval whose accept
+			// landed before the crash reads as landed (B-530).
+			if s.settleInterruptedApprovals(rs) {
+				repaired++
+			}
 
 			if run.Status == "running" || run.Status == "queued" {
 				if err := s.markEngineRestart(rs); err == nil {

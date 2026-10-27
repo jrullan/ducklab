@@ -207,10 +207,51 @@ func Run(args []string) int {
 	}
 }
 
+// interactiveTerminal reports whether a person is at this CLI: stdin and
+// stdout both a terminal. An agent's shell tool runs commands over pipes, so
+// the CLI it runs presents the agent credential (B-530). A seam for tests.
+var interactiveTerminal = func() bool {
+	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
+}
+
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+// cliClient picks the credential for a CLI command (B-530): the person's
+// (human.token) at an interactive terminal, the agents' (engine.json)
+// otherwise. A heuristic, stated as one: an agent that allocates a pty can
+// look interactive. What it rules out is the default path — a piped CLI, the
+// MCP server, a script — being recorded as the person.
+func cliClient(info *daemon.EngineInfo) *engineclt.Client {
+	if interactiveTerminal() {
+		return engineclt.NewHuman(info)
+	}
+	return engineclt.New(info)
+}
+
+// discoverAgentEngine is discoverEngine pinned to the agent credential, for
+// `ducklab mcp serve`: the MCP server is an agent channel whatever terminal
+// it was started from.
+func discoverAgentEngine(noAutostart bool) (*engineclt.Client, error) {
+	c, err := discoverEngine(noAutostart)
+	if err != nil || !c.Human {
+		return c, err
+	}
+	info, err := daemon.ReadEngineJSON()
+	if err != nil {
+		return nil, err
+	}
+	agent := engineclt.New(info)
+	agent.Version = c.Version
+	return agent, nil
+}
+
 func discoverEngine(noAutostart bool) (*engineclt.Client, error) {
 	info, err := daemon.ReadEngineJSON()
 	if err == nil && daemon.IsEngineRunning(info) {
-		return engineclt.New(info), nil
+		return cliClient(info), nil
 	}
 	if noAutostart {
 		return nil, fmt.Errorf("engine not running and auto-start disabled")
@@ -229,10 +270,16 @@ func discoverEngine(noAutostart bool) (*engineclt.Client, error) {
 	}
 	started, err := daemon.WaitReadyWhileAlive(pid, daemon.StartCap)
 	if err != nil {
+		// Two commands auto-starting at once: only one engine may hold the
+		// state directory (B-530 review), so the other exits; its caller waits
+		// for the engine that won and adopts it instead of reporting a failure.
+		if info, rerr := daemon.WaitReady(30 * time.Second); rerr == nil {
+			return cliClient(info), nil
+		}
 		return nil, fmt.Errorf("engine auto-started but did not become ready: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "engine auto-started: pid %d, port %d\n", started.PID, started.Port)
-	return engineclt.New(started), nil
+	return cliClient(started), nil
 }
 
 // printHelp is the engineless map: every noun, one line each. Anything
@@ -328,7 +375,7 @@ func engineCmd(verb string, args []string) int {
 		info, err := daemon.ReadEngineJSON()
 		running := err == nil && daemon.IsEngineRunning(info)
 		if running {
-			client := engineclt.New(info)
+			client := cliClient(info)
 			// Running or queued work dies mid-call on a restart; paused runs
 			// survive by design (I9) and do not block.
 			if !force {
@@ -389,7 +436,7 @@ func ducklingCmd(verb string, args []string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		if verb == "remove" {
 			if len(args) < 1 {
 				fmt.Fprintln(os.Stderr, "usage: ducklab duckling remove <id>")
@@ -409,7 +456,7 @@ func ducklingCmd(verb string, args []string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		ducklings, err := client.DucklingList()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -430,7 +477,7 @@ func ducklingCmd(verb string, args []string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		caps, err := engineclt.New(info).DucklingProbe(args[0])
+		caps, err := cliClient(info).DucklingProbe(args[0])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 8
@@ -465,7 +512,7 @@ func ducklingCmd(verb string, args []string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		result, err := client.DucklingTest(id, prompt)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -487,7 +534,7 @@ func rosterCmd(verb string, args []string, repo string) int {
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 	projectID, code := resolveProjectID(client, repo)
 	if code != 0 {
 		return code
@@ -590,7 +637,7 @@ func reportCmd(args []string, repo string) int {
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 	projectID, code := resolveProjectID(client, repo)
 	if code != 0 {
 		return code
@@ -814,7 +861,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		run, err := client.RunGet(args[0])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -832,7 +879,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		diff, tests, warning, err := engineclt.New(info).RunDiff(args[0])
+		diff, tests, warning, err := cliClient(info).RunDiff(args[0])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
@@ -879,7 +926,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		// The Accept gate offers the same plan amendment as a question does
 		// (#143), and the CLI could not take it either (B-484's class): a
 		// refused accept left the person only "revert those edits".
@@ -941,7 +988,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		if landedSHA != "" {
 			if err := client.RunLand(args[0], landedSHA, reason); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -966,7 +1013,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		if err := client.RunAbort(args[0]); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
@@ -1013,7 +1060,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		// B-484: r-20261002-184627-suwe offered a lane widening, the person
 		// answered "Amend T-290 Owns to include ..." in text, and the run
 		// resumed with its lane unchanged — then died refusing the edits the
@@ -1063,7 +1110,7 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		// Attaching to a run started elsewhere is the same code path as
 		// waiting on one you started: the engine, not the CLI, owns the run.
-		return followCurrentRun(engineclt.New(info), args[0])
+		return followCurrentRun(cliClient(info), args[0])
 	case "resume":
 		runID, note, ok := parseResumeArgs(args)
 		if !ok {
@@ -1075,7 +1122,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		client := engineclt.New(info)
+		client := cliClient(info)
 		run, err := client.RunResume(runID, note, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1093,7 +1140,7 @@ func runCmd(verb string, args []string, repo string) int {
 			fmt.Fprintln(os.Stderr, "engine not running")
 			return 9
 		}
-		run, err := engineclt.New(info).RunBudgetLift(args[0], args[1], "human")
+		run, err := cliClient(info).RunBudgetLift(args[0], args[1], "human")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
@@ -1286,7 +1333,7 @@ func runStart(taskID, mode, note string, dryRun, yes, noWait, noStream bool, rep
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 	// Find project by path
 	projects, err := client.ProjectList()
 	if err != nil {

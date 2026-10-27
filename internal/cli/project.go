@@ -77,7 +77,7 @@ func connect() (*engineclt.Client, error) {
 	if err != nil || !daemon.IsEngineRunning(info) {
 		return nil, fmt.Errorf("engine not running; start with: ducklab-engine")
 	}
-	c := engineclt.New(info)
+	c := cliClient(info)
 	c.Version = Version
 	return c, nil
 }

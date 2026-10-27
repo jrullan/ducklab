@@ -388,6 +388,10 @@ export function actorPhrase(actor: string): string {
   const a = actor.trim();
   if (a === "" || a === "human") return "the person";
   if (a.startsWith("mcp:")) return `the MCP operator ${a}`;
+  // B-530: the engine names an agent credential that did not say which agent
+  // it is "agent" — including one that claimed to be "human".
+  if (a === "agent") return "an agent";
+  if (a.startsWith("agent:")) return `the agent ${a.slice("agent:".length)}`;
   return a;
 }
 

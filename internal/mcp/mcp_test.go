@@ -20,6 +20,8 @@ type fakeEngine struct {
 	// acceptResult, when set, is what RunAcceptAs answers (B-529).
 	acceptResult        map[string]interface{}
 	lastRunReq          map[string]interface{}
+	approvalRun         string
+	approvalReq         map[string]interface{}
 	images              []string
 	settled             []string
 	extended            []string
@@ -210,6 +212,10 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 func (f *fakeEngine) ChatSwitch(id, duckling, actor string) (map[string]interface{}, error) {
 	f.chatSwitch = []string{id, duckling, actor}
 	return map[string]interface{}{"id": id, "roster": map[string]interface{}{"consultant": duckling}}, nil
+}
+func (f *fakeEngine) ApprovalRequestFile(runID string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.approvalRun, f.approvalReq = runID, req
+	return map[string]interface{}{"id": "ar-1", "status": "pending", "requested_by": req["actor"]}, nil
 }
 func (f *fakeEngine) RunAnswerAs(_, _, _, actor string) error {
 	f.answerActor = actor
@@ -1421,11 +1427,18 @@ func TestChatSwitchIsAttributedToTheOperator(t *testing.T) {
 
 // B-484: the CLI gained the human door that widens a task lane. The MCP
 // operator is a model, and widening a lane amends the accepted plan — a
-// person's approval — so this surface must have no way to ask for it: no
-// engine method that sends widen_lane or lane_widening, none of the human
-// (actor-less) answer/accept calls, and no tool argument that names a lane.
-// The engine also refuses a non-human widening (engineapi
+// person's approval — so this surface must have no way to TAKE it: no engine
+// method that sends widen_lane or lane_widening, none of the human
+// (actor-less) answer/accept calls, and no deciding tool argument that names
+// a lane. The engine also refuses a non-human widening (engineapi
 // TestALaneWideningAnswerCarriesItsActor); this keeps the door shut here too.
+//
+// B-530 flipped one half of this: the operator may now ASK. Refused, with
+// the person's agreement in chat and no door to carry it, an operator read
+// the engine token and impersonated the person. approval_request names the
+// lane paths it asks the person to approve; it decides nothing, and only the
+// person's credential can approve it. It is the one tool allowed lane
+// arguments.
 func TestOperatorCannotWidenALane(t *testing.T) {
 	engine := reflect.TypeOf((*Engine)(nil)).Elem()
 	for i := 0; i < engine.NumMethod(); i++ {
@@ -1444,6 +1457,9 @@ func TestOperatorCannotWidenALane(t *testing.T) {
 		tool := tl.(map[string]interface{})
 		schema, _ := tool["inputSchema"].(map[string]interface{})
 		props, _ := schema["properties"].(map[string]interface{})
+		if tool["name"] == "approval_request" {
+			continue
+		}
 		for prop := range props {
 			if strings.Contains(prop, "lane") {
 				t.Errorf("tool %v takes %q: an operator could ask to widen a lane", tool["name"], prop)

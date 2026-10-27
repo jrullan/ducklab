@@ -64,10 +64,10 @@ func (s *Shell) RestartEngine() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.conn = engineclt.New(info)
+	s.conn = engineclt.NewHuman(info)
 	return map[string]string{
 		"baseUrl": fmt.Sprintf("http://127.0.0.1:%d", info.Port),
-		"token":   info.Token,
+		"token":   s.conn.Token,
 		"version": info.Version,
 	}, nil
 }
@@ -91,10 +91,10 @@ func (s *Shell) ReconnectEngine() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no healthy engine to reconnect to (%v) — start one, or use Restart engine", err)
 	}
-	s.conn = engineclt.New(info)
+	s.conn = engineclt.NewHuman(info)
 	return map[string]string{
 		"baseUrl": fmt.Sprintf("http://127.0.0.1:%d", info.Port),
-		"token":   info.Token,
+		"token":   s.conn.Token,
 		"version": info.Version,
 	}, nil
 }

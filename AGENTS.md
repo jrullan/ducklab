@@ -50,7 +50,12 @@ and attributed (`approved_by: mcp:<client>`, never "human"). The engine's
 
 The HTTP contract is `docs/openapi.json`, served live at `/v1/openapi.json`;
 the engine binds loopback only with a bearer token from
-`~/.local/state/ducklab/engine.json`.
+`~/.local/state/ducklab/engine.json`. That token is the **agents'**
+credential: whatever actor a request names, the engine never records it as
+"human". A decision only a person may make (a lane widening, manual
+verification, an oracle dispute) is asked for with `approval_request`; the
+person confirms it in the desktop. Do not use the person's credential
+(`human.token`) — see `docs/decisions/0010-actor-from-credential.md`.
 
 Found a defect while working here? File it on the bug board rather than
 fixing it silently — triage → promote → task → build → accept is the paper

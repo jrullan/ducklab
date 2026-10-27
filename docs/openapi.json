@@ -1082,6 +1082,14 @@
         ],
         "type": "object"
       },
+      "EngineapideclineRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "EngineapidiffResponse": {
         "properties": {
           "diff": {
@@ -1182,6 +1190,9 @@
       },
       "EngineapiliftRequest": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "kind": {
             "type": "string"
           }
@@ -1590,6 +1601,83 @@
           "tokens",
           "unverified",
           "wallclock_ms"
+        ],
+        "type": "object"
+      },
+      "RunlogApprovalRequest": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "decline_reason": {
+            "type": "string"
+          },
+          "human_verified": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lane_widening": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "pending_kind": {
+            "type": "string"
+          },
+          "pending_since": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_at": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "widen_lane": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "pending_kind",
+          "reason",
+          "requested_at",
+          "requested_by",
+          "status"
         ],
         "type": "object"
       },
@@ -2077,6 +2165,12 @@
           "agent_turns": {
             "type": "integer"
           },
+          "approval_requests": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogApprovalRequest"
+            },
+            "type": "array"
+          },
           "autonomy": {
             "type": "string"
           },
@@ -2555,6 +2649,65 @@
           "capability",
           "command",
           "evidence"
+        ],
+        "type": "object"
+      },
+      "ServiceApprovalDecision": {
+        "properties": {
+          "accept": {
+            "$ref": "#/components/schemas/ServiceAcceptResult"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RunlogApprovalRequest"
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "type": "object"
+      },
+      "ServiceApprovalRequestInput": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "human_verified": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "lane_widening": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "widen_lane": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "reason"
         ],
         "type": "object"
       },
@@ -8955,6 +9108,150 @@
           }
         ],
         "summary": "Answer a pending question"
+      }
+    },
+    "/v1/runs/{id}/approval-requests": {
+      "post": {
+        "operationId": "ApprovalRequestFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceApprovalRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogApprovalRequest"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "File an approval request: an agent asks the person to make a human-only decision (accept with lane widening or manual verification, an oracle answer)"
+      }
+    },
+    "/v1/runs/{id}/approval-requests/{req}/approve": {
+      "post": {
+        "operationId": "ApprovalRequestApprove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "req",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceApprovalDecision"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The person confirms an approval request; the decision runs as human and records both actors. Person's credential only"
+      }
+    },
+    "/v1/runs/{id}/approval-requests/{req}/decline": {
+      "post": {
+        "operationId": "ApprovalRequestDecline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "req",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapideclineRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogApprovalRequest"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The person declines an approval request; nothing is decided. Person's credential only"
       }
     },
     "/v1/runs/{id}/brief": {

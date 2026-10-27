@@ -35,6 +35,7 @@ import { documentLabel, runLabel } from "../lib/runview";
 import { retryRoute, reviseRun, revisesDocument, type RevisionNote } from "../lib/retry";
 import { ACCEPT_VERIFYING_LABEL, acceptAndSettle, acceptingLabel } from "../lib/accept";
 import { VisualCheck } from "../components/VisualCheck";
+import { ApprovalRequests } from "../components/ApprovalRequests";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
 
@@ -1611,6 +1612,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       </header>
 
       {decisionSurface}
+
+      {/* B-530: what agents asked the person to decide on this run — pending
+          ones with Approve/Decline, decided ones with how they ended. */}
+      {!!run.approval_requests?.length && (
+        <div className="m-2 rounded-card border border-hairline p-3">
+          <ApprovalRequests client={client} run={run} />
+        </div>
+      )}
 
       {/* Breathing room so the first card clears the pinned header's shadow
           instead of peeking out cut in half. */}

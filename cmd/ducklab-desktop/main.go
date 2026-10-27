@@ -46,7 +46,10 @@ func main() {
 	}
 
 	notifier := notifications.New()
-	shell := &Shell{notifier: notifier, enginePath: enginePath, conn: engineclt.New(info)}
+	// The desktop is the person's channel: it presents human.token, never
+	// engine.json's agent credential (B-530). The webview gets the same one.
+	info = daemon.AsHuman(info)
+	shell := &Shell{notifier: notifier, enginePath: enginePath, conn: engineclt.NewHuman(info)}
 	// Env drift: an adopted engine may lack a provider key THIS process has
 	// (the engine is a daemon by design; it may predate the unlocked
 	// keyring). Names only — never values — so the frontend can open the

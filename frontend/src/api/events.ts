@@ -423,6 +423,12 @@ export const KNOWN_EVENT_TYPES = [
   // words are recorded before the door acts, so until this arrives the
   // decision is an attempt (second review of #177).
   "decision_outcome",
+  // B-530: an agent asked for a decision only the person may make; the
+  // person granted or declined it; what the granted decision did.
+  "approval_requested",
+  "approval_granted",
+  "approval_declined",
+  "approval_resolved",
   // An advisor auto-answer is an operator-facing correction opportunity.
   "notification",
   "human_needed",

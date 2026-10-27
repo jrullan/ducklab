@@ -459,7 +459,7 @@ func TestAcceptWorktreeRefusesInterruptedCleanCheckoutReproduction(t *testing.T)
 	// The engine's own cancellation, as shutdown's sweep issues it — without
 	// the shutdown flag, which would also refuse the retry below.
 	rs.cancelAccept(errCauseShutdown)
-	err := within(t, accepting, "the interrupted accept's outcome").err
+	err := awaitWithin(t, accepting, "the interrupted accept's outcome").err
 	if !errors.Is(err, ErrDecisionInterrupted) || !strings.Contains(err.Error(), "clean-checkout reproduction") {
 		t.Fatalf("accept error = %v, want an interrupted clean-checkout reproduction", err)
 	}
@@ -495,7 +495,7 @@ func TestAcceptWorktreeRefusesInterruptedCleanCheckoutReproduction(t *testing.T)
 	retry := acceptAsync(s, context.Background(), run.ID, "retry after interruption")
 	gate.awaitStart(t)
 	gate.open(t)
-	if got := within(t, retry, "the retried accept"); got.err != nil {
+	if got := awaitWithin(t, retry, "the retried accept"); got.err != nil {
 		t.Fatalf("retry after interrupted reproduction: %v", got.err)
 	}
 }

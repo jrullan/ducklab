@@ -17,6 +17,12 @@ func ActorPhrase(actor string) string {
 		return "the person"
 	case strings.HasPrefix(a, "mcp:"):
 		return "the MCP operator " + a
+	case a == "agent":
+		// The engine's name for an agent credential that did not say which
+		// agent it is — including one that claimed to be "human" (B-530).
+		return "an agent"
+	case strings.HasPrefix(a, "agent:"):
+		return "the agent " + strings.TrimPrefix(a, "agent:")
 	default:
 		return a
 	}

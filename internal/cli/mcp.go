@@ -15,7 +15,7 @@ import (
 // connects the model on stdin/stdout to the engine on loopback. Logs go to
 // stderr — stdout belongs to the protocol.
 func mcpCmd(verb string, noAutostart bool) int {
-	return mcpCmdWith(verb, noAutostart, os.Stdin, os.Stdout, discoverEngine)
+	return mcpCmdWith(verb, noAutostart, os.Stdin, os.Stdout, discoverAgentEngine)
 }
 
 func mcpCmdWith(verb string, noAutostart bool, in io.Reader, out io.Writer, discover func(bool) (*engineclt.Client, error)) int {

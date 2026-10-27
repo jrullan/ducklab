@@ -71,7 +71,7 @@ func fifoStep(t *testing.T, what string, step func() error) {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- step() }()
-	if err := within(t, done, what); err != nil {
+	if err := awaitWithin(t, done, what); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -106,9 +106,9 @@ func heldAcceptRun(t *testing.T, runID string) (*Service, *runlog.Run, *heldGate
 	return s, run, gate, dir
 }
 
-// within fails the test if ch does not deliver. It is a failure bound, not
+// awaitWithin fails the test if ch does not deliver. It is a failure bound, not
 // synchronization: every correct path delivers through a rendezvous above.
-func within[T any](t *testing.T, ch <-chan T, what string) T {
+func awaitWithin[T any](t *testing.T, ch <-chan T, what string) T {
 	t.Helper()
 	select {
 	case v := <-ch:
@@ -184,7 +184,7 @@ func TestAcceptOutlivesItsCallerAndARetryJoinsIt(t *testing.T) {
 	first := acceptAsync(s, caller, run.ID, "the suite passes out of band")
 	gate.awaitStart(t)
 	hangUp()
-	got := within(t, first, "the abandoned accept's answer")
+	got := awaitWithin(t, first, "the abandoned accept's answer")
 	if got.err != nil || got.res == nil || !got.res.InProgress || got.res.CommitSHA != "" {
 		t.Fatalf("abandoned accept = %+v, %v; want in_progress with no commit", got.res, got.err)
 	}
@@ -206,14 +206,14 @@ func TestAcceptOutlivesItsCallerAndARetryJoinsIt(t *testing.T) {
 	// this test holds shut.
 	rejected := make(chan error, 1)
 	go func() { rejected <- s.RunRejectAs(context.Background(), run.ID, "", "human") }()
-	if err := within(t, rejected, "reject answering during the accept"); err == nil || !strings.Contains(err.Error(), "in progress") {
+	if err := awaitWithin(t, rejected, "reject answering during the accept"); err == nil || !strings.Contains(err.Error(), "in progress") {
 		t.Fatalf("reject during the accept = %v; want a refusal naming the accept in progress", err)
 	}
 
 	// A caller that waits joins the same accept and sees it land.
 	waiter := acceptAsync(s, context.Background(), run.ID, "")
 	gate.open(t)
-	landed := within(t, waiter, "the joined accept's outcome")
+	landed := awaitWithin(t, waiter, "the joined accept's outcome")
 	if landed.err != nil || landed.res == nil || landed.res.CommitSHA == "" {
 		t.Fatalf("accept did not land after its caller left: %+v, %v", landed.res, landed.err)
 	}
@@ -248,10 +248,10 @@ func TestAbortDuringAcceptReplayCancelsItAsInterrupted(t *testing.T) {
 	gate.awaitStart(t)
 	aborted := make(chan error, 1)
 	go func() { aborted <- s.RunAbortAs(context.Background(), run.ID, "", "human") }()
-	if err := within(t, aborted, "abort returning"); err != nil {
+	if err := awaitWithin(t, aborted, "abort returning"); err != nil {
 		t.Fatalf("abort: %v", err)
 	}
-	got := within(t, accept, "the accept's outcome")
+	got := awaitWithin(t, accept, "the accept's outcome")
 	if !errors.Is(got.err, ErrDecisionInterrupted) || !strings.Contains(got.err.Error(), "aborted") {
 		t.Fatalf("accept after abort = %+v, %v; want ErrDecisionInterrupted naming the abort", got.res, got.err)
 	}
@@ -289,7 +289,7 @@ func TestShutdownDuringAcceptReplayLeavesTheGateUntouched(t *testing.T) {
 	if err := s.PauseAllRuns(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	got := within(t, accept, "the accept's outcome")
+	got := awaitWithin(t, accept, "the accept's outcome")
 	if !errors.Is(got.err, ErrDecisionInterrupted) || !strings.Contains(got.err.Error(), "shutting down") {
 		t.Fatalf("accept after shutdown = %+v, %v; want ErrDecisionInterrupted naming the shutdown", got.res, got.err)
 	}
@@ -323,7 +323,7 @@ func TestAcceptRefusedByTeardownIsNeverAnsweredInProgress(t *testing.T) {
 
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := within(t, acceptAsync(s, gone, runID, ""), "the accept's answer")
+	got := awaitWithin(t, acceptAsync(s, gone, runID, ""), "the accept's answer")
 	var finishing *RunFinishingError
 	if !errors.As(got.err, &finishing) {
 		t.Fatalf("accept while the worker tears down = %+v, %v; want the RunFinishingError itself, never in_progress", got.res, got.err)
@@ -351,7 +351,7 @@ func TestAcceptStartingDuringShutdownIsRefused(t *testing.T) {
 	beforeAcceptStart = func(*runState) { _ = s.PauseAllRuns(context.Background()) }
 	t.Cleanup(func() { beforeAcceptStart = func(*runState) {} })
 
-	got := within(t, acceptAsync(s, context.Background(), run.ID, ""), "the accept's answer")
+	got := awaitWithin(t, acceptAsync(s, context.Background(), run.ID, ""), "the accept's answer")
 	if !errors.Is(got.err, ErrDecisionInterrupted) || !strings.Contains(got.err.Error(), "shutting down") {
 		t.Fatalf("accept racing shutdown = %+v, %v; want it refused as interrupted by the shutdown", got.res, got.err)
 	}
@@ -384,7 +384,7 @@ func TestLastAcceptIsTheSameSettlementFromMemoryAndFromTheLog(t *testing.T) {
 	accepting := acceptAsync(s, context.Background(), run.ID, "")
 	gate.awaitStart(t)
 	gate.open(t)
-	got := within(t, accepting, "the accept")
+	got := awaitWithin(t, accepting, "the accept")
 	if got.err != nil || got.res.CommitSHA == "" {
 		t.Fatalf("accept: %+v, %v", got.res, got.err)
 	}
