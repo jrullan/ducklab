@@ -65,6 +65,13 @@ export interface RunsState {
    * verified or refuted a duckling's vision, so every surface holding the
    * fleet's vision_status refetches it. */
   fleetEpoch: number;
+  /** Moves on every bulk replacement of the run list (setRuns: the
+   * reconnect and overflow refresh, a project switch). A list payload does
+   * not carry accept_in_progress / last_accept, so an accept still verifying
+   * refetches its run on this — the only way an accept answered in_progress
+   * settles when the stream that would have carried accept_settled dropped
+   * it (review of #181). */
+  runsEpoch: number;
 
   applyEvent: (e: DucklabEvent) => void;
   /** Applies a frame's worth of streamed text in one update (AC-33). */
@@ -161,6 +168,7 @@ export const useRuns = create<RunsState>((set) => ({
   needsResync: false,
   resyncEpoch: 0,
   fleetEpoch: 0,
+  runsEpoch: 0,
 
   applyEvent: (e) =>
     set((state) => {
@@ -372,6 +380,7 @@ export const useRuns = create<RunsState>((set) => ({
     set((state) => ({
       ...state,
       runs: Object.fromEntries(list.map((r) => [r.id, r])),
+      runsEpoch: state.runsEpoch + 1,
     })),
 
   setRun: (run) =>

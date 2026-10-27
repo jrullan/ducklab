@@ -27,7 +27,7 @@ export class AcceptSettledError extends Error {
 type AcceptArgs = Parameters<EngineClient["accept"]>;
 
 export async function acceptAndSettle(
-  client: Pick<EngineClient, "accept">,
+  client: Pick<EngineClient, "accept" | "run">,
   ...args: AcceptArgs
 ): Promise<AcceptResult> {
   const runId = args[0];
@@ -45,11 +45,14 @@ export async function acceptAndSettle(
     return res;
   }
   useRuns.getState().acceptInProgress(runId);
-  return settled(runId);
+  return settled(client, runId);
 }
 
-/** Resolves when the run's accept leaves pending, from the stream. */
-function settled(runId: string): Promise<AcceptResult> {
+/** Resolves when the run's accept leaves pending: from the stream's
+ * accept_settled, or — when a reconnect or overflow replaced the run list
+ * instead (review of #181) — from the run read it prompts. Whichever view
+ * started the accept, the settlement does not depend on it being open. */
+function settled(client: Pick<EngineClient, "run">, runId: string): Promise<AcceptResult> {
   return new Promise((resolve, reject) => {
     const check = (): boolean => {
       const state = useRuns.getState();
@@ -72,8 +75,27 @@ function settled(runId: string): Promise<AcceptResult> {
       return false;
     };
     if (check()) return;
-    const unsubscribe = useRuns.subscribe(() => {
-      if (check()) unsubscribe();
+    let fetching = false;
+    const refetch = () => {
+      if (fetching) return;
+      fetching = true;
+      client
+        .run(runId)
+        .then((d) => useRuns.getState().setRun(d.run))
+        .catch(() => {})
+        .finally(() => {
+          fetching = false;
+        });
+    };
+    const unsubscribe = useRuns.subscribe((state, prev) => {
+      if (check()) {
+        unsubscribe();
+        return;
+      }
+      // A bulk replacement (setRuns) or a resync request: the stream may
+      // have dropped accept_settled, and the list does not carry the
+      // outcome. The run read does; setRun settles from it.
+      if (state.runsEpoch !== prev.runsEpoch || state.resyncEpoch !== prev.resyncEpoch) refetch();
     });
   });
 }

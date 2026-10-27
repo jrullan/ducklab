@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useRuns } from "../store/runs";
 import { acceptAndSettle, acceptingLabel, AcceptSettledError, ACCEPT_VERIFYING_LABEL } from "./accept";
 import { buildTurns, decisionLabel } from "./runview";
-import type { AcceptResult, Run } from "../api/client";
+import type { AcceptResult, EngineClient, Run } from "../api/client";
 
 const paused: Run = {
   id: "r-1", project_id: "p", stage: "build", mode: "solo", task_id: "T-004",
@@ -13,7 +13,9 @@ beforeEach(() => {
   useRuns.setState({ runs: { "r-1": paused }, events: {}, deltas: {}, reasoning: {}, acceptState: {}, needsResync: false, connection: "open" });
 });
 
-const answering = (res: AcceptResult) => ({ accept: async () => res });
+// No run read unless a test gives one: these settle through the stream.
+const answering = (res: AcceptResult) =>
+  ({ accept: async () => res, run: () => new Promise(() => {}) }) as unknown as Pick<EngineClient, "accept" | "run">;
 
 // B-529: ti36xpro's suite outlived the request that accepted it. The engine
 // now answers in_progress and keeps going; the desktop must keep saying
