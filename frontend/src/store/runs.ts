@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Run } from "../api/client";
+import type { ApprovalRequest, Run } from "../api/client";
 import type { DucklabEvent, ConnectionState } from "../api/events";
 
 /** One run's spend so far, as the engine reports it while the run is going. */
@@ -234,6 +234,12 @@ export const useRuns = create<RunsState>((set) => ({
           // and Now's inbox count — outlived the click that answered them.
           const { pending_kind: _pk, pending_since: _ps, pending_data: _pd, next: _n, failure: _f, ...resumed } = run;
           runs = { ...runs, [runId]: { ...resumed, status: "running" } };
+        } else if (APPROVAL_EVENTS.has(e.type) && isApprovalRequest(e.data?.request)) {
+          // B-530: every approval event carries the whole request as it now
+          // stands, so the run's list — and Now's — follows without a
+          // refetch: a request appears the moment an agent files it and
+          // leaves the pending list the moment the person answers.
+          runs = { ...runs, [runId]: { ...run, approval_requests: upsertApproval(run.approval_requests, e.data.request) } };
         } else if (e.type === "consultant_switched" && typeof e.data?.to === "string" && e.data.to) {
           // B-513: the seat moved. Every composer reads the consultant from
           // the record, so the record must follow without a refetch — or the
@@ -371,6 +377,30 @@ export const useRuns = create<RunsState>((set) => ({
 }));
 
 /** Runs waiting on a person, newest wait first — the human-gate inbox. */
+const APPROVAL_EVENTS = new Set(["approval_requested", "approval_granted", "approval_declined", "approval_resolved"]);
+
+function isApprovalRequest(v: unknown): v is ApprovalRequest {
+  return !!v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string";
+}
+
+/** Replaces the request with the same id, or appends a new one. */
+export function upsertApproval(list: ApprovalRequest[] | undefined, req: ApprovalRequest): ApprovalRequest[] {
+  const cur = list ?? [];
+  return cur.some((r) => r.id === req.id) ? cur.map((r) => (r.id === req.id ? req : r)) : [...cur, req];
+}
+
+/** Every request still waiting for the person, across runs, oldest first,
+ * each with its run (B-530). */
+export function pendingApprovals(runs: Record<string, Run>): { run: Run; request: ApprovalRequest }[] {
+  const out: { run: Run; request: ApprovalRequest }[] = [];
+  for (const run of Object.values(runs)) {
+    for (const request of run.approval_requests ?? []) {
+      if (request.status === "pending") out.push({ run, request });
+    }
+  }
+  return out.sort((a, b) => (a.request.requested_at ?? "").localeCompare(b.request.requested_at ?? ""));
+}
+
 export function pendingForHuman(runs: Record<string, Run>): Run[] {
   return Object.values(runs)
     // Chat is a conversation, not a human-gated run. In particular, an ended

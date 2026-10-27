@@ -48,6 +48,7 @@ var notInTheDesktop = map[string]string{
 	"POST /v1/shutdown":                                   "the Go shell reaches it through engineclt during a supervised restart; the webview itself still cannot stop the engine it is standing in",
 	"GET /v1/projects/{id}/bugs/{bug}/attachments/{name}": "reached by client.bugAttachmentUrl through a raw authenticated fetch: the bytes become a blob URL for <img>, which the JSON request helper cannot produce",
 	"POST /v1/projects/{id}/artifacts/{kind}/lint":        "CLI and MCP grammar preflight unblock hand-written oracles; the Documents editor action is tracked by B-356",
+	"POST /v1/runs/{id}/approval-requests":                "an agent's door (MCP approval_request): the person does not ask themselves, they decide directly — the requests it files ARE shown in the desktop, with approve/decline, on the run and in Now (B-530)",
 }
 
 func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {

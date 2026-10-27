@@ -56,7 +56,7 @@ func benchCmd(args []string, repo string) int {
 		return 9
 	}
 
-	client := engineclt.New(info)
+	client := cliClient(info)
 	fmt.Fprintf(os.Stderr, "running suite %s: %d duckling(s) x %d mode(s) x every task — this takes a while\n",
 		suite, len(ducklings), max(1, len(modes)))
 

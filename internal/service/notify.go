@@ -39,6 +39,12 @@ func (s *Service) startNotifier() {
 		"failure_streak":  true,
 		"repetition_loop": true,
 		"budget_pause":    true,
+		// B-530: an agent asked for the person's decision, and how the
+		// person answered — the asking agent's platform wakes it on either.
+		"approval_requested": true,
+		"approval_granted":   true,
+		"approval_declined":  true,
+		"approval_resolved":  true,
 	}
 	if s.bus == nil {
 		return

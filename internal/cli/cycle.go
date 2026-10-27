@@ -538,7 +538,7 @@ func project(repo string) (*engineclt.Client, string, int) {
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return nil, "", 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 	id, code := resolveProjectID(client, repo)
 	return client, id, code
 }

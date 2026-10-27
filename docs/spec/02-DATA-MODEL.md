@@ -872,6 +872,10 @@ restricted to the current user. It contains a live bearer token, so it is
 **state, not config** — never in a config directory, never in a repo, never
 logged.
 
+Its token is the agents' credential. The person's credential lives beside it
+in `human.token` (mode `0600`, same lifecycle), read by the desktop and an
+interactive CLI only (B-530, `07-ENGINE-API.md §1`).
+
 A stale `engine.json` whose pid is dead is deleted by the next client that
 notices, which then proceeds with auto-start.
 

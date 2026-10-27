@@ -12,7 +12,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Bug, Duckling, EngineClient, NextStep, ProjectLifecycle, Run, Task, RosterEntry, TraceError } from "../api/client";
 import { LifecycleStrip } from "../components/LifecycleStrip";
-import { useRuns, pendingForHuman } from "../store/runs";
+import { useRuns, pendingForHuman, pendingApprovals } from "../store/runs";
+import { PendingApprovals } from "../components/ApprovalRequests";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { reviseRun, revisesDocument } from "../lib/retry";
@@ -178,7 +179,10 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const quiet =
     waiting.length === 0 && !standalonePlan && failures.length === 0 && toVerify.length === 0 && idle.length === 0;
   const waitingCount = waiting.length + (standalonePlan ? 1 : 0);
-  const attentionCount = waitingCount + toVerify.length + failures.length + idle.length;
+  // B-530: an agent waiting on the person's approval is a decision like any
+  // gate — counted, and listed first.
+  const approvals = pendingApprovals(runs);
+  const attentionCount = waitingCount + approvals.length + toVerify.length + failures.length + idle.length;
 
   // The launcher seeds its seats from the PROJECT's resolved roster for the
   // mode it will run, never from the global saved line-up: a global default
@@ -259,6 +263,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
             <span className="font-medium text-good" data-testid="now-clear">✓ No decisions waiting</span>
           ) : (
             <>
+              {approvals.length > 0 && <span><strong className="font-medium text-ink" data-testid="now-approvals-count">{approvals.length}</strong> approval {approvals.length === 1 ? "request" : "requests"}</span>}
               {waitingCount > 0 && <span><strong className="font-medium text-ink" data-testid="now-waiting-count">{waitingCount}</strong> waiting for you</span>}
               {toVerify.length > 0 && <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>}
               {failures.length > 0 && <span><strong className="font-medium text-critical">{failures.length}</strong> failed</span>}
@@ -282,6 +287,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           onChanges={() => void client.artifactDiscard(projectId, "plan").then(() => setPlan(null)).catch(() => {})}
         />
       )}
+
+      <PendingApprovals client={client} items={approvals} />
 
       {waiting.length > 0 && (
         <section data-testid="now-waiting">

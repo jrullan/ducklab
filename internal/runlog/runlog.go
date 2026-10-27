@@ -88,6 +88,9 @@ type Run struct {
 	// launched with and what it was told later (B-493: TI-36X T-014 paused
 	// on an error whose fix the person knew, and resume had no way to say it).
 	ResumeNotes []ResumeNote `json:"resume_notes,omitempty"`
+	// ApprovalRequests are agents' asks for a person's decision on this run,
+	// oldest first, with how each ended (B-530).
+	ApprovalRequests []ApprovalRequest `json:"approval_requests,omitempty"`
 	// PriorAcceptedSHA identifies the accepted test commit this redo is reopening.
 	// The acceptance remains in the ledger; this provenance belongs to the fresh run.
 	PriorAcceptedSHA string `json:"prior_accepted_sha,omitempty"`
@@ -415,6 +418,49 @@ type ResumeNote struct {
 	// PendingKind is the pause the note answered: error, budget, provider...
 	PendingKind string `json:"pending_kind,omitempty"`
 	At          string `json:"at"`
+}
+
+// ApprovalRequest is an agent's ask that the person make a decision only a
+// person may make — widen a task's lane at accept, confirm manual
+// verification, answer an oracle dispute (B-530).
+//
+// The operator in B-530 had the person's "Ok" in chat and no door to carry
+// it, so it impersonated the person instead. This is the door: the agent
+// files what it wants decided and why; the person confirms or declines it in
+// the desktop; a confirmed request is decided as "human" and the record
+// carries both actors — who asked and who approved.
+type ApprovalRequest struct {
+	ID string `json:"id"`
+	// Action is the decision requested: "accept" or "answer".
+	Action string `json:"action"`
+	// Reason is the agent's why — typically what the person said in chat.
+	Reason string `json:"reason"`
+	// PendingKind and PendingSince pin the pending decision the request was
+	// filed against. A request outlives nothing: approving one whose run has
+	// moved on to another decision is refused, never applied to the new one.
+	PendingKind  string `json:"pending_kind"`
+	PendingSince string `json:"pending_since,omitempty"`
+	// What the accept would carry.
+	Message       string   `json:"message,omitempty"`
+	LaneWidening  []string `json:"lane_widening,omitempty"`
+	HumanVerified []int    `json:"human_verified,omitempty"`
+	// What the answer would carry.
+	QuestionID string   `json:"question_id,omitempty"`
+	Answer     string   `json:"answer,omitempty"`
+	WidenLane  []string `json:"widen_lane,omitempty"`
+
+	RequestedBy string `json:"requested_by"`
+	RequestedAt string `json:"requested_at"`
+	// Status is pending, then approved or declined by the person; landed or
+	// failed once an approved decision ran (Outcome says how); superseded
+	// when the decision it named was no longer pending.
+	Status    string `json:"status"`
+	DecidedBy string `json:"decided_by,omitempty"`
+	DecidedAt string `json:"decided_at,omitempty"`
+	// DeclineReason is the person's words when declining, if any.
+	DeclineReason string `json:"decline_reason,omitempty"`
+	// Outcome is what the approved decision did: the commit, or the refusal.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // RedoNote is the bounded retry recommendation attached to a failed run.

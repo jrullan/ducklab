@@ -28,6 +28,14 @@ app are clients. This document is the contract between them.
 }
 ```
 
+- **Two credentials** (B-530, `docs/decisions/0010`). The `token` in
+  `engine.json` is the **agents'** credential (MCP server, a piped CLI, the
+  renderer). The **person's** credential is in `<state-dir>/ducklab/human.token`
+  (mode `0600`), presented by the desktop and an interactive CLI. The engine
+  derives every recorded actor from the credential: an agent credential is
+  never recorded as `human`, and human-only decisions refuse it. Agents ask
+  the person through `POST /v1/runs/{id}/approval-requests`; only the person's
+  credential approves or declines.
 - Every request carries `Authorization: Bearer <token>` and
   `X-Ducklab-Client: <name>/<semver>`. A missing or wrong token → `401`. A
   client whose **major** version differs from the engine's → `409` with

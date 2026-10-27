@@ -306,6 +306,10 @@ export interface EngineapichatSwitchRequest {
   duckling?: string;
 }
 
+export interface EngineapideclineRequest {
+  reason?: string;
+}
+
 export interface EngineapidiffResponse {
   diff?: string;
   tests?: string;
@@ -338,6 +342,7 @@ export interface EngineapilandRequest {
 }
 
 export interface EngineapiliftRequest {
+  actor?: string;
   kind?: string;
 }
 
@@ -465,6 +470,27 @@ export interface ReportRow {
   tokens?: number;
   unverified?: number;
   wallclock_ms?: number;
+}
+
+export interface RunlogApprovalRequest {
+  action?: string;
+  answer?: string;
+  decided_at?: string;
+  decided_by?: string;
+  decline_reason?: string;
+  human_verified?: number[];
+  id?: string;
+  lane_widening?: string[];
+  message?: string;
+  outcome?: string;
+  pending_kind?: string;
+  pending_since?: string;
+  question_id?: string;
+  reason?: string;
+  requested_at?: string;
+  requested_by?: string;
+  status?: string;
+  widen_lane?: string[];
 }
 
 export interface RunlogBudgetLimits {
@@ -612,6 +638,7 @@ export interface RunlogRun {
   active_since?: string;
   active_wallclock_ms?: number;
   agent_turns?: number;
+  approval_requests?: RunlogApprovalRequest[];
   autonomy?: string;
   base_sha?: string;
   branch?: string;
@@ -743,6 +770,23 @@ export interface ServiceAppSuggestion {
   capability?: string;
   command?: string;
   evidence?: string;
+}
+
+export interface ServiceApprovalDecision {
+  accept?: ServiceAcceptResult;
+  request?: RunlogApprovalRequest;
+}
+
+export interface ServiceApprovalRequestInput {
+  action?: string;
+  actor?: string;
+  answer?: string;
+  human_verified?: number[];
+  lane_widening?: string[];
+  message?: string;
+  question_id?: string;
+  reason?: string;
+  widen_lane?: string[];
 }
 
 export interface ServiceArtifactLintDiagnostic {
@@ -1433,6 +1477,9 @@ export const OPERATIONS = [
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },
   { id: "RunAccept", method: "POST", path: "/v1/runs/{id}/accept" },
   { id: "RunAnswer", method: "POST", path: "/v1/runs/{id}/answer" },
+  { id: "ApprovalRequestFile", method: "POST", path: "/v1/runs/{id}/approval-requests" },
+  { id: "ApprovalRequestApprove", method: "POST", path: "/v1/runs/{id}/approval-requests/{req}/approve" },
+  { id: "ApprovalRequestDecline", method: "POST", path: "/v1/runs/{id}/approval-requests/{req}/decline" },
   { id: "RunBrief", method: "GET", path: "/v1/runs/{id}/brief" },
   { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },

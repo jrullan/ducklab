@@ -536,6 +536,22 @@ func routeTable() []Route {
 		{Method: "POST", Path: "/v1/runs/{id}/answer", Auth: true,
 			Request: answerRequest{}, Summary: "Answer a pending question", ClientMethod: "RunAnswer",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAnswer }},
+		// B-530: an agent's door to a decision only the person may make.
+		{Method: "POST", Path: "/v1/runs/{id}/approval-requests", Auth: true,
+			Request: service.ApprovalRequestInput{}, Response: runlog.ApprovalRequest{},
+			Summary:      "File an approval request: an agent asks the person to make a human-only decision (accept with lane widening or manual verification, an oracle answer)",
+			ClientMethod: "ApprovalRequestFile",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleApprovalRequestFile }},
+		{Method: "POST", Path: "/v1/runs/{id}/approval-requests/{req}/approve", Auth: true,
+			Response:     service.ApprovalDecision{},
+			Summary:      "The person confirms an approval request; the decision runs as human and records both actors. Person's credential only",
+			ClientMethod: "ApprovalRequestApprove",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleApprovalRequestApprove }},
+		{Method: "POST", Path: "/v1/runs/{id}/approval-requests/{req}/decline", Auth: true,
+			Request: declineRequest{}, RequestOptional: true, Response: runlog.ApprovalRequest{},
+			Summary:      "The person declines an approval request; nothing is decided. Person's credential only",
+			ClientMethod: "ApprovalRequestDecline",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleApprovalRequestDecline }},
 
 		// The cycle
 		{Method: "GET", Path: "/v1/projects/{id}/bugs", Auth: true,

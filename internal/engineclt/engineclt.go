@@ -19,13 +19,20 @@ import (
 
 // Client is the engine API client.
 type Client struct {
-	BaseURL    string
-	Token      string
+	BaseURL string
+	Token   string
+	// Human says Token is the person's credential (human.token), not the
+	// agents' (engine.json). A reconnect re-reads the same kind: following an
+	// engine restart must never quietly turn the desktop into an agent, nor
+	// an agent's client into the person (B-530).
+	Human      bool
 	Version    string
 	HTTPClient *http.Client
 }
 
-// New creates a new engine client from daemon info.
+// New creates an engine client with the AGENT credential from engine.json —
+// what the MCP server and a non-interactive CLI present. The engine records
+// everything it does as an agent and refuses it every human-only decision.
 func New(info *daemon.EngineInfo) *Client {
 	return &Client{
 		BaseURL: fmt.Sprintf("http://127.0.0.1:%d", info.Port),
@@ -34,6 +41,28 @@ func New(info *daemon.EngineInfo) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// NewHuman creates an engine client with the person's credential, for the
+// desktop and an interactive CLI. Against an engine from before the split
+// (no human.token) it falls back to engine.json's single token.
+func NewHuman(info *daemon.EngineInfo) *Client {
+	c := New(daemon.AsHuman(info))
+	c.Human = true
+	return c
+}
+
+// freshCredential re-reads where the engine is and this client's kind of
+// token, after a restart moved them.
+func (c *Client) freshCredential() (string, string, error) {
+	info, err := daemon.ReadEngineJSON()
+	if err != nil {
+		return "", "", err
+	}
+	if c.Human {
+		info = daemon.AsHuman(info)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, nil
 }
 
 func (c *Client) do(method, path string, body interface{}) (*http.Response, error) {
@@ -76,15 +105,14 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	// the dial fails and the file says somewhere new, go there. One retry;
 	// an engine that is genuinely down still says so.
 	if err != nil {
-		info, rerr := daemon.ReadEngineJSON()
+		fresh, token, rerr := c.freshCredential()
 		if rerr != nil {
 			return resp, err
 		}
-		fresh := fmt.Sprintf("http://127.0.0.1:%d", info.Port)
-		if fresh == c.BaseURL && info.Token == c.Token {
+		if fresh == c.BaseURL && token == c.Token {
 			return resp, err
 		}
-		c.BaseURL, c.Token = fresh, info.Token
+		c.BaseURL, c.Token = fresh, token
 		req, berr := build()
 		if berr != nil {
 			return nil, berr
@@ -94,11 +122,10 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	// The other face of a restart: the OS reused the port, so the dial
 	// succeeded and the stale token earned a 401 instead.
 	if resp.StatusCode == http.StatusUnauthorized {
-		if info, rerr := daemon.ReadEngineJSON(); rerr == nil {
-			fresh := fmt.Sprintf("http://127.0.0.1:%d", info.Port)
-			if fresh != c.BaseURL || info.Token != c.Token {
+		if fresh, token, rerr := c.freshCredential(); rerr == nil {
+			if fresh != c.BaseURL || token != c.Token {
 				resp.Body.Close()
-				c.BaseURL, c.Token = fresh, info.Token
+				c.BaseURL, c.Token = fresh, token
 				req, berr := build()
 				if berr != nil {
 					return nil, berr
@@ -679,6 +706,30 @@ func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]in
 	var result map[string]interface{}
 	err := c.patch("/v1/projects/"+id, keys, &result)
 	return result, err
+}
+
+// ApprovalRequestFile asks the person to make a human-only decision on a
+// run's pending decision (B-530). req carries action, reason and the
+// action's fields; the engine records the requester from the credential.
+func (c *Client) ApprovalRequestFile(runID string, req map[string]interface{}) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/runs/"+runID+"/approval-requests", req, &out)
+	return out, err
+}
+
+// ApprovalRequestApprove confirms a request. Only the person's credential
+// may; an agent's is refused with 403.
+func (c *Client) ApprovalRequestApprove(runID, reqID string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/runs/"+runID+"/approval-requests/"+reqID+"/approve", map[string]string{}, &out)
+	return out, err
+}
+
+// ApprovalRequestDecline declines a request. Person's credential only.
+func (c *Client) ApprovalRequestDecline(runID, reqID, reason string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/runs/"+runID+"/approval-requests/"+reqID+"/decline", map[string]string{"reason": reason}, &out)
+	return out, err
 }
 
 // RunAccept accepts a run.

@@ -60,8 +60,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Generate token
-	token, err := daemon.GenerateToken()
+	// Two credentials (B-530): the person's (desktop, interactive CLI) and
+	// the agents' (MCP server, renderer, a CLI an agent runs). The engine
+	// derives every recorded actor from which one a request presents, so an
+	// agent can never be recorded as "human" whatever its body says.
+	humanToken, err := daemon.GenerateToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: generate token: %v\n", err)
+		os.Exit(1)
+	}
+	agentToken, err := daemon.GenerateToken()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: generate token: %v\n", err)
 		os.Exit(1)
@@ -94,20 +102,22 @@ func main() {
 	info := &daemon.EngineInfo{
 		PID:        os.Getpid(),
 		Port:       port,
-		Token:      token,
+		Token:      agentToken,
 		Version:    build.Semver(),
 		Provenance: build.Provenance(),
 		StartedAt:  time.Now().UTC().Format(time.RFC3339),
 		StateDir:   stateDir,
 	}
-	if err := daemon.WriteEngineJSON(info); err != nil {
+	if err := daemon.WriteEngineFiles(info, humanToken); err != nil {
 		fmt.Fprintf(os.Stderr, "error: write engine.json: %v\n", err)
 		os.Exit(1)
 	}
 	defer daemon.DeleteEngineJSON()
+	defer daemon.DeleteHumanToken()
 
 	// Create server
-	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance(), *allowOrigin)
+	server := engineapi.New(svc, b, humanToken, build.Semver(), build.Provenance(), *allowOrigin)
+	server.SetAgentToken(agentToken)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,
