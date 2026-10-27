@@ -113,6 +113,10 @@ type runState struct {
 	// shutdown must all see it WITHOUT waiting out a gate replay (B-529).
 	acceptMu  sync.Mutex
 	accepting *acceptJob
+	// lastAccept is the newest accept's settlement in this engine, kept in
+	// memory as well as on the stream: run_get must show an outcome even
+	// when the run log refused its accept_settled write (review of #181).
+	lastAccept map[string]interface{}
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
@@ -4804,10 +4808,10 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// its event stream (MCP run_get). Derived on read like Next.
 	run.Escalation = escalationView(run, events)
 	run.AcceptInProgress = rs.acceptInFlight() != nil
-	for i := len(events) - 1; i >= 0; i-- {
+	run.LastAccept = rs.lastAcceptSettlement()
+	for i := len(events) - 1; i >= 0 && run.LastAccept == nil; i-- {
 		if events[i] != nil && events[i].Type == "accept_settled" {
 			run.LastAccept = events[i].Data
-			break
 		}
 	}
 	return &RunDetail{
@@ -4923,19 +4927,20 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	if s.shuttingDown.Load() && rs.acceptInFlight() == nil {
-		return nil, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
-	}
+	beforeAcceptStart(rs)
 	// Only cancellation is cut off from the caller. The run's own worker
 	// accepting itself (the tdd chain) stays marked, so the decision does
 	// not wait on that worker's teardown — which waits on this decision.
 	worker := ctx.Value(workerKey{}) == rs
-	job, joined := s.startAccept(rs, func(jobCtx context.Context) (*AcceptResult, error) {
+	job, joined, err := s.startAccept(rs, func(jobCtx context.Context, held func()) (*AcceptResult, error) {
 		if worker {
 			jobCtx = asWorker(jobCtx, rs)
 		}
-		return s.decideAccept(jobCtx, rs, id, msg, actor, options)
+		return s.decideAccept(jobCtx, rs, id, msg, actor, options, held)
 	})
+	if err != nil {
+		return nil, err
+	}
 	settled := func() (*AcceptResult, error) {
 		if joined {
 			return joinedNote(job.result, msg), job.err
@@ -4949,6 +4954,21 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 		return settled()
 	default:
 	}
+	// Never "in progress" before the accept holds the decision (review of
+	// #181). Until then it can still be refused by B-522's teardown guard,
+	// which must write nothing while the paused worker owns the log — so a
+	// caller told "in progress" would never hear that refusal. Bounded by
+	// settleWorkerLimit; the gate replay itself comes after.
+	select {
+	case <-job.done:
+		return settled()
+	case <-job.held:
+	}
+	select {
+	case <-job.done:
+		return settled()
+	default:
+	}
 	select {
 	case <-job.done:
 		return settled()
@@ -4957,12 +4977,15 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 }
 
-func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg string, actor string, options AcceptOptions) (result *AcceptResult, err error) {
+func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg string, actor string, options AcceptOptions, held func()) (result *AcceptResult, err error) {
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return nil, err
 	}
+	// From here every outcome is written as accept_settled: the worker has
+	// returned, so the log is the decision's to write.
+	held()
 	// Accepted is the compare-and-set winner. A second client may have entered
 	// before the first response reached it; return the durable result instead
 	// of trying to inspect the worktree the winner has already removed.

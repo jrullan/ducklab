@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,10 +37,17 @@ var (
 // acceptJob is one accept in flight. Exactly one exists per run at a time: a
 // second accept while it runs joins it instead of replaying the gate again.
 type acceptJob struct {
-	done   chan struct{}
-	cancel context.CancelCauseFunc
-	result *AcceptResult
-	err    error
+	done chan struct{}
+	// held closes once the accept holds the decision — past B-522's
+	// teardown guard, so every later outcome is written as accept_settled.
+	// Only then may a caller be told "in progress". A job that ends before
+	// it never closes held, only done: closing both would let a caller's
+	// select pick held and answer "in progress" for a settled refusal.
+	held     chan struct{}
+	heldOnce sync.Once
+	cancel   context.CancelCauseFunc
+	result   *AcceptResult
+	err      error
 }
 
 // acceptInFlight returns the accept running on this run, or nil.
@@ -59,48 +67,64 @@ func (rs *runState) cancelAccept(cause error) *acceptJob {
 	return job
 }
 
+// beforeAcceptStart is a seam for the start-versus-shutdown regression: it
+// runs just before an accept is installed. A no-op in the engine.
+var beforeAcceptStart = func(*runState) {}
+
 // startAccept starts work as this run's accept, or returns the accept already
 // running with joined=true. The work's context descends from Background, not
 // from any caller: only cancelAccept stops it.
-func (s *Service) startAccept(rs *runState, work func(context.Context) (*AcceptResult, error)) (job *acceptJob, joined bool) {
+//
+// The shutdown check sits in the same acceptMu section that installs the job
+// (review of #181). Checked before it, an accept could pass the check, then
+// PauseAllRuns set shuttingDown and swept every run without finding a job,
+// and the accept installed one mid-shutdown that nothing would cancel.
+// interruptAccepts takes acceptMu per run after setting the flag, so a job
+// is either refused here or found and cancelled there.
+func (s *Service) startAccept(rs *runState, work func(ctx context.Context, held func()) (*AcceptResult, error)) (job *acceptJob, joined bool, err error) {
 	rs.acceptMu.Lock()
 	defer rs.acceptMu.Unlock()
 	if rs.accepting != nil {
-		return rs.accepting, true
+		return rs.accepting, true, nil
+	}
+	if s.shuttingDown.Load() {
+		return nil, false, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
-	job = &acceptJob{done: make(chan struct{}), cancel: cancel}
+	job = &acceptJob{done: make(chan struct{}), held: make(chan struct{}), cancel: cancel}
+	markHeld := func() { job.heldOnce.Do(func() { close(job.held) }) }
 	rs.accepting = job
 	go func() {
 		defer func() {
 			cancel(nil)
 			rs.acceptMu.Lock()
 			rs.accepting = nil
+			rs.lastAccept = settlementData(job.result, job.err)
 			rs.acceptMu.Unlock()
 			close(job.done)
 		}()
-		job.result, job.err = work(ctx)
+		job.result, job.err = work(ctx, markHeld)
 		s.recordAcceptSettled(rs, job.result, job.err)
 	}()
-	return job, false
+	return job, false, nil
 }
 
-// recordAcceptSettled closes the accept on the run's stream. A caller that
-// stopped waiting was told the accept was in progress; this is where the
-// outcome it was promised arrives, for every accept, whoever is watching.
-func (s *Service) recordAcceptSettled(rs *runState, result *AcceptResult, err error) {
-	// Refused because the paused worker was still tearing down: that worker
-	// is about to close the log, and the door's promise is that it wrote
-	// nothing (B-522). The run is unchanged and accept_in_progress has gone
-	// false; a retry decides.
-	var finishing *RunFinishingError
-	if errors.As(err, &finishing) {
-		return
+// lastAcceptSettlement is the newest settlement this engine produced, or nil.
+func (rs *runState) lastAcceptSettlement() map[string]interface{} {
+	rs.acceptMu.Lock()
+	defer rs.acceptMu.Unlock()
+	if rs.lastAccept == nil {
+		return nil
 	}
-	w, werr := s.ensureWriter(rs)
-	if werr != nil {
-		return
+	out := make(map[string]interface{}, len(rs.lastAccept))
+	for k, v := range rs.lastAccept {
+		out[k] = v
 	}
+	return out
+}
+
+// settlementData is accept_settled's payload for an outcome.
+func settlementData(result *AcceptResult, err error) map[string]interface{} {
 	data := map[string]interface{}{"outcome": "accepted"}
 	switch {
 	case errors.Is(err, ErrDecisionInterrupted):
@@ -116,7 +140,29 @@ func (s *Service) recordAcceptSettled(rs *runState, result *AcceptResult, err er
 			data["info"] = result.Info
 		}
 	}
-	_ = w.AppendEvent("accept_settled", data)
+	return data
+}
+
+// recordAcceptSettled closes the accept on the run's stream. A caller that
+// stopped waiting was told the accept was in progress; this is where the
+// outcome it was promised arrives, for every accept, whoever is watching.
+func (s *Service) recordAcceptSettled(rs *runState, result *AcceptResult, err error) {
+	// Refused because the paused worker was still tearing down: that worker
+	// is about to close the log, and the door's promise is that it wrote
+	// nothing (B-522). No caller was told "in progress" for it — that waits
+	// for the decision to be held — so the refusal reached its caller
+	// directly, and run_get's last_accept carries it from memory.
+	var finishing *RunFinishingError
+	if errors.As(err, &finishing) {
+		return
+	}
+	// A log that refuses the write leaves the outcome in memory only
+	// (rs.lastAccept, set by the job): run_get still shows it.
+	w, werr := s.ensureWriter(rs)
+	if werr != nil {
+		return
+	}
+	_ = w.AppendEvent("accept_settled", settlementData(result, err))
 }
 
 // acceptInProgressInfo is what a caller that stopped waiting is told. It

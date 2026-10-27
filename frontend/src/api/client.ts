@@ -330,6 +330,12 @@ export interface Run {
   acceptance_gate?: GateResult;
   accepted?: boolean;
   commit_sha?: string;
+  /** An accept is running for this run (B-529). Set on a run read
+   * (GET /v1/runs/{id}), absent from lists. */
+  accept_in_progress?: boolean;
+  /** The newest accept_settled payload: outcome accepted | refused |
+   * interrupted, with commit_sha or error. Set on a run read. */
+  last_accept?: { outcome?: string; commit_sha?: string; error?: string; warning?: string; info?: string };
   /** Accepted commit is absent from all configured remote refs. */
   local_only?: boolean;
   /** Publication receipts, including retryable policy-push failures. */

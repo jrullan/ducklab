@@ -121,6 +121,35 @@ function discardTurn(
   return { ...buffers, [runId]: remaining };
 }
 
+/**
+ * Settles a verifying accept from the run record itself (review of #181).
+ * The live accept_settled event is not the only witness: after an overflow
+ * the resync replaces events without replaying them, and an accept answered
+ * in_progress stayed "Accepting…" forever. The engine's run read carries
+ * accept_in_progress and last_accept for exactly this.
+ *
+ * Only a verifying accept is settled here: the engine has then confirmed the
+ * accept exists, so a last_accept with no accept still in progress is its
+ * outcome — not a settlement left over from an earlier attempt.
+ */
+export function reconcileAccept(acceptState: Record<string, AcceptState>, run: Run): Record<string, AcceptState> {
+  const st = acceptState[run.id];
+  if (st?.kind !== "pending" || !st.verifying || run.accept_in_progress) return acceptState;
+  if (run.accepted && run.commit_sha) {
+    return { ...acceptState, [run.id]: { kind: "committed", sha: run.commit_sha } };
+  }
+  const last = run.last_accept;
+  if (!last?.outcome) return acceptState;
+  if (last.outcome === "accepted" && last.commit_sha) {
+    return { ...acceptState, [run.id]: { kind: "committed", sha: last.commit_sha } };
+  }
+  const message = last.error || `accept ${last.outcome}`;
+  return {
+    ...acceptState,
+    [run.id]: last.outcome === "interrupted" ? { kind: "error", message, interrupted: true } : { kind: "error", message },
+  };
+}
+
 export const useRuns = create<RunsState>((set) => ({
   runs: {},
   events: {},
@@ -345,7 +374,8 @@ export const useRuns = create<RunsState>((set) => ({
       runs: Object.fromEntries(list.map((r) => [r.id, r])),
     })),
 
-  setRun: (run) => set((state) => ({ ...state, runs: { ...state.runs, [run.id]: run } })),
+  setRun: (run) =>
+    set((state) => ({ ...state, runs: { ...state.runs, [run.id]: run }, acceptState: reconcileAccept(state.acceptState, run) })),
 
   // A resync REPLACES rather than merges: after an overflow we do not know
   // which events we missed, and appending would leave a gap in the middle
@@ -354,6 +384,7 @@ export const useRuns = create<RunsState>((set) => ({
     set((state) => ({
       ...state,
       runs: { ...state.runs, [run.id]: run },
+      acceptState: reconcileAccept(state.acceptState, run),
       events: {
         ...state.events,
         [run.id]: events.filter(

@@ -300,3 +300,61 @@ func TestShutdownDuringAcceptReplayLeavesTheGateUntouched(t *testing.T) {
 			detail.Run.Status, detail.Run.PendingKind, detail.Run.Accepted)
 	}
 }
+
+// Review of #181 (P1): an accept answered "in progress" while the paused
+// worker was still tearing down could then be refused by B-522's teardown
+// guard — which must write nothing — so no accept_settled ever came and the
+// caller waited forever. An accept is not answered "in progress" before it
+// holds the decision: a refusal in that window reaches its caller directly,
+// still writes nothing to the log, and run_get's last_accept carries it.
+func TestAcceptRefusedByTeardownIsNeverAnsweredInProgress(t *testing.T) {
+	s, root, runID, release := heldRun(t, "accept")
+	defer release()
+	previous := settleWorkerLimit
+	settleWorkerLimit = 50 * time.Millisecond
+	defer func() { settleWorkerLimit = previous }()
+	if got := mustRun(t, s, runID); got.Status != "paused" || got.PendingKind != "gate" {
+		t.Fatalf("setup: held worker published %s/%s, want paused/gate", got.Status, got.PendingKind)
+	}
+	dir := runlog.RunDirFor(root, runID)
+	stateBefore, _ := os.ReadFile(filepath.Join(dir, "state.json"))
+	eventsBefore, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := within(t, acceptAsync(s, gone, runID, ""), "the accept's answer")
+	var finishing *RunFinishingError
+	if !errors.As(got.err, &finishing) {
+		t.Fatalf("accept while the worker tears down = %+v, %v; want the RunFinishingError itself, never in_progress", got.res, got.err)
+	}
+	stateAfter, _ := os.ReadFile(filepath.Join(dir, "state.json"))
+	eventsAfter, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	if string(stateBefore) != string(stateAfter) || string(eventsBefore) != string(eventsAfter) {
+		t.Fatal("the refused accept wrote to a log the worker still owns")
+	}
+	detail, err := s.RunGet(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.AcceptInProgress || detail.Run.LastAccept["outcome"] != "refused" {
+		t.Fatalf("run_get after the refusal: in_progress=%v last_accept=%v; want the refusal observable", detail.Run.AcceptInProgress, detail.Run.LastAccept)
+	}
+}
+
+// Review of #181 (P2): the shutdown check ran before the job was installed.
+// An accept could pass it, PauseAllRuns then set the flag and swept every
+// run without finding a job, and the accept installed one mid-shutdown that
+// nothing would cancel. The seam runs a whole shutdown in exactly that gap.
+func TestAcceptStartingDuringShutdownIsRefused(t *testing.T) {
+	s, run, _, _ := heldAcceptRun(t, "r-b529-start-vs-shutdown")
+	beforeAcceptStart = func(*runState) { _ = s.PauseAllRuns(context.Background()) }
+	t.Cleanup(func() { beforeAcceptStart = func(*runState) {} })
+
+	got := within(t, acceptAsync(s, context.Background(), run.ID, ""), "the accept's answer")
+	if !errors.Is(got.err, ErrDecisionInterrupted) || !strings.Contains(got.err.Error(), "shutting down") {
+		t.Fatalf("accept racing shutdown = %+v, %v; want it refused as interrupted by the shutdown", got.res, got.err)
+	}
+	if detail, _ := s.RunGet(context.Background(), run.ID); detail.Run.AcceptInProgress || detail.Run.Status != "paused" {
+		t.Fatalf("after the refused start: in_progress=%v status=%s", detail.Run.AcceptInProgress, detail.Run.Status)
+	}
+}

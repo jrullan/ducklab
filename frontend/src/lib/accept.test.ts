@@ -85,6 +85,56 @@ describe("an accept that outlives its request", () => {
   });
 });
 
+// Review of #181: after an overflow the resync replaces the run's events
+// without replaying them, so a missed accept_settled left the button at
+// "Accepting…" forever. The resynced run record settles it.
+describe("an accept whose settlement was missed by the stream", () => {
+  const verifying = async () => {
+    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true }), "r-1");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true });
+    return { settled };
+  };
+
+  it("settles accepted from the resynced run", async () => {
+    const { settled } = await verifying();
+    useRuns.getState().resyncRun(
+      { ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: { outcome: "accepted", commit_sha: "abc1234" } },
+      [],
+    );
+    await expect(settled).resolves.toMatchObject({ commit_sha: "abc1234" });
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "committed", sha: "abc1234" });
+  });
+
+  it("settles refused from the resynced run", async () => {
+    const { settled } = await verifying();
+    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "refused", error: "rebased commit failed its gate" } }, []);
+    await expect(settled).rejects.toThrow("rebased commit failed its gate");
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "error", message: "rebased commit failed its gate" });
+  });
+
+  it("settles interrupted from the resynced run", async () => {
+    const { settled } = await verifying();
+    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "interrupted", error: "the run was aborted" } }, []);
+    const err = await settled.catch((e: unknown) => e);
+    expect((err as AcceptSettledError).interrupted).toBe(true);
+    expect(useRuns.getState().acceptState["r-1"]).toMatchObject({ kind: "error", interrupted: true });
+  });
+
+  it("keeps waiting while the engine says the accept is still running", async () => {
+    void (await verifying()).settled.catch(() => {});
+    useRuns.getState().resyncRun({ ...paused, accept_in_progress: true, last_accept: { outcome: "refused", error: "an earlier attempt" } }, []);
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true });
+  });
+
+  it("does not settle an accept the engine has not confirmed from an older outcome", () => {
+    useRuns.getState().beginAccept("r-1");
+    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "refused", error: "an earlier attempt" } }, []);
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending" });
+  });
+});
+
 describe("the lane after an interrupted accept", () => {
   it("closes the replay as interrupted and the decision as not made", () => {
     const turns = buildTurns([
