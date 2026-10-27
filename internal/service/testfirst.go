@@ -399,6 +399,8 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 }
 
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
+	// done closes after the log (settleWorker): declared first, it runs last.
+	defer close(rs.done)
 	defer rs.writer.Close()
 	// Record the custody root before the first (baseline) gate, so even a
 	// failure before the model turn has durable evidence of which checkout ran.
@@ -408,7 +410,6 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.wmu.Unlock()
 	// A worktree remains available at a human gate: acceptance must commit and
 	// prove its isolated red test. Accept and reject remove it after deciding.
-	defer close(rs.done)
 	defer recoverRun(rs)
 
 	// The tree before the test is written — what abort, reject and failure
@@ -1020,7 +1021,8 @@ func checkTestGate(mode string) error {
 // lives on the record.
 func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstRequest) {
 	runID := rs.snapshotRun().ID
-	if _, err := s.RunAcceptAs(ctx, runID, "chained: the test landed red", "auto:tdd"); err != nil {
+	// The worker accepting its own run must not wait for itself to finish.
+	if _, err := s.RunAcceptAs(asWorker(ctx, rs), runID, "chained: the test landed red", "auto:tdd"); err != nil {
 		rs.wmu.Lock()
 		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "gate"

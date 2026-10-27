@@ -1789,9 +1789,11 @@ func (s *Service) QueueStats() (running, waiting, limit int) {
 
 // executeDryRun renders prompts without calling any model. Synchronous.
 func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req RunRequest) {
+	// done closes last: the log is closed before a waiting decision may
+	// reopen it (settleWorker).
+	defer close(rs.done)
 	defer rs.writer.Close()
 	defer s.cleanupRunWorktree(rs, entry.Path)
-	defer close(rs.done)
 
 	// Load project config
 	ducklabDir := filepath.Join(entry.Path, ".ducklab")
@@ -2014,11 +2016,13 @@ func verifyOverride(cfg config.Verify, command string) config.Verify {
 }
 
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
-	defer rs.writer.Close()
 	// A worktree remains available at a human gate: acceptance must commit and
 	// prove its isolated changes, and a rebase conflict is resolved there by
 	// hand. Accept and reject remove it after recording their terminal decision.
+	// done closes after the log does, so a decision waiting for this worker
+	// (settleWorker) never takes a writer that is about to close.
 	defer close(rs.done)
+	defer rs.writer.Close()
 	defer recoverRun(rs)
 
 	// Load project config
@@ -4098,6 +4102,9 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
+	// The paused worker finishes closing its log before this resume takes a
+	// writer and starts the next worker on it.
+	s.settleWorker(ctx, rs)
 	current := rs.snapshotRun()
 	if current.Status != "paused" {
 		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, current.Status)
@@ -4493,6 +4500,7 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// aborted over it.
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	s.settleWorker(ctx, rs)
 	current := rs.snapshotRun()
 	// The full decision check (review of #176, 4383362596): only accepted
 	// and relaunched were refused, so reject-then-abort both succeeded and
@@ -4851,6 +4859,7 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	s.settleWorker(ctx, rs)
 	// Accepted is the compare-and-set winner. A second client may have entered
 	// before the first response reached it; return the durable result instead
 	// of trying to inspect the worktree the winner has already removed.
@@ -5135,6 +5144,7 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	s.settleWorker(ctx, rs)
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		if strings.TrimSpace(sha) == "" || sha == rs.run.CommitSHA {
@@ -5471,6 +5481,7 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	s.settleWorker(ctx, rs)
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))

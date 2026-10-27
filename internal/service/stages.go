@@ -1148,7 +1148,11 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"profile": profile, "source": profileSource,
 		"detail": "capacity-sensitive harness treatment resolved independently from the run's model roster",
 	})
+	// Under the run lock: WriteState marshals the shared record, and an
+	// abort settling it concurrently raced this write (-race, B-522 review).
+	rs.wmu.Lock()
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 	if warning != "" {
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}

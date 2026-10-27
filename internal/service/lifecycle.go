@@ -218,6 +218,59 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 	return nil
 }
 
+// workerKey marks a context as the run's own worker: a decision the worker
+// takes on itself (test-first's chained accept) must not wait for itself.
+type workerKey struct{}
+
+// asWorker marks ctx as rs's own worker.
+func asWorker(ctx context.Context, rs *runState) context.Context {
+	return context.WithValue(ctx, workerKey{}, rs)
+}
+
+// workerTeardown runs as a worker that reached a pause starts tearing down,
+// before it closes the run log. A no-op in the engine; tests hold it to
+// observe a decision arriving in that window.
+var workerTeardown = func(*runState) {}
+
+// settleWorker waits for a paused run's worker to finish tearing down before
+// a decision or a resume writes to the run.
+//
+// A worker publishes its pause (status paused, the gate's pending data) and
+// only then returns, closing the run log on the way out. A decision that
+// arrived in that window took the still-open writer from ensureWriter, the
+// worker closed it, and the decision's own record failed with "run log is
+// closed": a reject that errored after half-applying, events of an accept or
+// a resume lost (B-522 review; seen as a flaky decision-matrix test). Every
+// worker closes its log before it closes done, so once done is closed
+// ensureWriter reopens a log nobody else will close.
+//
+// Only a paused run is waited for — a running one is refused by every door
+// anyway, and waiting for it would block until it finished. The worker's
+// own calls (ctx marked by asWorker) are not waited for.
+func (s *Service) settleWorker(ctx context.Context, rs *runState) {
+	if rs == nil || ctx.Value(workerKey{}) == rs {
+		return
+	}
+	rs.wmu.Lock()
+	status, done := rs.run.Status, rs.done
+	rs.wmu.Unlock()
+	if status != "paused" || done == nil {
+		return
+	}
+	// Bounded: teardown is a log close and a channel close, and a decision
+	// must never hang behind a worker that, by some path not yet seen,
+	// leaves its done open while paused. Past the bound the door proceeds
+	// as it did before this wait existed.
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-time.After(settleWorkerLimit):
+	}
+}
+
+// settleWorkerLimit bounds settleWorker's wait.
+var settleWorkerLimit = 30 * time.Second
+
 // runStatusPrepared marks a revision whose record exists but whose parent is
 // not yet claimed. It is never registered, listed, queued or resumed; only
 // StageStart (after the claim) and recovery (reconcilePreparedRevision) move

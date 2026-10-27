@@ -731,6 +731,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
+	defer workerTeardown(rs)
 
 	projCfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
 	if err != nil {
@@ -900,6 +901,10 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	}
 	recordSpend(rs, tracker)
 
+	// The gate is published under the run lock: run_get, the desktop's
+	// resync and a decision door all snapshot the record concurrently, and
+	// these writes raced them (seen under -race in B-522's decision tests).
+	rs.wmu.Lock()
 	rs.run.Verdict = "UNVERIFIED"
 	setRunStatus(rs.run, "paused", time.Now())
 	rs.run.PendingKind = "gate"
@@ -919,12 +924,14 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		rs.run.PendingData["promote_blockers"] = blockers
 		rs.run.PendingData["detail"] = triageBlockerDetail(blockers)
 	}
+	autonomy := rs.run.Autonomy
+	rs.wmu.Unlock()
 
 	// Auto-apply under auto and yolo — with one law standing: a duplicate
 	// proposal always waits for a person, because a wrong duplicate CLOSES a
 	// real report, and that is the one triage outcome that is not just
 	// metadata. Severity, component and title are reversible edits.
-	if rs.run.Autonomy == "auto" || rs.run.Autonomy == "yolo" {
+	if autonomy == "auto" || autonomy == "yolo" {
 		hasDuplicate := false
 		for _, p := range proposals {
 			if _, ok := p["duplicate_of"]; ok {
@@ -932,7 +939,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			}
 		}
 		if !hasDuplicate && len(blockers) == 0 && len(proposals) > 0 {
+			rs.wmu.Lock()
 			rs.writer.WriteState()
+			rs.wmu.Unlock()
 			if entry, err := s.entryFor(rs); err == nil {
 				if err := s.acceptRun(ctx, rs, entry, "", "auto-triage"); err == nil {
 					return
@@ -940,11 +949,15 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			}
 			// A failed auto-apply degrades to the ordinary human gate below.
 		} else if hasDuplicate {
+			rs.wmu.Lock()
 			rs.run.PendingData["detail"] = "auto-apply declined: a proposal closes a report as duplicate — that decision is yours"
+			rs.wmu.Unlock()
 		} else if len(blockers) > 0 {
 			// An unattended accept would record a split nobody can promote and
 			// leave the loop stuck at promote with no one watching.
+			rs.wmu.Lock()
 			rs.run.PendingData["detail"] = "auto-apply declined: " + triageBlockerDetail(blockers)
+			rs.wmu.Unlock()
 		}
 	}
 
@@ -953,7 +966,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		needed["promote_blockers"] = blockers
 	}
 	rs.writer.AppendEvent("human_needed", needed)
+	rs.wmu.Lock()
 	rs.writer.WriteState()
+	rs.wmu.Unlock()
 }
 
 // triageSafePoint lands a requested pause between bugs. The bug just finished

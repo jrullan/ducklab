@@ -1766,6 +1766,9 @@ func TestATruncatedDocumentPausesInsteadOfDying(t *testing.T) {
 	if !strings.Contains(rs.run.Failure, "resume") {
 		t.Errorf("the pause does not name the way out: %q", rs.run.Failure)
 	}
+	// The test played the worker that failed; a worker returns once it has
+	// paused, closing done, and decisions wait for that (settleWorker).
+	close(rs.done)
 	s.RunAbort(context.Background(), run.ID)
 }
 
