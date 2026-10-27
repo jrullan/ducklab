@@ -62,7 +62,14 @@ func TestConcurrentAcceptsSettleOnceAndReturnTheSameCommit(t *testing.T) {
 	if first.result.CommitSHA != second.result.CommitSHA {
 		t.Fatalf("accepts returned different commits: %s and %s", first.result.CommitSHA, second.result.CommitSHA)
 	}
-	if !strings.Contains(first.result.Info+second.result.Info, "already accepted") {
+	// One of the two calls decided nothing, and its answer says so. Since
+	// B-529 a call that arrives while the other's accept is still in flight
+	// joins it ("joined an accept already in progress") instead of queuing a
+	// second decision behind the lock; one that arrives after it settled is
+	// answered from the record ("already accepted"). Either is the
+	// idempotent decision, named.
+	idempotent := first.result.Info + second.result.Info
+	if !strings.Contains(idempotent, "already accepted") && !strings.Contains(idempotent, "joined an accept already in progress") {
 		t.Fatalf("neither result identified the idempotent decision: %#v / %#v", first.result, second.result)
 	}
 

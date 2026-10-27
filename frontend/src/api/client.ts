@@ -115,6 +115,9 @@ export interface AcceptResult {
   warning?: string;
   /** Non-warning publication consequence, such as a repository with no remote. */
   info?: string;
+  /** The accept outlived the request (B-529): still verifying, nothing
+   * decided, commit_sha empty. Its outcome arrives as accept_settled. */
+  in_progress?: boolean;
 }
 
 export interface Project {

@@ -17,6 +17,8 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	// acceptResult, when set, is what RunAcceptAs answers (B-529).
+	acceptResult        map[string]interface{}
 	lastRunReq          map[string]interface{}
 	images              []string
 	settled             []string
@@ -175,6 +177,9 @@ func (f *fakeEngine) RunAcceptAs(id, msg, actor string) (map[string]interface{},
 	f.accepted = append(f.accepted, id)
 	f.acceptedAs = actor
 	f.acceptedMsg = msg
+	if f.acceptResult != nil {
+		return f.acceptResult, nil
+	}
 	return map[string]interface{}{"accepted": true}, nil
 }
 func (f *fakeEngine) RunRejectAs(id, reason, actor string) error {

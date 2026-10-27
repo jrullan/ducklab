@@ -124,3 +124,32 @@ func TestDecideSchemaSaysTheReasonChangesNothing(t *testing.T) {
 	}
 	t.Fatal("no decide tool")
 }
+
+// B-529: an accept whose gate replay outlasted the engine's answer comes back
+// in_progress. ti36xpro's operator read the cut-off accepts as intermittent
+// and retried seven times; decide must say nothing was decided yet, that a
+// retry starts nothing, and where the outcome appears — and must not claim
+// "accepted exactly as proposed".
+func TestDecideAcceptInProgressSaysWaitAndWhere(t *testing.T) {
+	eng := &fakeEngine{
+		acceptResult: map[string]interface{}{"commit_sha": "", "in_progress": true, "info": "accept in progress"},
+		runs: map[string]map[string]interface{}{
+			"r-x": {"id": "r-x", "status": "paused", "stage": "build", "project_id": "p", "next": []interface{}{"accept"}},
+		},
+	}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"elena"}}}`,
+		callFrame(2, "decide", `{"run_id":"r-x","action":"accept","reason":"suite passes"}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatalf("an accept in progress was reported as an error: %q", text)
+	}
+	for _, want := range []string{"NOT YET DECIDED", "Do not call decide again", "run_get", "accept_in_progress", "last_accept"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("decide's in-progress reply lacks %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "accepted exactly as proposed") {
+		t.Errorf("decide claimed an accept that has not happened: %s", text)
+	}
+}

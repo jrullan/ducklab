@@ -6,6 +6,7 @@ import { waitingFor, moneyOrZero } from "../lib/format";
 import { useState } from "react";
 import { EvidenceDrawerHost } from "./EvidenceDrawer";
 import { useRuns } from "../store/runs";
+import { acceptingLabel } from "../lib/accept";
 
 function waitingExplanation(run: Run): string {
   if (["intake", "spec", "plan"].includes(run.stage)) {
@@ -80,6 +81,8 @@ export function WaitingCard({
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
+  // B-529: while the engine replays the gate from a clean checkout, say so.
+  const acceptLabel = acceptingLabel(useRuns((s) => s.acceptState[run.id]));
   // B-247: the task's work already landed under another accepted run. The
   // T-181 phantom re-run was accepted from a card that looked like any other.
   const landedAs = useRuns((s) =>
@@ -205,7 +208,7 @@ export function WaitingCard({
             disabled={accepting}
             className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
-            {accepting ? "Accepting…" : "Accept"}
+            {accepting ? acceptLabel : "Accept"}
           </button>
         )}
         {next.includes("abort") && (

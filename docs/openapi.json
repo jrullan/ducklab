@@ -2059,6 +2059,9 @@
       },
       "RunlogRun": {
         "properties": {
+          "accept_in_progress": {
+            "type": "boolean"
+          },
           "acceptance_gate": {
             "$ref": "#/components/schemas/RunlogGateReproduction"
           },
@@ -2159,6 +2162,10 @@
           },
           "interrupted_turn": {
             "$ref": "#/components/schemas/RunlogInterruptedTurn"
+          },
+          "last_accept": {
+            "additionalProperties": {},
+            "type": "object"
           },
           "local_only": {
             "type": "boolean"
@@ -2439,6 +2446,9 @@
         "properties": {
           "commit_sha": {
             "type": "string"
+          },
+          "in_progress": {
+            "type": "boolean"
           },
           "info": {
             "type": "string"

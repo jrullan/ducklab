@@ -908,6 +908,12 @@ func runCmd(verb string, args []string, repo string) int {
 		if len(lane) > 0 {
 			printLaneWidened(client, args[0], lane)
 		}
+		// B-529: a long gate replay answers before it settles. Printing
+		// "accepted: commit " with no commit would claim what has not happened.
+		if inProgress, _ := result["in_progress"].(bool); inProgress {
+			fmt.Printf("accepting: verifying from a clean checkout — the engine continues on its own; `ducklab run show %s` shows the outcome\n", args[0])
+			return 0
+		}
 		fmt.Printf("accepted: commit %s\n", result["commit_sha"])
 		return 0
 	case "reject":
@@ -1112,6 +1118,19 @@ func printRunSummary(w io.Writer, run map[string]interface{}) {
 	// messages are written to be acted on.
 	if why := str(run["failure"]); why != "" {
 		fmt.Fprintf(w, "  failure: %s\n", why)
+	}
+	// B-529: an accept answered "in progress" settles here.
+	if inProgress, _ := run["accept_in_progress"].(bool); inProgress {
+		fmt.Fprintln(w, "  accept: in progress — verifying from a clean checkout")
+	} else if last, ok := run["last_accept"].(map[string]interface{}); ok {
+		line := str(last["outcome"])
+		if sha := str(last["commit_sha"]); sha != "" {
+			line += " " + sha
+		}
+		if why := str(last["error"]); why != "" {
+			line += ": " + why
+		}
+		fmt.Fprintf(w, "  last accept: %s\n", line)
 	}
 	if pending, ok := run["pending_data"].(map[string]interface{}); ok {
 		if q := str(pending["question"]); q != "" {

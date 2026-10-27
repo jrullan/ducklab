@@ -108,6 +108,11 @@ type runState struct {
 	// run. The writer mutex cannot serve this purpose: acceptance calls helpers
 	// that reopen and write the run log while the decision is active.
 	decisionMu sync.Mutex
+	// accepting is the accept in flight (accept_job.go), guarded by acceptMu.
+	// It is separate from decisionMu because a second accept, an abort and a
+	// shutdown must all see it WITHOUT waiting out a gate replay (B-529).
+	acceptMu  sync.Mutex
+	accepting *acceptJob
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
@@ -1292,6 +1297,11 @@ type AcceptResult struct {
 	CommitSHA string `json:"commit_sha"`
 	Warning   string `json:"warning,omitempty"`
 	Info      string `json:"info,omitempty"`
+	// InProgress means the caller stopped waiting before the accept settled
+	// (B-529). Nothing is decided yet and commit_sha is empty: the accept
+	// continues on the run's own context, and its outcome arrives as the
+	// run's accept_settled event. Info says so in words.
+	InProgress bool `json:"in_progress,omitempty"`
 }
 
 // AcceptOptions contains explicit, non-default recovery choices. A caller may
@@ -2645,6 +2655,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
+			if errors.Is(aerr, ErrDecisionInterrupted) {
+				// Abort or shutdown stopped the reproduction (B-529). The
+				// run's own gate passed; its clean-checkout replay never
+				// finished, so there is no gate result to page a person
+				// about. It waits at its gate; an accept reproduces again.
+				rs.run.PendingData["detail"] = fmt.Sprintf("auto-accept interrupted: %v", aerr)
+				rs.writer.AppendEvent("accept_settled", map[string]interface{}{"outcome": "interrupted", "error": aerr.Error()})
+				rs.writer.WriteState()
+				return
+			}
 			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail}
 			if rs.run.DesktopStale {
 				rs.run.PendingData["desktop_stale"] = desktopStaleMessage
@@ -3414,8 +3434,12 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 				"detail": fmt.Sprintf("the unreproducible commit %s could not be taken back: %v", short(sha), uerr),
 			})
 		} else {
+			detail := "the accept commit did not reproduce from a clean checkout; its diff stays in the tree, uncommitted"
+			if errors.Is(err, ErrDecisionInterrupted) {
+				detail = "the accept was interrupted before its clean-checkout reproduction finished; its diff stays in the tree, uncommitted"
+			}
 			rs.writer.AppendEvent("commit_withdrawn", map[string]interface{}{
-				"sha": sha, "detail": "the accept commit did not reproduce from a clean checkout; its diff stays in the tree, uncommitted",
+				"sha": sha, "detail": detail,
 			})
 		}
 		return err
@@ -3673,6 +3697,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			rs.run.GateReproduced = reproduction
 			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
 		}
+		if errors.Is(verifyErr, ErrDecisionInterrupted) {
+			// The run keeps the gate it was waiting at, unchanged: the next
+			// accept rebases (or finds the rebase done) and reproduces again.
+			return verifyErr
+		}
 		if verifyErr != nil {
 			output := ""
 			if reproduction != nil {
@@ -3808,6 +3837,8 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 		setup := config.Verify{Mode: string(verify.GateCustom), Custom: cfg.Verify.Setup, TimeoutS: cfg.Verify.TimeoutS}
 		if result, err := verify.Run(ctx, checkout, setup, identity); err != nil {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance: %w", err)
+		} else if ctx.Err() != nil {
+			return nil, interruptedError(ctx, "the clean-checkout setup for "+short(sha))
 		} else if !verify.IsGreen(result) {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance failed:\n%s", result.Output)
 		}
@@ -3816,6 +3847,15 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 	result, err := verify.Run(ctx, checkout, cfg.Verify, identity)
 	if err != nil {
 		return nil, fmt.Errorf("run gate from clean checkout: %w", err)
+	}
+	// Killed because the decision was cancelled (abort, shutdown), not because
+	// the gate failed or hit its own timeout: no reproduction is reported, so
+	// no "exit -1" reaches the record and no one is asked to decide a gate
+	// that never finished (B-529). The gate's own timeout_s is a different
+	// thing — the suite really did not finish in its budget — and stays a
+	// failure below.
+	if ctx.Err() != nil {
+		return nil, interruptedError(ctx, "the clean-checkout reproduction of "+short(sha))
 	}
 	// A project with no configured executable gate retains its existing
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
@@ -4501,6 +4541,16 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// rewrote the claimed original's resolution, and recovery then dropped
 	// the replacement as unclaimed. A run another decision consumed is not
 	// aborted over it.
+	//
+	// An accept in flight holds that lock for its whole gate replay, on its
+	// own context rather than the caller's (B-529), and abort is one of the
+	// two things that may stop it. So it is cancelled first, outside the
+	// lock: its replay is killed and it settles "interrupted" — never as a
+	// failed gate — and releases the lock. If it landed before the cancel
+	// reached it, the decided check below says so.
+	if job := rs.cancelAccept(errCauseAborted); job != nil {
+		<-job.done
+	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
@@ -4753,6 +4803,13 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// its safe point, or continuing — for clients that read the run and not
 	// its event stream (MCP run_get). Derived on read like Next.
 	run.Escalation = escalationView(run, events)
+	run.AcceptInProgress = rs.acceptInFlight() != nil
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i] != nil && events[i].Type == "accept_settled" {
+			run.LastAccept = events[i].Data
+			break
+		}
+	}
 	return &RunDetail{
 		Run: run, Events: events, LandingOffer: offer,
 	}, nil
@@ -4855,13 +4912,52 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	return s.runAcceptWithOptions(ctx, id, msg, actor, AcceptOptions{})
 }
 
-func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg string, actor string, options AcceptOptions) (result *AcceptResult, err error) {
+// runAcceptWithOptions runs the accept on the run's own context and waits for
+// it only as long as ctx lives. When ctx ends first the accept goes on, and
+// the caller is answered InProgress (B-529); a call that arrives while an
+// accept is in flight joins it rather than starting a second replay.
+func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg string, actor string, options AcceptOptions) (*AcceptResult, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
+	if s.shuttingDown.Load() && rs.acceptInFlight() == nil {
+		return nil, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
+	}
+	// Only cancellation is cut off from the caller. The run's own worker
+	// accepting itself (the tdd chain) stays marked, so the decision does
+	// not wait on that worker's teardown — which waits on this decision.
+	worker := ctx.Value(workerKey{}) == rs
+	job, joined := s.startAccept(rs, func(jobCtx context.Context) (*AcceptResult, error) {
+		if worker {
+			jobCtx = asWorker(jobCtx, rs)
+		}
+		return s.decideAccept(jobCtx, rs, id, msg, actor, options)
+	})
+	settled := func() (*AcceptResult, error) {
+		if joined {
+			return joinedNote(job.result, msg), job.err
+		}
+		return job.result, job.err
+	}
+	// A settled job wins over a caller that is also gone: never answer "in
+	// progress" for an accept that already has its outcome.
+	select {
+	case <-job.done:
+		return settled()
+	default:
+	}
+	select {
+	case <-job.done:
+		return settled()
+	case <-ctx.Done():
+		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined)}, nil
+	}
+}
+
+func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg string, actor string, options AcceptOptions) (result *AcceptResult, err error) {
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
@@ -4914,7 +5010,9 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	// errors. Keep their cause and all roots in events.jsonl so a later audit can
 	// establish why no commit landed even after the client has disconnected.
 	defer func() {
-		if err == nil {
+		// An interrupted accept was not refused: nothing was decided, and its
+		// accept_settled event says "interrupted" with the cause (B-529).
+		if err == nil || errors.Is(err, ErrDecisionInterrupted) {
 			return
 		}
 		w, writerErr := s.ensureWriter(rs)
@@ -5148,6 +5246,9 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
+	}
+	if err := acceptInFlightRefusal(rs, "land"); err != nil {
+		return err
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
@@ -5487,6 +5588,9 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
+	}
+	if err := acceptInFlightRefusal(rs, "reject"); err != nil {
+		return err
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()

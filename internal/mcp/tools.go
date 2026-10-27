@@ -76,7 +76,9 @@ func toolList() []map[string]interface{} {
 				"and the record will say so. The reason never changes what you decide: accept takes " +
 				"the proposal exactly as shown. Only request_changes acts on your words — its reason " +
 				"IS the change sent to the next draft. To change a triage proposal, accept the triage, " +
-				"then edit the bug's proposal with bug_edit before bug_promote.",
+				"then edit the bug's proposal with bug_edit before bug_promote. " +
+				"An accept that reproduces a long gate may answer in_progress: it is still running, not failed — " +
+				"do not retry; read run_get's accept_in_progress and last_accept for its outcome.",
 			"inputSchema": obj(map[string]interface{}{
 				"run_id": str("the run id"),
 				"action": str("one of the run's next actions: accept, reject, request_changes, resume, abort"),
@@ -1215,7 +1217,9 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 		// at a safe point, or left it running — and which seat it is about.
 		"escalation",
 		// B-521: which intention an intake serves, and the revision chain.
-		"intent", "revises_run", "revision")
+		"intent", "revises_run", "revision",
+		// B-529: where an accept answered "in progress" settles.
+		"accept_in_progress", "last_accept")
 	if diff, _, _, dErr := s.eng.RunDiff(id); dErr == nil && diff != "" {
 		view["diff"] = diff
 	}
@@ -1254,6 +1258,14 @@ func (s *Server) decide(runID, action, reason, note string) (map[string]interfac
 		// The reply says what the reason did — and did not do.
 		if res == nil {
 			res = map[string]interface{}{}
+		}
+		// B-529: an accept whose gate replay outlasts the engine's answer is
+		// still running, not failed. Said in words an agent acts on, because
+		// a cut-off accept read as an intermittent one was retried seven
+		// times.
+		if inProgress, _ := res["in_progress"].(bool); inProgress {
+			res["decision"] = acceptInProgress
+			return toolJSON(res), nil
 		}
 		stage, _ := run["stage"].(string)
 		res["decision"] = acceptedAsShown(stage)
@@ -1340,6 +1352,13 @@ func noteRefusal(action string) string {
 }
 
 // acceptedAsShown is the accept reply's account of the reason.
+// acceptInProgress is decide's answer when the engine stopped waiting for an
+// accept before it settled. Nothing has been decided yet.
+const acceptInProgress = "NOT YET DECIDED — the accept is in progress: the engine is reproducing the gate from a clean checkout and continues on its own; it was not cut off and did not fail. " +
+	"Do not call decide again — a retry joins the same accept and starts nothing. " +
+	"See the outcome with run_get: accept_in_progress=true while it runs; once it settles, last_accept.outcome says accepted (with commit_sha; status done), " +
+	"refused (with the error; the run still waits at its gate), or interrupted (an abort or engine shutdown stopped the replay; nothing was decided)."
+
 func acceptedAsShown(stage string) string {
 	msg := "accepted exactly as proposed; your reason is recorded as the decision and changed nothing"
 	if stage == "triage" || stage == "operate" {

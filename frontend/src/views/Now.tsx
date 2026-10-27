@@ -16,6 +16,7 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { reviseRun, revisesDocument } from "../lib/retry";
+import { acceptAndSettle } from "../lib/accept";
 import { WaitingCard } from "../components/WaitingCard";
 import { PlanCard } from "../components/PlanCard";
 import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
@@ -293,16 +294,9 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 client={client}
                 run={r}
                 accepting={acceptState[r.id]?.kind === "pending"}
-                onAccept={() => {
-                  const store = useRuns.getState();
-                  store.beginAccept(r.id);
-                  client
-                    .accept(r.id)
-                    .then((res) => store.confirmAccept(r.id, res.commit_sha))
-                    .catch((e) =>
-                      store.failAccept(r.id, e instanceof Error ? e.message : String(e)),
-                    );
-                }}
+                // The store carries the accept's state through an in_progress
+                // answer to its settled outcome (B-529).
+                onAccept={() => void acceptAndSettle(client, r.id).catch(() => {})}
                 onReject={() => void client.reject(r.id).catch(() => {})}
                 onAbort={() => void client.abort(r.id).catch(() => {})}
                 // The same revision RunView sends (B-517): one module decides

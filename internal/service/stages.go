@@ -306,6 +306,10 @@ func (s *Service) claimRevisionParent(projectRoot string, req StageRequest, plan
 		// engine's record): nothing to claim.
 		return nil
 	}
+	// Not queued behind an accept's gate replay (B-529): refused, named.
+	if err := acceptInFlightRefusal(rs, "request_changes"); err != nil {
+		return refuseLaunch("%v", err)
+	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
 	run := rs.snapshotRun()

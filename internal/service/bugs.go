@@ -531,6 +531,10 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	if !ok {
 		return fmt.Errorf("run %q not found", originalID)
 	}
+	// Not queued behind an accept's gate replay (B-529): refused, named.
+	if err := acceptInFlightRefusal(prior, "relaunch"); err != nil {
+		return err
+	}
 	prior.decisionMu.Lock()
 	defer prior.decisionMu.Unlock()
 	// A paused original whose worker is still tearing down is not claimed

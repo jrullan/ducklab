@@ -79,3 +79,15 @@ describe("WaitingCard and a task that already landed", () => {
     seed([]);
   });
 });
+
+// B-529: an accept that replays the gate from a clean checkout can outlast
+// the request; the card says what the engine is doing instead of a bare
+// "Accepting…" that reads as a hang.
+describe("WaitingCard accepting", () => {
+  it("says verifying from a clean checkout once the replay is under way", () => {
+    useRuns.setState({ acceptState: { [run.id]: { kind: "pending", verifying: true } } });
+    render(<WaitingCard run={run} accepting onAccept={() => {}} onReject={() => {}} onAbort={() => {}} />);
+    expect(screen.getByTestId("now-accept")).toHaveTextContent("Accepting… verifying from a clean checkout");
+    useRuns.setState({ acceptState: {} });
+  });
+});

@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
+import { acceptAndSettle } from "../lib/accept";
 import type { Bug, BugPortion, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorCard } from "../components/ErrorCard";
@@ -1348,19 +1349,10 @@ function TaskRunner({
             client={client}
             run={pausedRun}
             accepting={acceptSt?.kind === "pending"}
-            onAccept={() => {
-              const store = useRuns.getState();
-              store.beginAccept(pausedRun.id);
-              client
-                .accept(pausedRun.id)
-                .then((res) => {
-                  store.confirmAccept(pausedRun.id, res.commit_sha);
-                  onDone();
-                })
-                .catch((e) =>
-                  store.failAccept(pausedRun.id, e instanceof Error ? e.message : String(e)),
-                );
-            }}
+            // Done means landed, not answered: an in_progress accept is still
+            // verifying from a clean checkout (B-529). Failures are the
+            // store's accept state.
+            onAccept={() => void acceptAndSettle(client, pausedRun.id).then(() => onDone()).catch(() => {})}
             onReject={() =>
               void client
                 .reject(pausedRun.id)

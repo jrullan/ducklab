@@ -28,9 +28,15 @@ export type LiveSpend = {
 
 export type AcceptState =
   | { kind: "idle" }
-  | { kind: "pending" }
+  /** verifying: the engine is reproducing the gate from a clean checkout —
+   * announced by its gate_started, or by an in_progress answer from an
+   * accept that outlived the request (B-529). Still pending: no commit is
+   * shown until the engine confirms one (accept_settled). */
+  | { kind: "pending"; verifying?: boolean }
   | { kind: "committed"; sha: string }
-  | { kind: "error"; message: string };
+  /** interrupted: abort or engine shutdown stopped the accept's replay. Not
+   * a failure of the work — nothing was decided (B-529). */
+  | { kind: "error"; message: string; interrupted?: boolean };
 
 export interface RunsState {
   runs: Record<string, Run>;
@@ -73,6 +79,8 @@ export interface RunsState {
   /** A resync for run-holding surfaces without the overflow flag (reconnect). */
   requestResync: () => void;
   beginAccept: (runId: string) => void;
+  /** The engine answered in_progress: keep waiting, now for accept_settled. */
+  acceptInProgress: (runId: string) => void;
   confirmAccept: (runId: string, sha: string) => void;
   failAccept: (runId: string, message: string) => void;
   reset: () => void;
@@ -276,10 +284,38 @@ export const useRuns = create<RunsState>((set) => ({
       // round:turn coordinate. Their first token must begin a fresh live
       // buffer; otherwise attempt three visibly continues attempt one.
       const key = e.type === "turn_end" || e.type === "turn_start" ? deltaKey(e.data) : "";
+
+      // B-529: an accept outlives its request. While this client waits on
+      // one, the stream says what it is doing (the clean-checkout replay)
+      // and how it ended — the only place the outcome of an accept answered
+      // in_progress ever arrives. A commit is shown only once settled.
+      let acceptState = state.acceptState;
+      if (acceptState[runId]?.kind === "pending") {
+        if (e.type === "gate_started" && e.data?.phase === "accept") {
+          acceptState = { ...acceptState, [runId]: { kind: "pending", verifying: true } };
+        } else if (e.type === "accept_settled") {
+          const outcome = String(e.data?.outcome ?? "");
+          const sha = String(e.data?.commit_sha ?? "");
+          if (outcome === "accepted" && sha) {
+            acceptState = { ...acceptState, [runId]: { kind: "committed", sha } };
+            const current = runs[runId];
+            if (current) runs = { ...runs, [runId]: { ...current, accepted: true, commit_sha: sha, status: "done" } };
+          } else {
+            const message = String(e.data?.error ?? "") || `accept ${outcome || "did not land"}`;
+            acceptState = {
+              ...acceptState,
+              [runId]: outcome === "interrupted"
+                ? { kind: "error", message, interrupted: true }
+                : { kind: "error", message },
+            };
+          }
+        }
+      }
       return {
         ...state,
         events: { ...state.events, [runId]: trimmed },
         runs,
+        acceptState,
         fleetEpoch: e.type === "vision_evidence" ? state.fleetEpoch + 1 : state.fleetEpoch,
         // The durable message event is in events; streamed answer/thinking are
         // only live display buffers and must not survive a completed turn.
@@ -334,6 +370,14 @@ export const useRuns = create<RunsState>((set) => ({
 
   beginAccept: (runId) =>
     set((state) => ({ ...state, acceptState: { ...state.acceptState, [runId]: { kind: "pending" } } })),
+
+  acceptInProgress: (runId) =>
+    set((state) => {
+      // The outcome may already have arrived on the stream before the HTTP
+      // answer did; a settled accept is never reopened.
+      if (state.acceptState[runId]?.kind !== "pending") return state;
+      return { ...state, acceptState: { ...state.acceptState, [runId]: { kind: "pending", verifying: true } } };
+    }),
 
   confirmAccept: (runId, sha) =>
     set((state) => ({

@@ -88,7 +88,7 @@ export interface TurnBlock {
   /** A recorded decision's fate (B-524). The words are recorded BEFORE the
    * door acts, so the record is an attempt until its decision_outcome says
    * taken or refused; absent on blocks that are not decision attempts. */
-  decisionOutcome?: { outcome: "pending" | "taken" | "refused"; error?: string };
+  decisionOutcome?: { outcome: "pending" | "taken" | "refused" | "interrupted"; error?: string };
   /** A later turn_start resumed this turn's checkpoint. */
   resumed?: boolean;
   /** What this turn was working on: a split's subtask, a tournament's
@@ -401,6 +401,8 @@ export function decisionLabel(block: Pick<TurnBlock, "subject" | "author" | "dec
       return `${act} attempted — no outcome recorded · ${who}`;
     case "refused":
       return `${act} refused${block.decisionOutcome.error ? `: ${block.decisionOutcome.error}` : ""} · ${who}`;
+    case "interrupted":
+      return `${act} interrupted before it finished — nothing was decided · ${who}`;
     default:
       return `${act} · ${who}`;
   }
@@ -572,9 +574,13 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i]!;
           if (b.role === "decision" && b.subject === action && b.decisionOutcome?.outcome === "pending") {
+            // B-529: abort or shutdown stopping the door's work is not a
+            // refusal — nothing judged the decision; it was never made.
             b.decisionOutcome = d.outcome === "taken"
               ? { outcome: "taken" }
-              : { outcome: "refused", error: String(d.error ?? "") };
+              : d.outcome === "interrupted"
+                ? { outcome: "interrupted", error: String(d.error ?? "") }
+                : { outcome: "refused", error: String(d.error ?? "") };
             break;
           }
         }
@@ -922,6 +928,22 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           }
         }
         openGate = null;
+        break;
+      }
+      case "accept_settled": {
+        // B-529: an interrupted accept produced no reproduction, so no
+        // gate_reproduced closes its announced replay. Close it as what it
+        // was — stopped, not red — so the lane neither spins forever nor
+        // shows a failed gate that nobody ran to the end.
+        if (d.outcome === "interrupted") {
+          for (const gate of blocks) {
+            if (gate.role === "gate" && gate.gatePhase === "accept" && !gate.done) {
+              gate.done = true;
+              gate.gate = "interrupted";
+            }
+          }
+          openGate = null;
+        }
         break;
       }
       case "round_gate": {

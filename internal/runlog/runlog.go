@@ -214,6 +214,15 @@ type Run struct {
 	// paused | pausing | continuing | ended, with role, seat, actions and any
 	// candidate). Derived by the engine on read, never authoritative on disk.
 	Escalation map[string]interface{} `json:"escalation,omitempty"`
+	// AcceptInProgress is true while an accept is running for this run —
+	// usually reproducing its gate from a clean checkout. Derived on read like
+	// Next and never meaningful in a persisted copy: an accept does not survive
+	// the engine (B-529).
+	AcceptInProgress bool `json:"accept_in_progress,omitempty"`
+	// LastAccept is the newest accept_settled event's data — outcome
+	// (accepted, refused, interrupted), error, commit_sha — derived on read,
+	// so a caller told "in progress" finds the outcome on the run itself.
+	LastAccept map[string]interface{} `json:"last_accept,omitempty"`
 	// StageRequest is the persisted artifact-stage launch request, exposed on
 	// reads so an operator can replay an amendment without losing its shape.
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`

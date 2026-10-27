@@ -1022,7 +1022,12 @@ func checkTestGate(mode string) error {
 func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstRequest) {
 	runID := rs.snapshotRun().ID
 	// The worker accepting its own run must not wait for itself to finish.
-	if _, err := s.RunAcceptAs(asWorker(ctx, rs), runID, "chained: the test landed red", "auto:tdd"); err != nil {
+	// And the chain waits for its accept's outcome whatever happens to ctx:
+	// the accept runs on its own context, which abort and shutdown cancel,
+	// and a cancelled wait here would read an accept still in flight as a
+	// success (B-529).
+	if _, err := s.RunAcceptAs(context.WithoutCancel(asWorker(ctx, rs)), runID, "chained: the test landed red", "auto:tdd"); err != nil {
+		interrupted := errors.Is(err, ErrDecisionInterrupted)
 		rs.wmu.Lock()
 		setRunStatus(rs.run, "paused", time.Now())
 		rs.run.PendingKind = "gate"
@@ -1031,10 +1036,16 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 			rs.run.PendingData = map[string]interface{}{}
 		}
 		rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
-		rs.writer.AppendEvent("warning", map[string]interface{}{
-			"detail": fmt.Sprintf("tdd chain: accept failed (%v); decide this run by hand", err),
-		})
-		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "verdict": rs.run.Verdict})
+		detail := fmt.Sprintf("tdd chain: accept failed (%v); decide this run by hand", err)
+		if interrupted {
+			detail = fmt.Sprintf("tdd chain: accept interrupted (%v); the red test waits at its gate — accept it to reproduce again", err)
+		}
+		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": detail})
+		// An interrupted reproduction is not a gate for a person to judge: it
+		// never finished. The run waits at its gate; nobody is paged for it.
+		if !interrupted {
+			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "verdict": rs.run.Verdict})
+		}
 		rs.writer.WriteState()
 		rs.wmu.Unlock()
 	}

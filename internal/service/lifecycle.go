@@ -641,6 +641,7 @@ func (s *Service) PauseAllRuns(ctx context.Context) error {
 	// The apps the engine manages die with it — a process nobody can see or
 	// stop from any surface is worse than a stopped app.
 	s.stopAllApps()
+	s.interruptAccepts(ctx)
 
 	s.runsMu.RLock()
 	var active []*runState
