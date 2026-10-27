@@ -1306,6 +1306,10 @@ type AcceptResult struct {
 	// continues on the run's own context, and its outcome arrives as the
 	// run's accept_settled event. Info says so in words.
 	InProgress bool `json:"in_progress,omitempty"`
+	// Attempt identifies the accept this answer is about: accept_settled and
+	// run_get's last_accept carry the same id, so a caller told "in
+	// progress" can tell its own settlement from an older attempt's.
+	Attempt string `json:"attempt,omitempty"`
 	// job is the accept an InProgress answer is waiting on, and joined says
 	// this call joined an accept someone else started (it decided nothing).
 	// Engine-internal: an approved accept (B-530) settles its request when
@@ -2658,7 +2662,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// "running" forever with nothing left alive. The work already passed
 		// its own gate, so the honest state is paused-at-gate wearing the
 		// acceptance failure, exactly like reviewer dissent.
-		if aerr := s.acceptRun(ctx, rs, entry, "", ""); aerr != nil {
+		if aerr := s.unattendedAccept(ctx, rs, entry, ""); aerr != nil {
 			detail := fmt.Sprintf("auto-accept failed: %v — decide it yourself", aerr)
 			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "gate"
@@ -2671,7 +2675,6 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				// finished, so there is no gate result to page a person
 				// about. It waits at its gate; an accept reproduces again.
 				rs.run.PendingData["detail"] = fmt.Sprintf("auto-accept interrupted: %v", aerr)
-				rs.writer.AppendEvent("accept_settled", map[string]interface{}{"outcome": "interrupted", "error": aerr.Error()})
 				rs.writer.WriteState()
 				return
 			}
@@ -4565,11 +4568,21 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// lock: its replay is killed and it settles "interrupted" — never as a
 	// failed gate — and releases the lock. If it landed before the cancel
 	// reached it, the decided check below says so.
-	if job := rs.cancelAccept(errCauseAborted); job != nil {
-		<-job.done
+	// Atomic with the lock: an accept that starts between the cancel and the
+	// lock would otherwise hold it for its whole replay. Cancelled again
+	// until the lock is taken with no accept in flight; one started after
+	// that waits behind this abort and finds the run settled.
+	var unlock func()
+	for {
+		if job := rs.cancelAccept(errCauseAborted); job != nil {
+			<-job.done
+		}
+		var lockErr error
+		if unlock, lockErr = lockDecisionUnlessAccepting(rs, "abort"); lockErr == nil {
+			break
+		}
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
+	defer unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return err
 	}
@@ -4987,7 +5000,7 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	case <-job.done:
 		return settled()
 	case <-ctx.Done():
-		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined), job: job, joined: joined}, nil
+		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined), Attempt: job.attempt, job: job, joined: joined}, nil
 	}
 }
 
@@ -5292,11 +5305,11 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	if err := acceptInFlightRefusal(rs, "land"); err != nil {
+	unlock, err := lockDecisionUnlessAccepting(rs, "land")
+	if err != nil {
 		return err
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
+	defer unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return err
 	}
@@ -5634,11 +5647,11 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	if err := acceptInFlightRefusal(rs, "reject"); err != nil {
-		return err
+	unlock, lockErr := lockDecisionUnlessAccepting(rs, "reject")
+	if lockErr != nil {
+		return lockErr
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
+	defer unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return err
 	}

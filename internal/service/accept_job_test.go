@@ -393,7 +393,10 @@ func TestLastAcceptIsTheSameSettlementFromMemoryAndFromTheLog(t *testing.T) {
 	}
 	live, _ := s.RunGet(context.Background(), run.ID)
 	fromMemory := live.Run.LastAccept
-	want := map[string]interface{}{"outcome": "accepted", "commit_sha": got.res.CommitSHA}
+	want := map[string]interface{}{"outcome": "accepted", "commit_sha": got.res.CommitSHA, "attempt": got.res.Attempt}
+	if got.res.Attempt == "" {
+		t.Fatal("the settled accept carries no attempt id")
+	}
 	if got.res.Warning != "" {
 		want["warning"] = got.res.Warning
 	}

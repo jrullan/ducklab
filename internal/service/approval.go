@@ -339,7 +339,7 @@ func (s *Service) approvalInProgress(rs *runState, req runlog.ApprovalRequest, j
 		<-job.done
 		res := job.result
 		if joined {
-			res = joinedNote(res, "")
+			res = joinedNote(res, "") // marked joined even when res is nil
 		}
 		afterApprovalSettled(s.resolveApproval(rs, req, res, job.err))
 	}()
@@ -374,6 +374,15 @@ func (s *Service) resolveApproval(rs *runState, req runlog.ApprovalRequest, acce
 	}
 	mu := approvalLock(rs.run.ID)
 	mu.Lock()
+	// A request settles once: if something already settled it (recovery,
+	// after the engine that ran its decision died), that stands (review of
+	// #181 — a reached status never regresses or changes).
+	for _, cur := range rs.snapshotRun().ApprovalRequests {
+		if cur.ID == req.ID && cur.Status != ApprovalApproved && cur.Status != ApprovalPending {
+			mu.Unlock()
+			return cur
+		}
+	}
 	_ = s.setApproval(rs, req)
 	mu.Unlock()
 	if w, werr := s.ensureWriter(rs); werr == nil {
@@ -416,6 +425,12 @@ func (s *Service) settleInterruptedApprovals(rs *runState) bool {
 		}
 		if s.setApproval(rs, req) == nil {
 			changed = true
+			// The same observable the live path writes (review of #181).
+			if w, werr := s.ensureWriter(rs); werr == nil {
+				_ = w.AppendEvent("approval_resolved", map[string]interface{}{
+					"request": req, "requested_by": req.RequestedBy, "approved_by": req.DecidedBy,
+				})
+			}
 		}
 	}
 	return changed

@@ -532,11 +532,11 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 		return fmt.Errorf("run %q not found", originalID)
 	}
 	// Not queued behind an accept's gate replay (B-529): refused, named.
-	if err := acceptInFlightRefusal(prior, "relaunch"); err != nil {
+	unlock, err := lockDecisionUnlessAccepting(prior, "relaunch")
+	if err != nil {
 		return err
 	}
-	prior.decisionMu.Lock()
-	defer prior.decisionMu.Unlock()
+	defer unlock()
 	// A paused original whose worker is still tearing down is not claimed
 	// over it: the claim would write a log that worker is about to close.
 	if err := s.settleWorker(ctx, prior); err != nil {
@@ -952,7 +952,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			rs.writer.WriteState()
 			rs.wmu.Unlock()
 			if entry, err := s.entryFor(rs); err == nil {
-				if err := s.acceptRun(ctx, rs, entry, "", "auto-triage"); err == nil {
+				if err := s.unattendedAccept(ctx, rs, entry, "auto-triage"); err == nil {
 					return
 				}
 			}

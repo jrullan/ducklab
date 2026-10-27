@@ -633,6 +633,7 @@ export interface RunlogReviewFinding {
 }
 
 export interface RunlogRun {
+  accept_attempt?: string;
   accept_in_progress?: boolean;
   acceptance_gate?: RunlogGateReproduction;
   accepted?: boolean;
@@ -739,6 +740,7 @@ export interface RunlogVisualGate {
 }
 
 export interface ServiceAcceptResult {
+  attempt?: string;
   commit_sha?: string;
   in_progress?: boolean;
   info?: string;

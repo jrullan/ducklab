@@ -178,8 +178,11 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			if changed, err := s.reconcileAcceptedRun(rs); err == nil && changed {
 				repaired++
 			}
-			// After the accepted-run repair, so an approval whose accept
-			// landed before the crash reads as landed (B-530).
+			// After the accepted-run repair, so an accept (and an approval)
+			// that landed before the crash reads as landed, not interrupted.
+			if s.settleInterruptedAccept(rs) {
+				repaired++
+			}
 			if s.settleInterruptedApprovals(rs) {
 				repaired++
 			}

@@ -118,6 +118,9 @@ export interface AcceptResult {
   /** The accept outlived the request (B-529): still verifying, nothing
    * decided, commit_sha empty. Its outcome arrives as accept_settled. */
   in_progress?: boolean;
+  /** The accept attempt this answer is about; accept_settled and
+   * last_accept carry the same id. */
+  attempt?: string;
 }
 
 export interface Project {
@@ -367,7 +370,7 @@ export interface Run {
   accept_in_progress?: boolean;
   /** The newest accept_settled payload: outcome accepted | refused |
    * interrupted, with commit_sha or error. Set on a run read. */
-  last_accept?: { outcome?: string; commit_sha?: string; error?: string; warning?: string; info?: string };
+  last_accept?: { attempt?: string; outcome?: string; commit_sha?: string; error?: string; warning?: string; info?: string };
   /** Accepted commit is absent from all configured remote refs. */
   local_only?: boolean;
   /** Publication receipts, including retryable policy-push failures. */

@@ -222,6 +222,10 @@ type Run struct {
 	// Next and never meaningful in a persisted copy: an accept does not survive
 	// the engine (B-529).
 	AcceptInProgress bool `json:"accept_in_progress,omitempty"`
+	// AcceptAttempt is the accept attempt put on the record and not yet
+	// closed by its accept_settled (B-529). Persisted: a next engine that
+	// finds it set settles it, because the engine running it died.
+	AcceptAttempt string `json:"accept_attempt,omitempty"`
 	// LastAccept is the newest accept_settled event's data — outcome
 	// (accepted, refused, interrupted), error, commit_sha — derived on read,
 	// so a caller told "in progress" finds the outcome on the run itself.

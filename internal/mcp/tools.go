@@ -1402,8 +1402,8 @@ func noteRefusal(action string) string {
 // accept before it settled. Nothing has been decided yet.
 const acceptInProgress = "NOT YET DECIDED — the accept is in progress: the engine is reproducing the gate from a clean checkout and continues on its own; it was not cut off and did not fail. " +
 	"Do not call decide again — a retry joins the same accept and starts nothing. " +
-	"See the outcome with run_get: accept_in_progress=true while it runs; once it settles, last_accept.outcome says accepted (with commit_sha; status done), " +
-	"refused (with the error; the run still waits at its gate), or interrupted (an abort or engine shutdown stopped the replay; nothing was decided)."
+	"See the outcome with run_get: accept_in_progress=true while it runs; once it settles, the last_accept whose attempt equals this reply's attempt says accepted (with commit_sha; status done), " +
+	"refused (with the error; the run still waits at its gate), or interrupted (an abort or engine shutdown stopped the replay; nothing was decided). A last_accept with another attempt is an older accept, not this one."
 
 func acceptedAsShown(stage string) string {
 	msg := "accepted exactly as proposed; your reason is recorded as the decision and changed nothing"

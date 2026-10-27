@@ -44,7 +44,7 @@ export async function acceptAndSettle(
     useRuns.getState().confirmAccept(runId, res.commit_sha);
     return res;
   }
-  useRuns.getState().acceptInProgress(runId);
+  useRuns.getState().acceptInProgress(runId, res.attempt);
   return settled(client, runId);
 }
 

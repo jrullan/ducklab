@@ -2147,6 +2147,9 @@
       },
       "RunlogRun": {
         "properties": {
+          "accept_attempt": {
+            "type": "string"
+          },
           "accept_in_progress": {
             "type": "boolean"
           },
@@ -2538,6 +2541,9 @@
       },
       "ServiceAcceptResult": {
         "properties": {
+          "attempt": {
+            "type": "string"
+          },
           "commit_sha": {
             "type": "string"
           },

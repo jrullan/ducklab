@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jrullan/ducklab/internal/registry"
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 // B-529: an accept that rebased onto a moved default branch replayed its gate
@@ -48,6 +51,10 @@ type acceptJob struct {
 	cancel   context.CancelCauseFunc
 	result   *AcceptResult
 	err      error
+	// attempt identifies this accept on the record (accept_started,
+	// accept_settled, last_accept). Set when the decision is held; read
+	// only after held or done closes.
+	attempt string
 }
 
 // acceptInFlight returns the accept running on this run, or nil.
@@ -92,21 +99,188 @@ func (s *Service) startAccept(rs *runState, work func(ctx context.Context, held 
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	job = &acceptJob{done: make(chan struct{}), held: make(chan struct{}), cancel: cancel}
-	markHeld := func() { job.heldOnce.Do(func() { close(job.held) }) }
+	// Holding the decision is also where the attempt goes on the record:
+	// from here on exactly one accept_settled closes it — written by this
+	// job, or by the next engine's recovery if this one dies first.
+	markHeld := func() {
+		job.heldOnce.Do(func() {
+			job.attempt = s.beginAcceptAttempt(rs)
+			close(job.held)
+		})
+	}
 	rs.accepting = job
 	go func() {
 		defer func() {
 			cancel(nil)
 			rs.acceptMu.Lock()
 			rs.accepting = nil
-			rs.lastAccept = settlementData(job.result, job.err)
 			rs.acceptMu.Unlock()
 			close(job.done)
 		}()
 		job.result, job.err = work(ctx, markHeld)
-		s.recordAcceptSettled(rs, job.result, job.err)
+		if job.result != nil {
+			job.result.Attempt = job.attempt
+		}
+		s.settleAcceptAttempt(rs, job.attempt, job.result, job.err)
 	}()
 	return job, false, nil
+}
+
+// newAcceptAttempt names one accept attempt. Unique across engine restarts,
+// so a settlement can never be mistaken for another attempt's.
+func newAcceptAttempt() string {
+	return fmt.Sprintf("acc-%d", time.Now().UnixNano())
+}
+
+// beginAcceptAttempt puts an accept attempt on the record: accept_started,
+// and the run's AcceptAttempt, which stays set until its accept_settled is
+// written. A next engine that finds it set settles it (settleInterruptedAccept)
+// — the attempt was in flight when this engine died (review of #181: an
+// accept killed with the engine wrote no settlement, and run_get then
+// reported an older attempt's as last_accept). Only called once the run's
+// worker no longer owns the log.
+func (s *Service) beginAcceptAttempt(rs *runState) string {
+	attempt := newAcceptAttempt()
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return attempt
+	}
+	rs.wmu.Lock()
+	rs.run.AcceptAttempt = attempt
+	_ = w.WriteState()
+	rs.wmu.Unlock()
+	_ = w.AppendEvent("accept_started", map[string]interface{}{"attempt": attempt})
+	return attempt
+}
+
+// settleAcceptAttempt is the one terminal record of an accept: in memory for
+// run_get, and — for an attempt that was put on the record — the
+// accept_settled event that closes it. Every accept path ends here exactly
+// once: the job, the unattended accepts, and recovery.
+//
+// An attempt that never held the decision (refused by B-522's teardown guard
+// while the paused worker still owned the log) writes nothing: no caller was
+// told "in progress" for it, the refusal reached its caller directly, and
+// the door's promise is that it wrote nothing.
+func (s *Service) settleAcceptAttempt(rs *runState, attempt string, result *AcceptResult, err error) {
+	data := settlementData(result, err)
+	if attempt != "" {
+		data["attempt"] = attempt
+	}
+	rs.acceptMu.Lock()
+	rs.lastAccept = data
+	rs.acceptMu.Unlock()
+	var finishing *RunFinishingError
+	if attempt == "" || errors.As(err, &finishing) {
+		return
+	}
+	// A log that refuses the write leaves the outcome in memory, and
+	// AcceptAttempt set: the next engine settles it from the record.
+	w, werr := s.ensureWriter(rs)
+	if werr != nil {
+		return
+	}
+	if w.AppendEvent("accept_settled", data) != nil {
+		return
+	}
+	rs.wmu.Lock()
+	if rs.run.AcceptAttempt == attempt {
+		rs.run.AcceptAttempt = ""
+	}
+	_ = w.WriteState()
+	rs.wmu.Unlock()
+}
+
+// unattendedAccept is acceptRun for the accepts no caller waits on — yolo's
+// auto-accept and auto-triage — with the same record as every other accept:
+// one attempt, one accept_settled. They run on the run's own worker, which
+// owns the log, so they write it directly.
+func (s *Service) unattendedAccept(ctx context.Context, rs *runState, entry *registry.ProjectEntry, actor string) error {
+	attempt := s.beginAcceptAttempt(rs)
+	err := s.acceptRun(ctx, rs, entry, "", actor)
+	var result *AcceptResult
+	if err == nil {
+		run := rs.snapshotRun()
+		result = &AcceptResult{CommitSHA: run.CommitSHA, Warning: run.Warning, Info: publicationInfo(run)}
+	}
+	s.settleAcceptAttempt(rs, attempt, result, err)
+	return err
+}
+
+// settleInterruptedAccept runs as an engine recovers a run: an attempt still
+// on the record was in flight when the last engine died (kill -9, a crash,
+// or a shutdown whose bounded wait gave up), so no accept_settled closed it.
+// It is closed now, from what the record shows — accepted with its commit
+// when the accept landed before the engine died, interrupted otherwise —
+// with the same payload, decision_outcome included, that the live path
+// would have written. Mirrors settleInterruptedApprovals.
+func (s *Service) settleInterruptedAccept(rs *runState) bool {
+	run := rs.snapshotRun()
+	if run.AcceptAttempt == "" {
+		return false
+	}
+	events, _ := runlog.ReadEvents(rs.runDir)
+	settled, decisionOpen := attemptRecord(events, run.AcceptAttempt)
+	if settled {
+		// The engine died between writing accept_settled and clearing the
+		// attempt: it is closed already, and exactly once.
+		if w, werr := s.ensureWriter(rs); werr == nil {
+			rs.wmu.Lock()
+			rs.run.AcceptAttempt = ""
+			_ = w.WriteState()
+			rs.wmu.Unlock()
+		}
+		return true
+	}
+	var result *AcceptResult
+	var err error
+	if run.Accepted && run.CommitSHA != "" {
+		result = &AcceptResult{CommitSHA: run.CommitSHA, Warning: run.Warning, Info: publicationInfo(run)}
+	} else {
+		err = fmt.Errorf("%w: the engine stopped while this accept was in flight; nothing was decided — the run keeps its gate, and accept may be retried", ErrDecisionInterrupted)
+	}
+	// The live path closes a recorded decision with decision_outcome; so
+	// does this, and only when this attempt recorded one.
+	if decisionOpen {
+		if w, werr := s.ensureWriter(rs); werr == nil {
+			data := map[string]interface{}{"action": "accept", "outcome": "taken"}
+			if err != nil {
+				data["outcome"], data["error"] = "interrupted", err.Error()
+			}
+			_ = w.AppendEvent("decision_outcome", data)
+		}
+	}
+	s.settleAcceptAttempt(rs, run.AcceptAttempt, result, err)
+	return true
+}
+
+// attemptRecord reads what the log holds for one accept attempt: whether an
+// accept_settled already closed it, and whether it recorded a decision (an
+// accept with words) that no decision_outcome has closed.
+func attemptRecord(events []*runlog.Event, attempt string) (settled, decisionOpen bool) {
+	started := false
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		switch e.Type {
+		case "accept_started":
+			started = e.Data["attempt"] == attempt
+		case "accept_settled":
+			if e.Data["attempt"] == attempt {
+				settled = true
+			}
+		case "decision":
+			if started && e.Data["action"] == "accept" {
+				decisionOpen = true
+			}
+		case "decision_outcome":
+			if started && e.Data["action"] == "accept" {
+				decisionOpen = false
+			}
+		}
+	}
+	return settled, decisionOpen
 }
 
 // lastAcceptSettlement is the newest settlement this engine produced, or nil.
@@ -141,28 +315,6 @@ func settlementData(result *AcceptResult, err error) map[string]interface{} {
 		}
 	}
 	return data
-}
-
-// recordAcceptSettled closes the accept on the run's stream. A caller that
-// stopped waiting was told the accept was in progress; this is where the
-// outcome it was promised arrives, for every accept, whoever is watching.
-func (s *Service) recordAcceptSettled(rs *runState, result *AcceptResult, err error) {
-	// Refused because the paused worker was still tearing down: that worker
-	// is about to close the log, and the door's promise is that it wrote
-	// nothing (B-522). No caller was told "in progress" for it — that waits
-	// for the decision to be held — so the refusal reached its caller
-	// directly, and run_get's last_accept carries it from memory.
-	var finishing *RunFinishingError
-	if errors.As(err, &finishing) {
-		return
-	}
-	// A log that refuses the write leaves the outcome in memory only
-	// (rs.lastAccept, set by the job): run_get still shows it.
-	w, werr := s.ensureWriter(rs)
-	if werr != nil {
-		return
-	}
-	_ = w.AppendEvent("accept_settled", settlementData(result, err))
 }
 
 // acceptInProgressInfo is what a caller that stopped waiting is told. It
@@ -214,21 +366,41 @@ func (s *Service) interruptAccepts(ctx context.Context) {
 	}
 }
 
-// acceptInFlightRefusal refuses another decision while an accept is in flight.
+// lockDecisionUnlessAccepting takes the run's decision lock for a door other
+// than accept, or refuses while an accept is in flight — atomically (review
+// of #181): checked first and locked after, an accept starting in between
+// held the lock for its whole gate replay and the door hung behind it.
+//
+// The check and the lock happen under acceptMu. An accept job is installed
+// (accepting set) before it takes decisionMu and cleared after it releases
+// it, so with accepting nil the lock's holder, if any, is a short door, and
+// waiting for it under acceptMu is brief.
+func lockDecisionUnlessAccepting(rs *runState, action string) (unlock func(), err error) {
+	rs.acceptMu.Lock()
+	defer rs.acceptMu.Unlock()
+	if rs.accepting != nil {
+		return nil, acceptInFlightError(rs, action)
+	}
+	rs.decisionMu.Lock()
+	return rs.decisionMu.Unlock, nil
+}
+
+// acceptInFlightError refuses another decision while an accept is in flight.
 // Reject and land used to queue on decisionMu behind the whole gate replay —
 // a click that hangs for the length of a test suite and then answers about a
 // run that has meanwhile changed. Abort is the door that stops an accept.
-func acceptInFlightRefusal(rs *runState, action string) error {
-	if rs.acceptInFlight() == nil {
-		return nil
-	}
+func acceptInFlightError(rs *runState, action string) error {
 	return fmt.Errorf("%s refused: an accept of run %s is in progress (reproducing its gate from a clean checkout); wait for its accept_settled outcome, or abort the run to stop it", action, rs.run.ID)
 }
 
 // joinedNote marks a joined call's result: its own words decided nothing.
+//
+// A joined call is marked joined whatever the accept's outcome: a refused or
+// interrupted accept has no result, and dropping the mark with it recorded
+// an approval that joined someone else's accept as "failed" (review of #181).
 func joinedNote(res *AcceptResult, msg string) *AcceptResult {
 	if res == nil {
-		return nil
+		res = &AcceptResult{}
 	}
 	out := *res
 	out.joined = true
