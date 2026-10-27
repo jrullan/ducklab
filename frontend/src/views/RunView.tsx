@@ -7,7 +7,7 @@ import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
-import { EscalationSuggestionCard } from "../components/EscalationSuggestionCard";
+import { EscalationSuggestionCard, escalationState } from "../components/EscalationSuggestionCard";
 import { ConfigAmendmentCard, shouldShowConfigAmendment } from "../components/ConfigAmendmentCard";
 import { ConfigFailureCard } from "../components/ConfigFailureCard";
 import { CandidateCard } from "../components/CandidateCard";
@@ -968,12 +968,34 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // instead: a fresh launch and a re-run are different intents, and each
   // panel says which one it serves.)
   const relaunchDucklings = seatsFromRoster(run.mode, run.roster);
-  // A stronger seat replaces the IMPLEMENTER position; shifting the list
-  // would move every other seat into a role it never had (B-394). Participant
-  // modes seed nothing positional, so the suggestion cannot ride there.
-  const suggestedDucklings = escalationCandidate && relaunchDucklings.length
-    ? relaunchDucklings.map((id, i) => (i === 0 ? escalationCandidate : id === escalationCandidate ? "" : id))
+  // A stronger seat replaces the position of the ROLE the evidence is about;
+  // shifting the list would move every other seat into a role it never had
+  // (B-394), and assuming position 0 put a triager's replacement in an
+  // implementer's chair (B-522). Participant modes seed nothing positional,
+  // so the suggestion cannot ride there.
+  const escalationRole = typeof latestEscalation?.data?.role === "string" && latestEscalation.data.role
+    ? latestEscalation.data.role
+    : "implementer";
+  const escalationIndex = rolesForMode(run.mode)?.indexOf(escalationRole) ?? -1;
+  const suggestedDucklings = escalationCandidate && escalationIndex >= 0 && relaunchDucklings.length
+    ? Array.from({ length: Math.max(relaunchDucklings.length, escalationIndex + 1) }, (_, i) => relaunchDucklings[i] ?? "")
+      .map((id, i) => (i === escalationIndex ? escalationCandidate : id === escalationCandidate ? "" : id))
     : relaunchDucklings;
+  // B-522: a triage has its own relaunch door — the same bugs, the triager
+  // the person picked, the earlier run ended by the engine first.
+  const relaunchTriage = async (seat: string) => {
+    setActionError(null);
+    setRelaunchBusy(true);
+    setRelaunchError(null);
+    try {
+      const started = await client.triageRelaunch(run.project_id, run.id, seat);
+      setRelaunched(started.id);
+    } catch (e) {
+      setRelaunchError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRelaunchBusy(false);
+    }
+  };
 
   const retryTo = retryRoute(run);
   const relaunch = async (opts: LaunchOpts) => {
@@ -1610,22 +1632,52 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <EscalationSuggestionCard
           key={latestEscalation.seq ?? "escalation"}
           event={latestEscalation}
-          onRelaunch={(candidate) => {
-            // A decision dispatches the card: choose the candidate AND drop the
-            // suggestion from the run view so it does not remain visible.
-            setEscalationCandidate(candidate);
-            dismissEscalation(latestEscalation);
-          }}
+          state={escalationState(latestEscalation, events, run)}
+          hasTask={!!run.task_id}
+          stage={run.stage}
+          seatChoices={fleet.map((duckling) => duckling.id)}
+          onRelaunch={run.stage === "triage"
+            ? (seat) => {
+              dismissEscalation(latestEscalation);
+              void relaunchTriage(seat);
+            }
+            : run.task_id
+              ? (candidate) => {
+                // A decision dispatches the card: choose the candidate AND drop the
+                // suggestion from the run view so it does not remain visible.
+                setEscalationCandidate(candidate);
+                dismissEscalation(latestEscalation);
+              }
+              : undefined}
           onOpenTask={() => {
             setTaskOpen(true);
             dismissEscalation(latestEscalation);
           }}
           onContinue={() => {
             dismissEscalation(latestEscalation);
+            // Only a paused run has anything to resume. On a run that kept
+            // working, "continue" is the person agreeing with that — resuming
+            // a running run only errors.
+            if (run.status !== "paused") return;
             void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+          }}
+          onAbort={() => {
+            dismissEscalation(latestEscalation);
+            void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
           }}
           secondary={!runIsLive || decisionOpen || !!run.failure}
         />
+      )}
+      {run.stage === "triage" && (relaunchBusy || relaunched || relaunchError) && (
+        <section data-testid="triage-relaunch" className="m-2 rounded-card border border-hairline p-3 text-sm">
+          {relaunchBusy && <p>Relaunching triage…</p>}
+          {relaunched && (
+            <a href={`#/runs/${relaunched}`} data-testid="relaunch-link" className="text-ink underline">
+              started {relaunched}
+            </a>
+          )}
+          {relaunchError && <p className="text-critical" data-testid="relaunch-error">{relaunchError}</p>}
+        </section>
       )}
       {run.stage !== "chat" && configFailure && (() => {
         const data = configFailure.data ?? {};

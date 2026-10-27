@@ -625,6 +625,7 @@ export interface RunlogRun {
   desktop_stale?: boolean;
   dry_run?: boolean;
   ended_at?: string;
+  escalation?: Record<string, unknown>;
   execution_root?: string;
   failure?: string;
   gate?: string;
@@ -651,6 +652,7 @@ export interface RunlogRun {
   project_id?: string;
   queued_reason?: string;
   redo_note?: RunlogRedoNote;
+  relaunch_of?: string;
   remote_receipts?: Record<string, unknown>[];
   resolution?: string;
   resume_notes?: RunlogResumeNote[];
@@ -823,6 +825,13 @@ export interface ServiceBugRequest {
   severity?: string;
   source?: string;
   title?: string;
+}
+
+export interface ServiceBugTriageRequest {
+  bug_id?: string;
+  bug_ids?: string[];
+  ducklings?: string[];
+  relaunch_of?: string;
 }
 
 export interface ServiceCandidate {

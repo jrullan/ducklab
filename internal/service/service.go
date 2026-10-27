@@ -1789,9 +1789,11 @@ func (s *Service) QueueStats() (running, waiting, limit int) {
 
 // executeDryRun renders prompts without calling any model. Synchronous.
 func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req RunRequest) {
+	// done closes last: the log is closed before a waiting decision may
+	// reopen it (settleWorker).
+	defer close(rs.done)
 	defer rs.writer.Close()
 	defer s.cleanupRunWorktree(rs, entry.Path)
-	defer close(rs.done)
 
 	// Load project config
 	ducklabDir := filepath.Join(entry.Path, ".ducklab")
@@ -2014,11 +2016,13 @@ func verifyOverride(cfg config.Verify, command string) config.Verify {
 }
 
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
-	defer rs.writer.Close()
 	// A worktree remains available at a human gate: acceptance must commit and
 	// prove its isolated changes, and a rebase conflict is resolved there by
 	// hand. Accept and reject remove it after recording their terminal decision.
+	// done closes after the log does, so a decision waiting for this worker
+	// (settleWorker) never takes a writer that is about to close.
 	defer close(rs.done)
+	defer rs.writer.Close()
 	defer recoverRun(rs)
 
 	// Load project config
@@ -2090,7 +2094,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// was paused — and its ledger continues from what it already spent: a
 		// tracker reborn at zero would have made "resume" a way to double
 		// every budget, and the record would undercount the run's true cost.
-		recorded, resumed := trackerFromRecord(rs.run)
+		recorded, resumed := resumedTracker(rs.snapshotRun(), &b)
 		b, tracker = *recorded, resumed
 	}
 	rs.setTracker(tracker)
@@ -2718,10 +2722,15 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 	counts := map[int]int{}
 	stuckItem, stuckReports, turns, redStreak, bestRed := 0, 0, 0, 0, 0
 	modeMedian := s.modeTurnMedian(rs.run.Mode, rs.run.ID)
+	// The seat this evidence is about is the one the run actually seated: a
+	// failed triage counted implementer turns (none), asked for implementer
+	// candidates against an empty seat, and offered to edit a task it did
+	// not have (B-522).
+	shape := escalationShapeFor(rs.snapshotRun())
 	for _, e := range events {
 		switch e.Type {
 		case "turn_start":
-			if role, _ := e.Data["role"].(string); role == "implementer" {
+			if role, _ := e.Data["role"].(string); role == shape.Role {
 				turns++
 			}
 		case "deliverables_report":
@@ -2790,11 +2799,14 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 		return
 	}
 	cards, _ := s.Scorecards(context.Background())
-	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), rs.run.Roster[string(config.RoleImplementer)], cards)
+	cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards)
 	if len(cands) == 0 {
 		return
 	}
-	rs.writer.AppendEvent("escalation_suggestion", map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0], "diagnoses": map[string]interface{}{"seat_at_capacity": map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body"}, "actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"}})
+	data := map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0],
+		"diagnoses": shape.diagnoses(map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "at-capacity and badly-briefed look identical; improve the task body")}
+	shape.stamp(data)
+	rs.writer.AppendEvent("escalation_suggestion", data)
 }
 
 // emitLaunchEscalation warns before this run's first model call when the same
@@ -2840,15 +2852,18 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 		return
 	}
 	cards, _ := s.Scorecards(context.Background())
-	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), current.Roster[string(config.RoleImplementer)], cards)
+	// Only task runs reach here (TaskID is required above), so the brief is
+	// a real diagnosis; the role still comes from the run, not a constant.
+	shape := escalationShapeFor(current)
+	cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards)
 	data := map[string]interface{}{
 		"point": "launch", "thresholds_fired": []string{"repeated_task_stage_failure"},
 		"prior_failed_or_aborted_runs": failures, "current_wilson_floor": floor,
 		"diagnoses": map[string]interface{}{"task_brief_quality": fmt.Sprintf(
 			"launch-time reminder from history, not evidence from this run: this task's %s stage has failed or been aborted here %d times; improve the task body before reseating",
 			current.Stage, failures)},
-		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
+	shape.stamp(data)
 	// A stronger candidate is useful reseating evidence, but its absence must
 	// not silence the task-level warning: improving the brief remains actionable.
 	if len(cands) > 0 {
@@ -4087,6 +4102,12 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
+	// The paused worker finishes closing its log before this resume takes a
+	// writer and starts the next worker on it; while it has not, the resume
+	// is refused rather than starting a second worker beside it.
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return nil, err
+	}
 	current := rs.snapshotRun()
 	if current.Status != "paused" {
 		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, current.Status)
@@ -4110,6 +4131,18 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 			return nil, fmt.Errorf("run %q waits at its gate, which resume does not answer — accept or reject it (their reason is recorded), or request changes to send your words to the next draft", id)
 		}
 		return current, nil
+	}
+	// A triage continues its own work list: the bugs it has not finished,
+	// never the ones whose proposals are already on the record (B-522).
+	if current.Stage == "triage" {
+		if note != "" {
+			return nil, fmt.Errorf("a triage run takes no note on resume — resume it without one")
+		}
+		entry, err := s.entryFor(rs)
+		if err != nil {
+			return nil, err
+		}
+		return s.resumeTriage(ctx, rs, current, entry.Path, w)
 	}
 	// Document stages re-enter through their persisted request, which has no
 	// channel for a note: their instruction travels as a revision. Refused
@@ -4463,7 +4496,36 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
+	// Abort is a decision like accept, reject and relaunch, and takes the
+	// same lock (review of #176): an abort interleaved with a relaunch claim
+	// rewrote the claimed original's resolution, and recovery then dropped
+	// the replacement as unclaimed. A run another decision consumed is not
+	// aborted over it.
+	rs.decisionMu.Lock()
+	defer rs.decisionMu.Unlock()
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	current := rs.snapshotRun()
+	// The full decision check (review of #176, 4383362596): only accepted
+	// and relaunched were refused, so reject-then-abort both succeeded and
+	// the terminal record went from done/FAILED to failed/ABORTED.
+	//
+	// Accepted or relaunched: an error — the work landed, or continues in
+	// the replacement, and "abort" would claim otherwise. Already aborted or
+	// settled: a no-op that changes nothing — abort's intent (this run does
+	// no more work and lands nothing) already holds, and callers chain an
+	// abort after other steps (the desktop's "accept amendment and
+	// relaunch", a double-click, the board's abort button) without first
+	// checking whether the run already ended. Words given with it cannot be
+	// recorded on a decision that did not happen, so a reason refuses
+	// instead of being dropped (B-524).
+	if decided := runDecided(current); decided != "" {
+		if current.Accepted || relaunchedByPattern.MatchString(current.Resolution) || strings.TrimSpace(reason) != "" {
+			return fmt.Errorf("run %q was already %s; there is nothing to abort", id, decided)
+		}
+		return nil
+	}
 	wasQueued := current.Status == "queued"
 	// Recorded before the worker is cancelled: a log that refuses the
 	// reason refuses the abort with it (review of #177).
@@ -4486,7 +4548,9 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// A terminal abort must not return while the isolated checkout is still
 	// being used: callers commonly tear down the project immediately afterward.
 	// Queued runs have no goroutine (and thus no done close) until promoted.
-	if !wasQueued && done != nil && (current.Stage == "build" || current.Stage == "test") {
+	// A triage too: its worker writes the gate when its loop ends, and an
+	// abort that returned first was overwritten by it (B-522).
+	if !wasQueued && done != nil && (current.Stage == "build" || current.Stage == "test" || current.Stage == "triage") {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -4685,6 +4749,10 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// Always recomputed: the stored copy cannot be allowed to disagree with
 	// the rules.
 	run.Next = runNext(run)
+	// The truthful state of the latest escalation card — paused, pausing at
+	// its safe point, or continuing — for clients that read the run and not
+	// its event stream (MCP run_get). Derived on read like Next.
+	run.Escalation = escalationView(run, events)
 	return &RunDetail{
 		Run: run, Events: events, LandingOffer: offer,
 	}, nil
@@ -4796,6 +4864,9 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return nil, err
+	}
 	// Accepted is the compare-and-set winner. A second client may have entered
 	// before the first response reached it; return the durable result instead
 	// of trying to inspect the worktree the winner has already removed.
@@ -4811,6 +4882,12 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 	if rs.run.Status == "done" {
 		return nil, fmt.Errorf("run %q is already settled (%s); there is no acceptance decision pending", id, rs.run.Resolution)
+	}
+	// A relaunch or an abort already decided this run (review of #176): an
+	// accept arriving after a triage was relaunched applied proposals the
+	// replacement was re-triaging.
+	if reason := runDecided(rs.run); reason != "" {
+		return nil, fmt.Errorf("run %q was already %s; there is no acceptance decision pending", id, reason)
 	}
 	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
@@ -5074,6 +5151,9 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		if strings.TrimSpace(sha) == "" || sha == rs.run.CommitSHA {
@@ -5410,9 +5490,18 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))
+	}
+	// Any earlier decision refuses this one, a settled run included: a
+	// second reject rewrote a finished run's verdict and appended a second
+	// run_end (review of #176).
+	if decided := runDecided(rs.run); decided != "" {
+		return fmt.Errorf("run %q was already %s; there is nothing to reject", id, decided)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -6317,37 +6406,62 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 	if rs.run.InterruptedTurn != nil {
 		stage = fmt.Sprintf("%s, round %d", rs.run.InterruptedTurn.Role, rs.run.InterruptedTurn.Round)
 	}
+	// What the card may say and offer depends on the run, not on the build
+	// loop this check was written for (B-522).
+	shape := escalationShapeFor(rs.run)
 	data := map[string]interface{}{
 		"point": "wallclock_history", "thresholds_fired": []string{"wallclock_over_history"},
 		"current_stage": stage,
 		"wallclock_s":   elapsed, "history_average_s": average, "history_runs": count,
 		"detail":    fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60),
-		"diagnoses": map[string]interface{}{"seat_at_capacity": "the current seat may be saturated", "task_brief_quality": "the brief may be too wide"},
-		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
+		"diagnoses": shape.diagnoses("the current seat may be saturated", "the brief may be too wide"),
 	}
-	rs.writer.AppendEvent("escalation_suggestion", data)
-	// Section-wise document updates are transactions held by the stage
-	// orchestrator: triage selects sections, then independent councils replace
-	// them in an in-memory candidate. A turn checkpoint can preserve one
-	// council conversation, but not that outer replacement ledger. Pausing a
-	// plan/spec/intake at a turn boundary therefore resumes into the wrong pass
-	// and can report "architect changed no sections" after approved work. Keep
-	// the advisory card, but let document transactions reach their human gate.
-	// Build/test work lives in a durable worktree and remains safely pausable.
-	if rs.run.Stage == "intake" || rs.run.Stage == "spec" || rs.run.Stage == "plan" {
+	shape.stamp(data)
+	// A stronger seat is named only with evidence for the role that ran. The
+	// card used to carry none at all, so its relaunch button was disabled
+	// forever with nothing to say why.
+	if cards, err := s.Scorecards(context.Background()); err == nil {
+		if cands, floor := escalationCandidatesFor(shape.Role, shape.Seat, cards); len(cands) > 0 {
+			data["candidate"] = cands[0]
+			data["current_wilson_floor"] = floor
+		}
+	}
+	if !shape.Pausable {
+		// Keep the advisory card, but say on the card itself that nothing
+		// stopped: "The run paused" over a working run is the defect.
+		data["pause"] = "deferred"
+		data["pause_detail"] = shape.DeferDetail
+		rs.writer.AppendEvent("escalation_suggestion", data)
 		rs.writer.AppendEvent("pause_deferred", map[string]interface{}{
-			"kind": "history_duration", "detail": "document transaction continues to its human gate",
+			"kind": "history_duration", "detail": shape.DeferDetail,
 		})
 		return
 	}
+	data["pause"] = "requested"
+	data["pause_detail"] = shape.PauseDetail
+	rs.writer.AppendEvent("escalation_suggestion", data)
 	// Pause at the next safe point, not now: the turn in flight finishes
-	// and its work lands on the record before the run stops (I9). The
-	// turn_end hook files the card and cancels.
+	// and its work lands on the record before the run stops (I9). Every
+	// pausable run kind calls pauseAtSafePoint at its own boundary — the
+	// build loop and test-first at turn_end, triage after each bug.
 	rs.wmu.Lock()
 	rs.pausePending = data
 	rs.wmu.Unlock()
 	rs.pauseAfterTurn.Store(true)
-	rs.writer.AppendEvent("pause_requested", map[string]interface{}{"kind": "history_duration", "detail": "pausing when the current turn ends"})
+	rs.writer.AppendEvent("pause_requested", map[string]interface{}{"kind": "history_duration", "detail": shape.PauseDetail})
+}
+
+// withdrawPendingPause gives up a requested pause that has no safe point left
+// to land at — the run's last unit of work just ended — and says so on the
+// record, so the card does not keep promising a pause that will never come.
+func (s *Service) withdrawPendingPause(rs *runState, detail string) {
+	if rs == nil || rs.writer == nil || !rs.pauseAfterTurn.CompareAndSwap(true, false) {
+		return
+	}
+	rs.wmu.Lock()
+	rs.pausePending = nil
+	rs.wmu.Unlock()
+	rs.writer.AppendEvent("pause_deferred", map[string]interface{}{"kind": "history_duration", "detail": detail})
 }
 
 // pauseAtSafePoint lands a requested pause once the turn in flight has

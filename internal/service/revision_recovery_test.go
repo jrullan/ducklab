@@ -118,4 +118,13 @@ func TestACrashAfterTheClaimFinalizesTheRevisionForResume(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(runlog.RunDirFor(root, child), stageRequestFile)); err != nil {
 		t.Fatalf("the finalized child cannot resume without its request: %v", err)
 	}
+	// Review of #176: a child recovered before it ever ran resumed with an
+	// all-zero Limit, which budget reads as unlimited. Its record carries the
+	// project's ceilings from birth, and resume keeps them.
+	assertProjectLimits(t, s, projectID, mustDisk(t, root, child), "recovered revision record")
+	cleanupStartedRun(t, s, child)
+	if _, err := s.RunResume(context.Background(), child); err != nil {
+		t.Fatal(err)
+	}
+	assertProjectLimits(t, s, projectID, waitForStatus(t, s, child, "paused", "gate"), "resumed revision")
 }

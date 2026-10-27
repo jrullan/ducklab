@@ -212,14 +212,25 @@ func (e escalationEvidence) fired() []string {
 	return out
 }
 
-func emitEscalationSuggestion(params *ExecuteParams, evidence escalationEvidence, point string) {
+func emitEscalationSuggestion(params *ExecuteParams, evidence escalationEvidence, point string, role config.Role) {
 	triggers := evidence.fired()
 	if len(triggers) == 0 {
 		return
 	}
+	// The task brief directs the implementer, and the service's candidates
+	// are implementer seats. A spec architect, a release scribe or a reviewer
+	// whose turn died here was offered "improve the task body" and an
+	// implementer to replace it with (B-522): the card fits the seat that
+	// produced the evidence, or it says nothing about tasks and reseating.
+	taskShaped := params.TaskID != "" && role == config.RoleImplementer
 	// nil means legacy/event-only callers: retain the evidence card. An
 	// explicitly empty candidate set means scorecard machinery found nobody.
+	// The service's candidates are implementer seats: for any other seat
+	// there is no same-role evidence, which is the same as finding nobody.
 	if params.EscalationCandidates != nil {
+		if !taskShaped {
+			return
+		}
 		stronger := false
 		for _, c := range params.EscalationCandidates {
 			if c.WilsonFloor > params.CurrentLowerBound {
@@ -236,13 +247,20 @@ func emitEscalationSuggestion(params *ExecuteParams, evidence escalationEvidence
 		"stuck_item": evidence.StuckItem, "stuck_reports": evidence.StuckReports,
 		"turns": evidence.Turns, "mode_median": evidence.ModeMedian,
 		"red_gate_streak": evidence.RedGateStreak,
+		"role":            string(role),
 		"diagnoses": map[string]interface{}{
-			"seat_at_capacity":   map[string]interface{}{"turns": evidence.Turns, "mode_median": evidence.ModeMedian, "consecutive_red_gates": evidence.RedGateStreak},
-			"task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body before reseating",
+			"seat_at_capacity": map[string]interface{}{"turns": evidence.Turns, "mode_median": evidence.ModeMedian, "consecutive_red_gates": evidence.RedGateStreak},
 		},
-		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as_is"},
+		"actions": []string{"continue_as-is", "abort"},
 	}
-	if params.EscalationCandidates != nil {
+	if seat := params.Roster[role]; seat != "" {
+		data["seat"] = string(seat)
+	}
+	if taskShaped {
+		data["diagnoses"].(map[string]interface{})["task_brief_quality"] = "at-capacity and badly-briefed look identical; improve the task body before reseating"
+		data["actions"] = []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"}
+	}
+	if taskShaped && len(params.EscalationCandidates) > 0 {
 		best := params.EscalationCandidates[0]
 		for _, c := range params.EscalationCandidates[1:] {
 			if c.WilsonFloor > best.WilsonFloor {
@@ -1054,7 +1072,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					emit(params, "distress_evidence", map[string]interface{}{
 						"kind": "unanswered_death", "role": string(turn.Role), "reason": reason,
 					})
-					emitEscalationSuggestion(params, evidence, "failed_run")
+					emitEscalationSuggestion(params, evidence, "failed_run", turn.Role)
 				}
 				if outcome != nil {
 					emitMessage(params, round, i, turn.Role, duckling, outcome)
@@ -1533,7 +1551,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						continue
 					}
 					if len(evidence.fired()) > 0 {
-						emitEscalationSuggestion(params, evidence, "distress_pause")
+						emitEscalationSuggestion(params, evidence, "distress_pause", turn.Role)
 					}
 					if summary, ok := operationalSummaryWithReport(outcome, lastReport); ok {
 						operational = summary

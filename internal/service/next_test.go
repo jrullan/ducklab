@@ -243,18 +243,21 @@ func TestAnAcceptedStageRunOffersTheNextStage(t *testing.T) {
 // re-enter through their persisted request. The promise and the menu now
 // agree, for every stage that can keep it.
 func TestAPausedDocumentStageOffersResume(t *testing.T) {
-	for _, stage := range []string{"intake", "spec", "plan", "build", "test"} {
+	// Triage joined the list with B-522: it re-enters from its own work list
+	// (run_start's bug_ids) and skips the bugs already on the record, so its
+	// history-duration pause has a resume that keeps the promise.
+	for _, stage := range []string{"intake", "spec", "plan", "build", "test", "triage"} {
 		r := &runlog.Run{Stage: stage, Status: "paused", PendingKind: "error"}
 		next := runNext(r)
 		if !slices.Contains(next, "resume") {
 			t.Errorf("a paused %s offers %v — the resume its pause text promises is missing", stage, next)
 		}
 	}
-	// A stage with no persisted-request machinery does not promise what it
-	// cannot keep.
-	r := &runlog.Run{Stage: "triage", Status: "paused", PendingKind: "error"}
+	// A stage with no re-entry machinery does not promise what it cannot
+	// keep: a release draft is held in memory until its gate.
+	r := &runlog.Run{Stage: "release", Status: "paused", PendingKind: "error"}
 	if slices.Contains(runNext(r), "resume") {
-		t.Error("triage cannot re-enter; offering resume would be a button that only errors")
+		t.Error("release cannot re-enter; offering resume would be a button that only errors")
 	}
 }
 

@@ -1828,6 +1828,14 @@ export class EngineClient {
       bugId ? { bug_id: bugId } : undefined,
     );
   }
+  /** Re-triage the bugs an earlier triage run was given, with another
+   * triager. The engine ends that run first if it has not ended (B-522). */
+  triageRelaunch(projectId: string, runId: string, triager: string) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/bugs/triage`, {
+      relaunch_of: runId,
+      ducklings: [triager],
+    });
+  }
   /** Correct what a report says. A bug could be moved, triaged and promoted but
    * never edited, so a typo or a missing detail lived as long as the bug did —
    * and the triager, and then the implementer, worked from it. */

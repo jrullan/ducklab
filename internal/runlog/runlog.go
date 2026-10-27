@@ -210,6 +210,10 @@ type Run struct {
 	// overwritten if a stale copy was persisted — clients render buttons from
 	// this list and never encode the loop's rules themselves.
 	Next []string `json:"next,omitempty"`
+	// Escalation is the latest escalation card's truthful state (state:
+	// paused | pausing | continuing | ended, with role, seat, actions and any
+	// candidate). Derived by the engine on read, never authoritative on disk.
+	Escalation map[string]interface{} `json:"escalation,omitempty"`
 	// StageRequest is the persisted artifact-stage launch request, exposed on
 	// reads so an operator can replay an amendment without losing its shape.
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`
@@ -220,6 +224,11 @@ type Run struct {
 	// changes, and Revision its place in the chain (1 for the first).
 	RevisesRun string `json:"revises_run,omitempty"`
 	Revision   int    `json:"revision,omitempty"`
+	// RelaunchOf is the triage run this one re-triages with another seat. The
+	// replacement is written prepared until the original's record names it
+	// ("relaunched as <id>"), so recovery can tell a real replacement from one
+	// an engine died preparing (B-522 review).
+	RelaunchOf string `json:"relaunch_of,omitempty"`
 	// InterruptedTurn is the last turn stopped by a pausing interruption.
 	InterruptedTurn *InterruptedTurn `json:"interrupted_turn,omitempty"`
 	// RemoteReceipts are the publication receipts recorded for this accepted

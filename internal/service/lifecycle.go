@@ -218,6 +218,72 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 	return nil
 }
 
+// workerKey marks a context as the run's own worker: a decision the worker
+// takes on itself (test-first's chained accept) must not wait for itself.
+type workerKey struct{}
+
+// asWorker marks ctx as rs's own worker.
+func asWorker(ctx context.Context, rs *runState) context.Context {
+	return context.WithValue(ctx, workerKey{}, rs)
+}
+
+// workerTeardown runs as a worker that reached a pause starts tearing down,
+// before it closes the run log. A no-op in the engine; tests hold it to
+// observe a decision arriving in that window.
+var workerTeardown = func(*runState) {}
+
+// settleWorker waits for a paused run's worker to finish tearing down before
+// a decision or a resume writes to the run.
+//
+// A worker publishes its pause (status paused, the gate's pending data) and
+// only then returns, closing the run log on the way out. A decision that
+// arrived in that window took the still-open writer from ensureWriter, the
+// worker closed it, and the decision's own record failed with "run log is
+// closed": a reject that errored after half-applying, events of an accept or
+// a resume lost (B-522 review; seen as a flaky decision-matrix test). Every
+// worker closes its log before it closes done, so once done is closed
+// ensureWriter reopens a log nobody else will close.
+//
+// Only a paused run is waited for — a running one is refused by every door
+// anyway, and waiting for it would block until it finished. The worker's
+// own calls (ctx marked by asWorker) are not waited for.
+func (s *Service) settleWorker(ctx context.Context, rs *runState) error {
+	if rs == nil || ctx.Value(workerKey{}) == rs {
+		return nil
+	}
+	rs.wmu.Lock()
+	status, done, id := rs.run.Status, rs.done, rs.run.ID
+	rs.wmu.Unlock()
+	if status != "paused" || done == nil {
+		return nil
+	}
+	// Bounded, so no door hangs forever — but only a closed done lets the
+	// door proceed (review of #176, 4387975214). Falling through on a
+	// cancelled request or the bound returned as if the worker had finished:
+	// a resume then started a second worker while the first still owned the
+	// log, and the first's teardown closed it under the second. Instead the
+	// door refuses, having written nothing, and the person retries.
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+	case <-time.After(settleWorkerLimit):
+	}
+	return &RunFinishingError{RunID: id}
+}
+
+// RunFinishingError refuses a decision or resume while the run's paused
+// worker is still tearing down. Nothing was written; retrying succeeds once
+// the worker has returned.
+type RunFinishingError struct{ RunID string }
+
+func (e *RunFinishingError) Error() string {
+	return fmt.Sprintf("run %s is still finishing its last turn; nothing was changed — try again", e.RunID)
+}
+
+// settleWorkerLimit bounds settleWorker's wait.
+var settleWorkerLimit = 30 * time.Second
+
 // runStatusPrepared marks a revision whose record exists but whose parent is
 // not yet claimed. It is never registered, listed, queued or resumed; only
 // StageStart (after the claim) and recovery (reconcilePreparedRevision) move
@@ -241,6 +307,17 @@ func reconcilePreparedRevision(projectRoot, runDir string, run *runlog.Run) bool
 			}
 		}
 	}
+	// A triage relaunch is prepared the same way (review of #176): real only
+	// when the original's record says it was relaunched as this run. One
+	// the engine died preparing must not survive as a second live triage of
+	// the same bugs beside the original.
+	if run.RelaunchOf != "" {
+		if original, err := runlog.ReadState(runlog.RunDirFor(projectRoot, run.RelaunchOf)); err == nil {
+			if m := relaunchedByPattern.FindStringSubmatch(original.Resolution); m != nil && m[1] == run.ID {
+				named = true
+			}
+		}
+	}
 	if named {
 		setRunStatus(run, "running", time.Now())
 		return true
@@ -250,6 +327,9 @@ func reconcilePreparedRevision(projectRoot, runDir string, run *runlog.Run) bool
 	}
 	setRunStatus(run, "failed", time.Now())
 	run.Failure = "abandoned: the engine stopped before this revision claimed " + run.RevisesRun + "; revise that run again"
+	if run.RelaunchOf != "" {
+		run.Failure = "abandoned: the engine stopped before this relaunch claimed " + run.RelaunchOf + "; relaunch that run again"
+	}
 	run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	return true
 }

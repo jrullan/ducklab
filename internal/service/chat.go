@@ -503,9 +503,15 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	}
 	tracker := rs.tracker
 	if tracker == nil {
+		// No tracker in memory means the engine restarted under this chat:
+		// its record holds the ceilings set at ChatStart (or lifted since)
+		// and what it already spent. Rebuilding from defaults reset the
+		// ledger to zero at the next message — the resume-doubles-budget
+		// class (review of #176). Only a record with no ceilings at all, from
+		// before ChatStart recorded them, falls back to the defaults.
 		limitsValue := s.chatBudget(projCfg)
-		limits := &limitsValue
-		tracker = budget.NewTracker(limits)
+		limits, resumed := resumedTracker(rs.snapshotRun(), &limitsValue)
+		tracker = resumed
 		recordLimits(rs, limits)
 		rs.setTracker(tracker)
 	}

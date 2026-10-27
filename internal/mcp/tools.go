@@ -306,7 +306,8 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id":  str("the project id"),
 				"bug_id":      str("optional: triage exactly this bug"),
-				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks; the first is the triager"},
+				"relaunch_of": str("optional: a triage run id — re-triage the same bugs (ending that run first) with the triager in ducklings"),
 				"mode":        str("optional mode: solo | council | sectioned"),
 				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 			}, "project_id"),
@@ -978,6 +979,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 	case "bug_triage":
 		req := map[string]interface{}{}
 		copyRunOverrides(req, a)
+		if id := a.str("relaunch_of"); id != "" {
+			req["relaunch_of"] = id
+		}
 		run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"), req)
 		if err != nil {
 			return nil, err
@@ -1207,6 +1211,9 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 	}
 	view := pick(run, "id", "project_id", "stage", "mode", "task_id", "status", "verdict",
 		"failure", "redo_note", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings", "stage_request",
+		// B-522: whether an escalation actually paused the run, will pause it
+		// at a safe point, or left it running — and which seat it is about.
+		"escalation",
 		// B-521: which intention an intake serves, and the revision chain.
 		"intent", "revises_run", "revision")
 	if diff, _, _, dErr := s.eng.RunDiff(id); dErr == nil && diff != "" {
