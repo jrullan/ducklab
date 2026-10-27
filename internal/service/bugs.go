@@ -533,6 +533,11 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	}
 	prior.decisionMu.Lock()
 	defer prior.decisionMu.Unlock()
+	// A paused original whose worker is still tearing down is not claimed
+	// over it: the claim would write a log that worker is about to close.
+	if err := s.settleWorker(ctx, prior); err != nil {
+		return err
+	}
 	before := prior.snapshotRun()
 	// A compare-and-set on the original's decision (review of #176,
 	// 4381761698): only "another relaunch won" was checked here, so an

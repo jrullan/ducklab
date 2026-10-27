@@ -4103,8 +4103,11 @@ func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor 
 		return nil, fmt.Errorf("run %q not found", id)
 	}
 	// The paused worker finishes closing its log before this resume takes a
-	// writer and starts the next worker on it.
-	s.settleWorker(ctx, rs)
+	// writer and starts the next worker on it; while it has not, the resume
+	// is refused rather than starting a second worker beside it.
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return nil, err
+	}
 	current := rs.snapshotRun()
 	if current.Status != "paused" {
 		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, current.Status)
@@ -4500,7 +4503,9 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// aborted over it.
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
-	s.settleWorker(ctx, rs)
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	current := rs.snapshotRun()
 	// The full decision check (review of #176, 4383362596): only accepted
 	// and relaunched were refused, so reject-then-abort both succeeded and
@@ -4859,7 +4864,9 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
-	s.settleWorker(ctx, rs)
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return nil, err
+	}
 	// Accepted is the compare-and-set winner. A second client may have entered
 	// before the first response reached it; return the durable result instead
 	// of trying to inspect the worktree the winner has already removed.
@@ -5144,7 +5151,9 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
-	s.settleWorker(ctx, rs)
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		if strings.TrimSpace(sha) == "" || sha == rs.run.CommitSHA {
@@ -5481,7 +5490,9 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	}
 	rs.decisionMu.Lock()
 	defer rs.decisionMu.Unlock()
-	s.settleWorker(ctx, rs)
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return err
+	}
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))

@@ -247,25 +247,38 @@ var workerTeardown = func(*runState) {}
 // Only a paused run is waited for — a running one is refused by every door
 // anyway, and waiting for it would block until it finished. The worker's
 // own calls (ctx marked by asWorker) are not waited for.
-func (s *Service) settleWorker(ctx context.Context, rs *runState) {
+func (s *Service) settleWorker(ctx context.Context, rs *runState) error {
 	if rs == nil || ctx.Value(workerKey{}) == rs {
-		return
+		return nil
 	}
 	rs.wmu.Lock()
-	status, done := rs.run.Status, rs.done
+	status, done, id := rs.run.Status, rs.done, rs.run.ID
 	rs.wmu.Unlock()
 	if status != "paused" || done == nil {
-		return
+		return nil
 	}
-	// Bounded: teardown is a log close and a channel close, and a decision
-	// must never hang behind a worker that, by some path not yet seen,
-	// leaves its done open while paused. Past the bound the door proceeds
-	// as it did before this wait existed.
+	// Bounded, so no door hangs forever — but only a closed done lets the
+	// door proceed (review of #176, 4387975214). Falling through on a
+	// cancelled request or the bound returned as if the worker had finished:
+	// a resume then started a second worker while the first still owned the
+	// log, and the first's teardown closed it under the second. Instead the
+	// door refuses, having written nothing, and the person retries.
 	select {
 	case <-done:
+		return nil
 	case <-ctx.Done():
 	case <-time.After(settleWorkerLimit):
 	}
+	return &RunFinishingError{RunID: id}
+}
+
+// RunFinishingError refuses a decision or resume while the run's paused
+// worker is still tearing down. Nothing was written; retrying succeeds once
+// the worker has returned.
+type RunFinishingError struct{ RunID string }
+
+func (e *RunFinishingError) Error() string {
+	return fmt.Sprintf("run %s is still finishing its last turn; nothing was changed — try again", e.RunID)
 }
 
 // settleWorkerLimit bounds settleWorker's wait.
