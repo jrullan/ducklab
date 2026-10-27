@@ -22,7 +22,7 @@ func providerCmd(verb string, args []string) int {
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 
 	switch verb {
 	case "", "list":

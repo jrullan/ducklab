@@ -42,6 +42,11 @@ type Engine interface {
 	RunResumeAs(id, note, reason, actor string) (map[string]interface{}, error)
 	RunBudgetLift(id, kind, actor string) (map[string]interface{}, error)
 	RunAnswerAs(id, questionID, answer, actor string) error
+	// ApprovalRequestFile asks the person for a decision only a person may
+	// make (B-530). There is deliberately no approve here: the MCP server
+	// holds the agent credential, and approving is the person's, in the
+	// desktop.
+	ApprovalRequestFile(runID string, req map[string]interface{}) (map[string]interface{}, error)
 	ChatSwitch(id, duckling, actor string) (map[string]interface{}, error)
 	RunFileFindings(id string) ([]map[string]interface{}, error)
 	RunStart(projectID string, req map[string]interface{}) (map[string]interface{}, error)

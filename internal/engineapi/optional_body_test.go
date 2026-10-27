@@ -52,6 +52,8 @@ func TestOptionalRequestBodiesAreDocumentedAsOptional(t *testing.T) {
 		// B-524: abort takes an optional reason; no body aborts as before.
 		"POST /v1/runs/{id}/abort",
 		"POST /v1/runs/{id}/accept",
+		// B-530: declining takes the person's optional words.
+		"POST /v1/runs/{id}/approval-requests/{req}/decline",
 		"POST /v1/runs/{id}/reject",
 		"POST /v1/runs/{id}/resume",
 	}

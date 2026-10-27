@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/jrullan/ducklab/internal/daemon"
-	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 // budgetCmd shows and changes the budget every run starts with.
@@ -20,7 +19,7 @@ func budgetCmd(verb string, args []string) int {
 		fmt.Fprintln(os.Stderr, "engine not running")
 		return 9
 	}
-	client := engineclt.New(info)
+	client := cliClient(info)
 
 	switch verb {
 	case "", "show":

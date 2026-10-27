@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -29,6 +30,24 @@ func main() {
 		fmt.Printf("ducklab-engine %s (%s)\n", build.Semver(), build.Provenance())
 		return
 	}
+
+	// One engine per state directory, for the whole life of the process
+	// (B-530 review): two simultaneous starts each published their own
+	// human.token and then raced to engine.json, leaving a credential pair
+	// that did not match the engine serving it. The OS lock is released when
+	// this process exits however it exits, so a crashed engine never blocks
+	// the next start. Taken before recovery too: RecoverRuns already assumes
+	// only one engine holds the state directory.
+	engineLock, err := daemon.AcquireEngineLock(15 * time.Second)
+	if err != nil {
+		if errors.Is(err, daemon.ErrEngineLocked) {
+			fmt.Fprintf(os.Stderr, "error: another ducklab-engine is running or starting for this state directory; use it, or stop it first (`ducklab engine stop`)\n")
+			os.Exit(4)
+		}
+		fmt.Fprintf(os.Stderr, "error: engine lock: %v\n", err)
+		os.Exit(1)
+	}
+	defer engineLock.Release()
 
 	// Load config
 	configDir, err := xplat.ConfigDir()
@@ -60,8 +79,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Generate token
-	token, err := daemon.GenerateToken()
+	// Two credentials (B-530): the person's (desktop, interactive CLI) and
+	// the agents' (MCP server, renderer, a CLI an agent runs). The engine
+	// derives every recorded actor from which one a request presents, so an
+	// agent can never be recorded as "human" whatever its body says.
+	humanToken, err := daemon.GenerateToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: generate token: %v\n", err)
+		os.Exit(1)
+	}
+	agentToken, err := daemon.GenerateToken()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: generate token: %v\n", err)
 		os.Exit(1)
@@ -94,20 +121,22 @@ func main() {
 	info := &daemon.EngineInfo{
 		PID:        os.Getpid(),
 		Port:       port,
-		Token:      token,
+		Token:      agentToken,
 		Version:    build.Semver(),
 		Provenance: build.Provenance(),
 		StartedAt:  time.Now().UTC().Format(time.RFC3339),
 		StateDir:   stateDir,
 	}
-	if err := daemon.WriteEngineJSON(info); err != nil {
+	if err := daemon.WriteEngineFiles(info, humanToken); err != nil {
 		fmt.Fprintf(os.Stderr, "error: write engine.json: %v\n", err)
 		os.Exit(1)
 	}
 	defer daemon.DeleteEngineJSON()
+	defer daemon.DeleteHumanToken()
 
 	// Create server
-	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance(), *allowOrigin)
+	server := engineapi.New(svc, b, humanToken, build.Semver(), build.Provenance(), *allowOrigin)
+	server.SetAgentToken(agentToken)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,

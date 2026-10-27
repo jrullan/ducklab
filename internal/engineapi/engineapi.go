@@ -4,8 +4,6 @@ package engineapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -34,9 +32,12 @@ import (
 
 // Server is the engine API server.
 type Server struct {
-	svc         *service.Service
-	bus         *bus.Bus
+	svc *service.Service
+	bus *bus.Bus
+	// token is the person's credential; agentToken the agents' (B-530).
+	// Which one a request presents decides every actor it records.
 	token       string
+	agentToken  string
 	version     string
 	provenance  string
 	allowOrigin string
@@ -520,6 +521,11 @@ func (s *Server) handleDucklingSet(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	declared, _ := update["actor"].(string)
+	if update == nil {
+		update = map[string]interface{}{}
+	}
+	update["actor"] = s.actor(r, declared)
 	if err := s.svc.DucklingUpdate(r.PathValue("id"), update); err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -618,7 +624,7 @@ func (s *Server) handleProjectGateAdopt(w http.ResponseWriter, r *http.Request) 
 	var body service.GateAdoptRequest
 	// An empty body is a person's click from the desktop.
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	st, err := s.svc.ProjectGateAdopt(r.Context(), r.PathValue("id"), body.Actor)
+	st, err := s.svc.ProjectGateAdopt(r.Context(), r.PathValue("id"), s.actor(r, body.Actor))
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -882,9 +888,9 @@ func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	var err error
 	if len(body.WidenLane) > 0 {
-		err = s.svc.RunAnswerWithLaneAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.WidenLane, body.Actor)
+		err = s.svc.RunAnswerWithLaneAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.WidenLane, s.actor(r, body.Actor))
 	} else {
-		err = s.svc.RunAnswerAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, body.Actor)
+		err = s.svc.RunAnswerAs(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer, s.actor(r, body.Actor))
 	}
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
@@ -912,7 +918,7 @@ func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	run, err := s.svc.RunResumeDecided(r.Context(), r.PathValue("id"), req.Note, req.Reason, req.Actor)
+	run, err := s.svc.RunResumeDecided(r.Context(), r.PathValue("id"), req.Note, req.Reason, s.actor(r, req.Actor))
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -990,7 +996,7 @@ func (s *Server) handleChatSwitch(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	run, err := s.svc.ChatSwitch(r.Context(), r.PathValue("id"), req.Duckling, req.Actor)
+	run, err := s.svc.ChatSwitch(r.Context(), r.PathValue("id"), req.Duckling, s.actor(r, req.Actor))
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "invalid_request:") {
 			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -1046,6 +1052,10 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 // liftRequest names the one cap to remove.
 type liftRequest struct {
 	Kind string `json:"kind"`
+	// Actor names the lifter when it is an agent: "mcp:<client>". The MCP
+	// sent it and the engine dropped it, recording "by: human" for an
+	// operator's lift (B-530 audit).
+	Actor string `json:"actor,omitempty"`
 }
 
 func (s *Server) handleRunBudgetLift(w http.ResponseWriter, r *http.Request) {
@@ -1054,7 +1064,7 @@ func (s *Server) handleRunBudgetLift(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	run, err := s.svc.RunBudgetLift(r.Context(), r.PathValue("id"), req.Kind)
+	run, err := s.svc.RunBudgetLiftAs(r.Context(), r.PathValue("id"), req.Kind, s.actor(r, req.Actor))
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -1094,14 +1104,12 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "missing or malformed credentials")
 			return
 		}
-		// Compare fixed-size digests so token validation is constant-time even
-		// when the supplied token has a different length.
-		gotHash := sha256.Sum256([]byte(token))
-		wantHash := sha256.Sum256([]byte(s.token))
-		if subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) != 1 {
+		cred, ok := s.credentialFor(token)
+		if !ok {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), credentialKey{}, cred))
 		// Check version
 		clientVersion := r.Header.Get("X-Ducklab-Client")
 		if clientVersion != "" {
@@ -1278,6 +1286,7 @@ func (s *Server) remoteRequest(r *http.Request) (service.RemoteRequest, error) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return req, err
 	}
+	req.Actor = s.actor(r, req.Actor)
 	return req, nil
 }
 func (s *Server) handleProjectPull(w http.ResponseWriter, r *http.Request) {
@@ -1430,6 +1439,7 @@ func (s *Server) handleTaskLand(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	req.Actor = s.actor(r, req.Actor)
 	run, err := s.svc.TaskLand(r.Context(), r.PathValue("id"), r.PathValue("task"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -1461,10 +1471,10 @@ func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
-	// The actor is optional and self-declared; "human" is the desktop's
-	// silence. Self-declaration is enough for an audit whose reader is the
-	// project's own operator — the point is distinguishing the person's
-	// clicks from the agents acting for them, not authentication.
+	// The actor comes from the credential (B-530): the body may name the
+	// agent ("mcp:<client>"), and the person's silence is "human". It used
+	// to be self-declared here, and the empty actor an agent sent with the
+	// token it read from engine.json was recorded as the person.
 	var req struct {
 		Actor string `json:"actor"`
 		Note  string `json:"note"`
@@ -1472,7 +1482,7 @@ func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
 	}
-	out, err := s.svc.BugPromoteWithNote(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Actor, req.Note)
+	out, err := s.svc.BugPromoteWithNote(r.Context(), r.PathValue("id"), r.PathValue("bug"), s.actor(r, req.Actor), req.Note)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -1489,7 +1499,7 @@ func (s *Server) handleBugMove(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	b, err := s.svc.BugMove(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Status, req.Actor)
+	b, err := s.svc.BugMove(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Status, s.actor(r, req.Actor))
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -1817,7 +1827,7 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.Unmarshal(raw, &body)
-	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, body.Actor, service.AcceptOptions{
+	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, s.actor(r, body.Actor), service.AcceptOptions{
 		ResolveAdditiveConflicts: body.ResolveAdditiveConflicts,
 		HumanVerified:            body.HumanVerified,
 		LaneWidening:             body.LaneWidening,
@@ -1848,7 +1858,7 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Resolution == "landed" {
-		if err := s.svc.RunLand(r.Context(), id, body.CommitSHA, "human", body.Reason); err != nil {
+		if err := s.svc.RunLand(r.Context(), id, body.CommitSHA, s.actor(r, body.Actor), body.Reason); err != nil {
 			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
@@ -1859,7 +1869,7 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("unknown resolution %q", body.Resolution))
 		return
 	}
-	if err := s.svc.RunRejectAs(r.Context(), id, body.Reason, body.Actor); err != nil {
+	if err := s.svc.RunRejectAs(r.Context(), id, body.Reason, s.actor(r, body.Actor)); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
@@ -1895,7 +1905,7 @@ func (s *Server) handleRunLand(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if err := s.svc.RunLand(r.Context(), r.PathValue("id"), body.CommitSHA, "human", body.Note); err != nil {
+	if err := s.svc.RunLand(r.Context(), r.PathValue("id"), body.CommitSHA, s.actor(r, ""), body.Note); err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -1916,7 +1926,7 @@ func (s *Server) handleRunAbort(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.svc.RunAbortAs(r.Context(), id, body.Reason, body.Actor); err != nil {
+	if err := s.svc.RunAbortAs(r.Context(), id, body.Reason, s.actor(r, body.Actor)); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
@@ -2140,7 +2150,8 @@ func (s *Server) handleArtifactPromote(w http.ResponseWriter, r *http.Request) {
 		ApprovedBy string `json:"approved_by"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	got, err := s.svc.ArtifactPromote(r.Context(), r.PathValue("id"), r.PathValue("kind"), body.ApprovedBy)
+	// approved_by is an actor like any other: the credential decides it (B-530).
+	got, err := s.svc.ArtifactPromote(r.Context(), r.PathValue("id"), r.PathValue("kind"), s.actor(r, body.ApprovedBy))
 	if err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -2249,6 +2260,7 @@ func (s *Server) handleVisualCheckSet(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	req.Actor = s.actor(r, req.Actor)
 	view, err := s.svc.VisualCheckSet(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())

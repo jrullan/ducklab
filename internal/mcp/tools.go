@@ -115,6 +115,29 @@ func toolList() []map[string]interface{} {
 			}, "run_id", "answer"),
 		},
 		{
+			"name": "approval_request",
+			"description": "Ask the person to make a decision only a person may make, when they have agreed to it with you " +
+				"(in chat, say) and the engine refused you as an operator: widening a task's lane at accept, confirming " +
+				"manual verification, answering a test-first oracle dispute. You file what and why; the person sees it " +
+				"in the desktop (the run, and Now) with Approve and Decline, and a configured webhook rings. Approved, " +
+				"the decision runs as the person's and the record names you as the requester. You cannot approve it " +
+				"yourself and must not try another way: the engine knows your credential, and an agent is never " +
+				"recorded as human. Read the outcome in run_get's approval_requests.",
+			"inputSchema": obj(map[string]interface{}{
+				"run_id": str("the run id, r-..."),
+				"action": str("accept | answer — the decision you are asking the person to make"),
+				"reason": str("why: what the person agreed to and where. Shown to them beside the buttons"),
+				"lane_widening": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"},
+					"description": "accept: the lane paths to approve; omit for every path the pending decision offers"},
+				"human_verified": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "integer"},
+					"description": "accept: the manual-verification slices the person says they verified"},
+				"question_id": str("answer: the question; omit for the pending one"),
+				"answer":      str("answer: the person's answer"),
+				"widen_lane": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"},
+					"description": "answer: lane paths the answer widens"},
+			}, "run_id", "action", "reason"),
+		},
+		{
 			"name":        "artifact_get",
 			"description": "Read a project document: intent, requirements, spec or plan — approved content plus any pending proposal.",
 			"inputSchema": obj(map[string]interface{}{
@@ -713,6 +736,29 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolText("answered", false), nil
+	case "approval_request":
+		req := map[string]interface{}{
+			"action": a.str("action"), "reason": a.str("reason"),
+			"actor": "mcp:" + s.client,
+		}
+		for _, k := range []string{"lane_widening", "human_verified", "widen_lane"} {
+			if v, ok := a[k].([]interface{}); ok && len(v) > 0 {
+				req[k] = v
+			}
+		}
+		for _, k := range []string{"question_id", "answer"} {
+			if v := a.str(k); v != "" {
+				req[k] = v
+			}
+		}
+		out, err := s.eng.ApprovalRequestFile(a.str("run_id"), req)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(map[string]interface{}{
+			"request": out,
+			"next":    "the person approves or declines it in the desktop; nothing is decided until then. run_get shows its status in approval_requests",
+		}), nil
 	case "artifact_get":
 		doc, err := s.eng.ArtifactGet(a.str("project_id"), a.str("kind"))
 		if err != nil {

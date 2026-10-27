@@ -22,3 +22,4 @@ engineer.
 | [0006](0006-test-first.md) | The test is written first, by a different model, and read by a person |
 | [0007](0007-artifact-modes.md) | An artifact stage may run solo, and says which ducklings it will use |
 | [0008](0008-rubber-duck.md) | The advisor is a positioned turn with three answers, not a background consult |
+| [0010](0010-actor-from-credential.md) | The engine derives the actor from the credential; agents ask the person through approval requests |
