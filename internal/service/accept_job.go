@@ -231,6 +231,7 @@ func joinedNote(res *AcceptResult, msg string) *AcceptResult {
 		return nil
 	}
 	out := *res
+	out.joined = true
 	note := "this call joined an accept already in progress"
 	if strings.TrimSpace(msg) != "" {
 		note += ", so its message was not recorded"

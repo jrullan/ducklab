@@ -43,7 +43,7 @@ func newHeldGate(t *testing.T, dir string) *heldGate {
 		}
 	}
 	appendVerifyPreparation(t, dir, fmt.Sprintf(`mode = "custom"
-custom = "echo replay >> %s; echo started > %s; cat %s > /dev/null"`, g.count, g.started, g.release))
+custom = "echo replay >> %s; echo started > %s; grep -q go %s"`, g.count, g.started, g.release))
 	return g
 }
 

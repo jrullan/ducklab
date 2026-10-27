@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -265,6 +266,13 @@ func (s *Service) ApprovalRequestApprove(ctx context.Context, runID, reqID, acto
 
 	out := &ApprovalDecision{}
 	out.Accept, err = decideApproval(s, ctx, runID, req, actor)
+	// B-529: the accept outlived the approval's request — it is replaying
+	// the gate on the run's own context. The request stays approved, says
+	// so, and settles exactly once when that accept does.
+	if err == nil && out.Accept != nil && out.Accept.InProgress && out.Accept.job != nil {
+		out.Request = s.approvalInProgress(rs, req, out.Accept.job, out.Accept.joined)
+		return out, nil
+	}
 	req = s.resolveApproval(rs, req, out.Accept, err)
 	out.Request = req
 	if req.Status != ApprovalLanded {
@@ -309,6 +317,35 @@ func (s *Service) claimApproval(rs *runState, reqID, actor string) (runlog.Appro
 	return req, nil
 }
 
+// afterApprovalSettled observes an approval settled after its accept job —
+// a no-op in the engine; tests wait on it instead of on a clock.
+var afterApprovalSettled = func(runlog.ApprovalRequest) {}
+
+// approvalInProgress keeps an approved accept's request "approved" with the
+// outcome "accept in progress", and settles it when job does: landed with
+// the commit, failed with the refusal's reason, interrupted when abort or
+// shutdown stopped it. Only this path resolves it, so a retry that joins
+// the same accept cannot resolve the request a second time. If the engine
+// stops before the settlement is written, recovery's
+// settleInterruptedApprovals reads the request approved-and-unsettled and
+// says interrupted (or landed, when the run's record has the commit).
+func (s *Service) approvalInProgress(rs *runState, req runlog.ApprovalRequest, job *acceptJob, joined bool) runlog.ApprovalRequest {
+	req.Outcome = "accept in progress"
+	mu := approvalLock(rs.run.ID)
+	mu.Lock()
+	_ = s.setApproval(rs, req)
+	mu.Unlock()
+	go func() {
+		<-job.done
+		res := job.result
+		if joined {
+			res = joinedNote(res, "")
+		}
+		afterApprovalSettled(s.resolveApproval(rs, req, res, job.err))
+	}()
+	return req
+}
+
 // resolveApproval records how an approved decision ended. The run's own
 // record is the judge where the door's answer is ambiguous: an accept that
 // errored after its commit (a publication failure, say) landed; one that
@@ -318,6 +355,12 @@ func (s *Service) resolveApproval(rs *runState, req runlog.ApprovalRequest, acce
 	switch {
 	case req.Action == "accept" && accept != nil && strings.Contains(accept.Info, "decided nothing"):
 		req.Status, req.Outcome = ApprovalSuperseded, "the run was already accepted ("+accept.CommitSHA+"); this approval decided nothing"
+	case req.Action == "accept" && accept != nil && accept.joined:
+		// Another caller's accept was already running; this approval joined
+		// it and decided nothing itself (B-529).
+		req.Status, req.Outcome = ApprovalSuperseded, "an accept of this run was already in progress (it settled as "+approvalSettledAs(accept, decideErr)+"); this approval decided nothing"
+	case req.Action == "accept" && errors.Is(decideErr, ErrDecisionInterrupted):
+		req.Status, req.Outcome = ApprovalInterrupted, "interrupted: "+decideErr.Error()
 	case decideErr == nil:
 		req.Status, req.Outcome = ApprovalLanded, req.Action+" taken"
 		if accept != nil && accept.CommitSHA != "" {
@@ -339,6 +382,19 @@ func (s *Service) resolveApproval(rs *runState, req runlog.ApprovalRequest, acce
 		})
 	}
 	return req
+}
+
+// approvalSettledAs names a joined accept's outcome in a superseded request.
+func approvalSettledAs(accept *AcceptResult, err error) string {
+	switch {
+	case errors.Is(err, ErrDecisionInterrupted):
+		return "interrupted"
+	case err != nil:
+		return "refused: " + err.Error()
+	case accept != nil && accept.CommitSHA != "":
+		return "accepted as " + accept.CommitSHA
+	}
+	return "accepted"
 }
 
 // settleInterruptedApprovals runs as an engine recovers a run: a request

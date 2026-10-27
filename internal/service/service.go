@@ -1306,6 +1306,12 @@ type AcceptResult struct {
 	// continues on the run's own context, and its outcome arrives as the
 	// run's accept_settled event. Info says so in words.
 	InProgress bool `json:"in_progress,omitempty"`
+	// job is the accept an InProgress answer is waiting on, and joined says
+	// this call joined an accept someone else started (it decided nothing).
+	// Engine-internal: an approved accept (B-530) settles its request when
+	// this job does.
+	job    *acceptJob
+	joined bool
 }
 
 // AcceptOptions contains explicit, non-default recovery choices. A caller may
@@ -4981,7 +4987,7 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	case <-job.done:
 		return settled()
 	case <-ctx.Done():
-		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined)}, nil
+		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined), job: job, joined: joined}, nil
 	}
 }
 
