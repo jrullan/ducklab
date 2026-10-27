@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -138,31 +139,68 @@ func LockPath() (string, error) {
 	return filepath.Join(dir, "engine.lock"), nil
 }
 
-// TryLock attempts to create the lock file exclusively.
-// Returns true if the lock was acquired, false if another process holds it.
-func TryLock() (bool, error) {
+// ErrEngineLocked is returned when another engine holds the state directory.
+var ErrEngineLocked = errors.New("another ducklab-engine holds the state directory")
+
+// EngineLock is the engine's exclusive hold on its state directory.
+//
+// B-530 review: two engines started at once could each find no engine.json,
+// each write its own human.token, and then race to engine.json — Codex
+// reproduced engine.json naming engine B's agent token beside engine A's
+// human.token, so the desktop lost every person-only door until a restart.
+// The credential pair is only a pair if one engine at a time publishes it.
+//
+// The old engine.lock was an O_EXCL marker that nothing ever acquired: a
+// marker file outlives the process that made it, so the first crash would
+// have locked every later start out. This lock is an OS file lock (flock /
+// LockFileEx) on engine.lock, held for the engine's whole life. The kernel
+// drops it when the holder exits, cleanly or not, so a dead engine's lock
+// never blocks a fresh start, and the file's mere existence means nothing.
+type EngineLock struct{ f *os.File }
+
+// AcquireEngineLock takes the state directory's engine lock, waiting up to
+// wait for a holder that is on its way out (a restart starts the new engine
+// as soon as the old one stops answering, while it may still be running its
+// deferred cleanup). It returns ErrEngineLocked if the lock is still held.
+func AcquireEngineLock(wait time.Duration) (*EngineLock, error) {
 	path, err := LockPath()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		if os.IsExist(err) {
-			return false, nil
-		}
-		return false, err
+		return nil, err
 	}
-	f.Close()
-	return true, nil
+	deadline := time.Now().Add(wait)
+	for {
+		ok, err := tryLockFile(f)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		if ok {
+			return &EngineLock{f: f}, nil
+		}
+		if !time.Now().Before(deadline) {
+			f.Close()
+			return nil, ErrEngineLocked
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
-// Unlock removes the lock file.
-func Unlock() error {
-	path, err := LockPath()
-	if err != nil {
-		return err
+// Release drops the lock. Closing the descriptor releases it; so does the
+// process exiting.
+func (l *EngineLock) Release() error {
+	if l == nil || l.f == nil {
+		return nil
 	}
-	return os.Remove(path)
+	err := l.f.Close()
+	l.f = nil
+	return err
 }
 
 // GenerateToken generates a random bearer token.

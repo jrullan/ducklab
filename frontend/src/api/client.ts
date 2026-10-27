@@ -318,7 +318,7 @@ export interface ApprovalRequest {
   widen_lane?: string[];
   requested_by: string;
   requested_at: string;
-  /** pending | approved | declined | landed | failed | superseded */
+  /** pending | approved (decision in flight) | declined | landed | failed | superseded | interrupted */
   status: string;
   decided_by?: string;
   decided_at?: string;

@@ -32,6 +32,16 @@ tokens are 256 random bits, regenerated at every engine start;
 `human.token` is written before `engine.json` and both are removed on
 graceful stop.
 
+The pair is published by one engine at a time. An engine holds an OS file
+lock (`flock` / `LockFileEx`) on `<state-dir>/ducklab/engine.lock` for its
+whole life, taken before it recovers runs or writes either file. Without
+it, two simultaneous starts could leave `engine.json` from one engine beside
+`human.token` from the other (review of #180). The kernel releases the lock
+when the holder exits, crash included, so a dead engine never blocks a
+start; the file's existence means nothing. A new start waits up to 15 s for
+a holder on its way out (a restart), then exits with code 4; a CLI
+auto-start that loses the race adopts the engine that won.
+
 - The person's credential records `human` when the body names no actor. It
   may narrow (name an agent); it never needs to elevate.
 - An agent credential keeps a body actor only of the form `mcp:<client>` or
@@ -58,6 +68,17 @@ with Approve / Decline. Approve and decline need the person's credential
 `human`, and the record carries both actors: `approval_granted`
 (`requested_by`, `approved_by`), the decision's own events, and
 `approval_resolved` with the outcome. Declined, nothing is decided.
+
+A request moves `pending → approved → landed | failed | interrupted`, or
+`pending → declined | superseded`, never back. The `pending → approved`
+claim is atomic under a per-run lock, and the decision runs with no approval
+lock held, so a long accept on one run never blocks requests on another.
+`approved` means the decision is in flight. `failed` means the door refused
+it after approval (the outcome says why). `interrupted` means the engine
+stopped mid-decision; the next engine settles it on recovery, or marks it
+`landed` if the accept had committed. A retry is a new request, so nothing
+is decided twice. An accept that settles later (B-529's accept job) waits in
+`approved` until it settles.
 
 ## What this does not do
 

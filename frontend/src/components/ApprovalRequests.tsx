@@ -34,6 +34,7 @@ function statusRole(status: string): StatusRole {
     case "approved":
       return "good";
     case "failed":
+    case "interrupted":
       return "critical";
     case "declined":
     case "superseded":

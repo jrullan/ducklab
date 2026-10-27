@@ -270,6 +270,12 @@ func discoverEngine(noAutostart bool) (*engineclt.Client, error) {
 	}
 	started, err := daemon.WaitReadyWhileAlive(pid, daemon.StartCap)
 	if err != nil {
+		// Two commands auto-starting at once: only one engine may hold the
+		// state directory (B-530 review), so the other exits; its caller waits
+		// for the engine that won and adopts it instead of reporting a failure.
+		if info, rerr := daemon.WaitReady(30 * time.Second); rerr == nil {
+			return cliClient(info), nil
+		}
 		return nil, fmt.Errorf("engine auto-started but did not become ready: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "engine auto-started: pid %d, port %d\n", started.PID, started.Port)

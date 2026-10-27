@@ -453,7 +453,8 @@ type ApprovalRequest struct {
 	RequestedAt string `json:"requested_at"`
 	// Status is pending, then approved or declined by the person; landed or
 	// failed once an approved decision ran (Outcome says how); superseded
-	// when the decision it named was no longer pending.
+	// when the decision it named was no longer pending; interrupted when the
+	// engine stopped mid-decision (service.ApprovalInterrupted says more).
 	Status    string `json:"status"`
 	DecidedBy string `json:"decided_by,omitempty"`
 	DecidedAt string `json:"decided_at,omitempty"`
