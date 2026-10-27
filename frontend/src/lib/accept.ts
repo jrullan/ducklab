@@ -58,14 +58,10 @@ function settled(client: Pick<EngineClient, "run">, runId: string): Promise<Acce
       const state = useRuns.getState();
       const st = state.acceptState[runId];
       if (st?.kind === "committed") {
-        // The settlement event carries the publication caveats the HTTP
-        // answer would have.
-        const last = [...(state.events[runId] ?? [])].reverse().find((e) => e.type === "accept_settled");
-        resolve({
-          commit_sha: st.sha,
-          warning: typeof last?.data?.warning === "string" ? last.data.warning : undefined,
-          info: typeof last?.data?.info === "string" ? last.data.info : undefined,
-        });
+        // The settled state carries the publication caveats the HTTP answer
+        // would have, however it arrived — the live event or a run read
+        // (review of #181: looking them up in events lost them on a read).
+        resolve({ commit_sha: st.sha, warning: st.warning, info: st.info });
         return true;
       }
       if (st?.kind === "error") {

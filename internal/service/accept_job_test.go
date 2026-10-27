@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
@@ -356,5 +357,61 @@ func TestAcceptStartingDuringShutdownIsRefused(t *testing.T) {
 	}
 	if detail, _ := s.RunGet(context.Background(), run.ID); detail.Run.AcceptInProgress || detail.Run.Status != "paused" {
 		t.Fatalf("after the refused start: in_progress=%v status=%s", detail.Run.AcceptInProgress, detail.Run.Status)
+	}
+}
+
+// Review of #181 (4394889562): last_accept is how a client that missed the
+// live accept_settled recovers the outcome — including its publication
+// consequences (warning, info). It must say the same thing from memory and,
+// after an engine restart, from the log.
+func TestLastAcceptIsTheSameSettlementFromMemoryAndFromTheLog(t *testing.T) {
+	s, run, gate, dir := heldAcceptRun(t, "r-b529-last-accept")
+	// A push that fails: the durable consequence a client must not lose.
+	path := filepath.Join(dir, ".ducklab", "project.toml")
+	cfg, err := config.LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Remote.Name, cfg.Remote.OnAccept = "origin", "push"
+	if err := config.SaveProject(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	remote := exec.Command("git", "remote", "add", "origin", filepath.Join(t.TempDir(), "missing.git"))
+	remote.Dir = dir
+	if out, err := remote.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %s", out)
+	}
+	accepting := acceptAsync(s, context.Background(), run.ID, "")
+	gate.awaitStart(t)
+	gate.open(t)
+	got := within(t, accepting, "the accept")
+	if got.err != nil || got.res.CommitSHA == "" {
+		t.Fatalf("accept: %+v, %v", got.res, got.err)
+	}
+	if !strings.Contains(got.res.Warning, "push failed") {
+		t.Fatalf("fixture: accept warning = %q, want a failed push", got.res.Warning)
+	}
+	live, _ := s.RunGet(context.Background(), run.ID)
+	fromMemory := live.Run.LastAccept
+	want := map[string]interface{}{"outcome": "accepted", "commit_sha": got.res.CommitSHA}
+	if got.res.Warning != "" {
+		want["warning"] = got.res.Warning
+	}
+	if got.res.Info != "" {
+		want["info"] = got.res.Info
+	}
+	if fmt.Sprint(fromMemory) != fmt.Sprint(want) {
+		t.Fatalf("last_accept = %v, want the accept's whole result %v", fromMemory, want)
+	}
+	// An engine restart keeps the log and loses memory.
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	rs.acceptMu.Lock()
+	rs.lastAccept = nil
+	rs.acceptMu.Unlock()
+	restarted, _ := s.RunGet(context.Background(), run.ID)
+	if fmt.Sprint(restarted.Run.LastAccept) != fmt.Sprint(want) {
+		t.Fatalf("last_accept from the log = %v, want %v", restarted.Run.LastAccept, want)
 	}
 }

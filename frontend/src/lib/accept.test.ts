@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 import { useRuns } from "../store/runs";
 import { acceptAndSettle, acceptingLabel, AcceptSettledError, ACCEPT_VERIFYING_LABEL } from "./accept";
 import { buildTurns, decisionLabel } from "./runview";
@@ -37,7 +38,7 @@ describe("an accept that outlives its request", () => {
       data: { outcome: "accepted", commit_sha: "abc1234", info: "no remote configured" },
     });
     await expect(settled).resolves.toEqual({ commit_sha: "abc1234", warning: undefined, info: "no remote configured" });
-    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "committed", sha: "abc1234" });
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "committed", sha: "abc1234", info: "no remote configured" });
     expect(useRuns.getState().runs["r-1"]).toMatchObject({ accepted: true, commit_sha: "abc1234", status: "done" });
   });
 
@@ -90,6 +91,50 @@ describe("an accept that outlives its request", () => {
 // Review of #181: after an overflow the resync replaces the run's events
 // without replaying them, so a missed accept_settled left the button at
 // "Accepting…" forever. The resynced run record settles it.
+// Review of #181 (4394889562): a settlement recovered from a run read lost
+// its warning and info — they were looked up in the event log, where a lost
+// accept_settled is not — so a failed push never reached RunView's retry.
+// Every path must resolve the same AcceptResult.
+describe("every settlement path yields the same AcceptResult", () => {
+  const settlement = {
+    outcome: "accepted", commit_sha: "abc1234",
+    warning: "committed as abc1234; push failed: permission denied", info: "committed locally",
+  };
+  const want = { commit_sha: "abc1234", warning: settlement.warning, info: settlement.info };
+  const paths: [string, (c: { run: ReturnType<typeof vi.fn> }) => void][] = [
+    ["live accept_settled", () => useRuns.getState().applyEvent({ type: "accept_settled", run_id: "r-1", seq: 9, data: settlement })],
+    ["resyncRun", () => useRuns.getState().resyncRun({ ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: settlement }, [])],
+    ["setRun", () => useRuns.getState().setRun({ ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: settlement })],
+    ["runsEpoch refetch", () => useRuns.getState().setRuns([{ ...paused, status: "done", accepted: true, commit_sha: "abc1234" }])],
+  ];
+  for (const [name, settle] of paths) {
+    it(name, async () => {
+      const client = {
+        accept: async () => ({ commit_sha: "", in_progress: true }),
+        run: vi.fn(() => Promise.resolve({ run: { ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: settlement }, events: [] })),
+      };
+      const settled = acceptAndSettle(client as unknown as Pick<EngineClient, "accept" | "run">, "r-1");
+      await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true }));
+      settle(client);
+      await expect(settled).resolves.toEqual(want);
+    });
+  }
+
+  it("a refusal recovered from a run read keeps its reason and flag", async () => {
+    const client = {
+      accept: async () => ({ commit_sha: "", in_progress: true }),
+      run: vi.fn(() => Promise.resolve({ run: { ...paused, last_accept: { outcome: "interrupted", error: "the run was aborted" } }, events: [] })),
+    };
+    const settled = acceptAndSettle(client as unknown as Pick<EngineClient, "accept" | "run">, "r-1");
+    await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true }));
+    useRuns.getState().setRuns([paused]);
+    const err = await settled.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AcceptSettledError);
+    expect((err as AcceptSettledError).message).toBe("the run was aborted");
+    expect((err as AcceptSettledError).interrupted).toBe(true);
+  });
+});
+
 describe("an accept whose settlement was missed by the stream", () => {
   const verifying = async () => {
     const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true }), "r-1");

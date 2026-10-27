@@ -33,7 +33,10 @@ export type AcceptState =
    * accept that outlived the request (B-529). Still pending: no commit is
    * shown until the engine confirms one (accept_settled). */
   | { kind: "pending"; verifying?: boolean }
-  | { kind: "committed"; sha: string }
+  /** warning/info: the accept's publication consequences (a failed push,
+   * a local-only commit), carried however the settlement arrived — the
+   * HTTP answer, the live accept_settled, or last_accept on a run read. */
+  | { kind: "committed"; sha: string; warning?: string; info?: string }
   /** interrupted: abort or engine shutdown stopped the accept's replay. Not
    * a failure of the work — nothing was decided (B-529). */
   | { kind: "error"; message: string; interrupted?: boolean };
@@ -142,19 +145,39 @@ function discardTurn(
 export function reconcileAccept(acceptState: Record<string, AcceptState>, run: Run): Record<string, AcceptState> {
   const st = acceptState[run.id];
   if (st?.kind !== "pending" || !st.verifying || run.accept_in_progress) return acceptState;
+  const fromLast = settlementState(run.last_accept);
+  if (fromLast) return { ...acceptState, [run.id]: fromLast };
+  // A read without last_accept (an older engine) still knows the commit and
+  // the run's standing warning.
   if (run.accepted && run.commit_sha) {
-    return { ...acceptState, [run.id]: { kind: "committed", sha: run.commit_sha } };
+    return { ...acceptState, [run.id]: settlementState({ outcome: "accepted", commit_sha: run.commit_sha, warning: run.warning })! };
   }
-  const last = run.last_accept;
-  if (!last?.outcome) return acceptState;
-  if (last.outcome === "accepted" && last.commit_sha) {
-    return { ...acceptState, [run.id]: { kind: "committed", sha: last.commit_sha } };
+  return acceptState;
+}
+
+/**
+ * The one reading of an accept settlement (review of #181): the live
+ * accept_settled payload and a run read's last_accept are the same object,
+ * so every path yields the same state — commit with its warning and info,
+ * or the refusal's reason with the interrupted flag. Null when the payload
+ * is not a settlement.
+ */
+export function settlementState(payload: Record<string, unknown> | undefined | null): AcceptState | null {
+  const outcome = typeof payload?.outcome === "string" ? payload.outcome : "";
+  if (!outcome) return null;
+  const text = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  if (outcome === "accepted") {
+    const sha = text(payload?.commit_sha);
+    if (!sha) return null;
+    const st: AcceptState = { kind: "committed", sha };
+    const warning = text(payload?.warning);
+    const info = text(payload?.info);
+    if (warning) st.warning = warning;
+    if (info) st.info = info;
+    return st;
   }
-  const message = last.error || `accept ${last.outcome}`;
-  return {
-    ...acceptState,
-    [run.id]: last.outcome === "interrupted" ? { kind: "error", message, interrupted: true } : { kind: "error", message },
-  };
+  const message = text(payload?.error) ?? `accept ${outcome}`;
+  return outcome === "interrupted" ? { kind: "error", message, interrupted: true } : { kind: "error", message };
 }
 
 export const useRuns = create<RunsState>((set) => ({
@@ -331,20 +354,13 @@ export const useRuns = create<RunsState>((set) => ({
         if (e.type === "gate_started" && e.data?.phase === "accept") {
           acceptState = { ...acceptState, [runId]: { kind: "pending", verifying: true } };
         } else if (e.type === "accept_settled") {
-          const outcome = String(e.data?.outcome ?? "");
-          const sha = String(e.data?.commit_sha ?? "");
-          if (outcome === "accepted" && sha) {
-            acceptState = { ...acceptState, [runId]: { kind: "committed", sha } };
+          const settledState = settlementState(e.data);
+          if (settledState) {
+            acceptState = { ...acceptState, [runId]: settledState };
             const current = runs[runId];
-            if (current) runs = { ...runs, [runId]: { ...current, accepted: true, commit_sha: sha, status: "done" } };
-          } else {
-            const message = String(e.data?.error ?? "") || `accept ${outcome || "did not land"}`;
-            acceptState = {
-              ...acceptState,
-              [runId]: outcome === "interrupted"
-                ? { kind: "error", message, interrupted: true }
-                : { kind: "error", message },
-            };
+            if (settledState.kind === "committed" && current) {
+              runs = { ...runs, [runId]: { ...current, accepted: true, commit_sha: settledState.sha, status: "done" } };
+            }
           }
         }
       }
