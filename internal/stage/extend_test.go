@@ -301,7 +301,8 @@ func TestExtendKeepsAcceptedExistingTaskProofFieldsImmutable(t *testing.T) {
 	}, current)
 	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") ||
 		!strings.Contains(err.Error(), "accepted or active") ||
-		!strings.Contains(err.Error(), "approve the offered lane widening") {
+		!strings.Contains(err.Error(), "the person approves the offered lane widening") ||
+		!strings.Contains(err.Error(), "approval_request") {
 		t.Fatalf("accepted task proof fields were mutable: %v", err)
 	}
 }
@@ -322,7 +323,8 @@ func TestExtendExplainsThatOwnsCannotBeAmendedThroughAnExtension(t *testing.T) {
 		},
 	}, current)
 	if err == nil || !strings.Contains(err.Error(), "Owns is not amendable") ||
-		!strings.Contains(err.Error(), "approve the offered lane widening") {
+		!strings.Contains(err.Error(), "the person approves the offered lane widening") ||
+		!strings.Contains(err.Error(), "approval_request") {
 		t.Fatalf("Owns amendment refusal did not name the rule and lawful path: %v", err)
 	}
 }

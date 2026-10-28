@@ -180,7 +180,8 @@ run resumes or the Accept proceeds; `--widen-lane a,b` approves a subset; a
 path that was not offered is refused. An answer's text cannot apply the
 amendment (B-484), so `run answer` on a question carrying an offer requires
 `--widen-lane` or `--keep-lane` and refuses to resume otherwise. The MCP
-operator has no such door: a lane amendment is a person's approval.
+operator cannot approve it: a lane amendment is a person's approval, which
+the operator asks for with `approval_request` once the person has agreed.
 
 To retry rejected work with its correction, start a new run explicitly:
 

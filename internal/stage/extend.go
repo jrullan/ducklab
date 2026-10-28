@@ -258,7 +258,7 @@ func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Sectio
 }
 
 func existingTaskRewriteError(id, reason string) error {
-	return fmt.Errorf("plan extension tried to rewrite existing task %s: %s. Extension may add tasks, add dependencies, and replace proof fields only on dormant tasks. If this followed an out-of-lane Accept refusal, return to that gate and approve the offered lane widening; otherwise add a new task instead of rewriting accepted or active work", id, reason)
+	return fmt.Errorf("plan extension tried to rewrite existing task %s: %s. Extension may add tasks, add dependencies, and replace proof fields only on dormant tasks. If this followed an out-of-lane Accept refusal, return to that gate, where the person approves the offered lane widening (an operator agent cannot: with the person's agreement it files an MCP approval_request); otherwise add a new task instead of rewriting accepted or active work", id, reason)
 }
 
 func planTaskAmendmentRefusal(task artifact.Section) string {
