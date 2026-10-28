@@ -610,8 +610,9 @@ the gate on `main` and moves it to `verified`.
 `verified` and `closed` are the person's (I2): the engine refuses both from an
 agent's credential, MCP operators included, and an agent carries a bug no
 further than `fixed` (B-542). A verification an agent recorded before that rule
-can be undone: such a bug, verified or closed from that verification, may move
-back to `fixed` so the person makes the judgement.
+can be undone by the person: while it still stands (the bug is verified, or an
+agent closed it straight from that verification), it may move back to `fixed`
+so the person makes the judgement.
 
 ---
 

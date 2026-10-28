@@ -42,7 +42,7 @@ func TestAnAgentCannotVerifyOrCloseABug(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s moved %s to %s; only the person may", actor, b, to)
 			}
-			for _, want := range []string{"person's judgement", actor, "ducklab bug status " + b + " " + to} {
+			for _, want := range []string{"person's judgement", actor, "desktop"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not name %q", err, want)
 				}
@@ -84,6 +84,12 @@ func TestAnAgentCannotCloseAWontfix(t *testing.T) {
 // fixed→verified (and, when close, →closed) before the engine refused it.
 func agentVerdict(t *testing.T, s *Service, project, id, verifier string, close bool) {
 	t.Helper()
+	recordVerdict(t, s, project, id, verifier, verifier, close)
+}
+
+// recordVerdict is agentVerdict with the closer named apart from the verifier.
+func recordVerdict(t *testing.T, s *Service, project, id, verifier, closer string, close bool) {
+	t.Helper()
 	entry, err := s.registry.Get(project)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func agentVerdict(t *testing.T, s *Service, project, id, verifier string, close 
 	appendBugAudit(entry.Path, bug.AuditEntry{Bug: id, From: "fixed", To: "verified", Actor: verifier, Via: "move"})
 	if close {
 		rec.Status = string(bug.Closed)
-		appendBugAudit(entry.Path, bug.AuditEntry{Bug: id, From: "verified", To: "closed", Actor: verifier, Via: "move"})
+		appendBugAudit(entry.Path, bug.AuditEntry{Bug: id, From: "verified", To: "closed", Actor: closer, Via: "move"})
 	}
 	if err := db.UpdateBug(rec); err != nil {
 		t.Fatal(err)
@@ -173,3 +179,63 @@ func TestThePersonsVerificationIsNotUndoable(t *testing.T) {
 		}
 	}
 }
+
+// Review of B-542. The undo answers a verdict that still stands; anything a
+// person did after it ends it. The person closing an agent's verification
+// ratified it, and a bug undone, reopened and then closed as a duplicate is
+// not standing on that verdict any more — offering "back to fixed" there would
+// move a duplicate to fixed in one click.
+func TestTheUndoEndsWhenTheBugMovesOn(t *testing.T) {
+	ctx := context.Background()
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	b := fixedBug(t, s, id)
+	recordVerdict(t, s, id, b, "mcp:opencode", "human", true)
+	bugs, _ := s.BugList(ctx, id, false)
+	if slices.Contains(bugs[0].Next, bug.Fixed) {
+		t.Fatalf("the person's close of an agent's verdict still offers the undo: %v", bugs[0].Next)
+	}
+	if _, err := s.BugMove(ctx, id, b, "fixed", "human"); err == nil {
+		t.Fatal("a verdict the person ratified was undone")
+	}
+
+	if _, err := s.BugAdd(ctx, id, BugRequest{Title: "same as B-001", Severity: "low"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{"triaged", "in_progress", "fixed"} {
+		if _, err := s.BugMove(ctx, id, "B-002", to, "human"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agentVerdict(t, s, id, "B-002", "mcp:opencode", true)
+	for _, to := range []string{"fixed", "in_progress", "triaged", "duplicate", "closed"} {
+		if _, err := s.BugMove(ctx, id, "B-002", to, "human"); err != nil {
+			t.Fatalf("move to %s: %v", to, err)
+		}
+	}
+	bugs, _ = s.BugList(ctx, id, false)
+	for _, x := range bugs {
+		if x.ID == "B-002" && slices.Contains(x.Next, bug.Fixed) {
+			t.Errorf("a duplicate close after the undo offers fixed: %v", x.Next)
+		}
+	}
+}
+
+// An agent reopening what an agent closed is the same unasked judgement in
+// reverse: only the person undoes it.
+func TestAnAgentCannotUndoAVerification(t *testing.T) {
+	ctx := context.Background()
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	b := fixedBug(t, s, id)
+	agentVerdict(t, s, id, b, "mcp:opencode", true)
+	_, err := s.BugMove(ctx, id, b, "fixed", "mcp:opencode")
+	if err == nil || !strings.Contains(err.Error(), "the person's call") {
+		t.Fatalf("an agent undid a verification: %v", err)
+	}
+	bugs, _ := s.BugList(ctx, id, false)
+	if bugs[0].Status != bug.Closed {
+		t.Fatalf("a refused undo changed the bug: %s", bugs[0].Status)
+	}
+}
+
