@@ -251,6 +251,14 @@ Server-Sent Events. One SSE `event:` per Ducklab event type; `data:` is the
 event object from `02-DATA-MODEL.md §6.2`. `id:` is `"<runId>:<seq>"` so a
 reconnecting client sends `Last-Event-ID` and resumes with no gap.
 
+`Last-Event-ID` resumes only a single-run stream (`?run=`), and only when its
+run is that run: a seq is per run. It never changes which runs a stream
+covers. A stream without `?run=` (all runs, or one project's) has no
+stream-wide cursor, so a client reconnecting to it resyncs from a snapshot
+(`GET /v1/runs`, a run read) rather than relying on the header (B-537). Any
+query parameter other than `project`, `run`, `from_seq` and `token` is
+refused with 400.
+
 ```
 event: turn_start
 id: r-20260725-153012-k7q2:7

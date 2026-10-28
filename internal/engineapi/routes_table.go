@@ -712,7 +712,7 @@ func routeTable() []Route {
 
 		// Stream
 		{Method: "GET", Path: "/v1/events", Auth: true,
-			Summary: "SSE event stream. Accepts ?token= because EventSource cannot set headers.",
+			Summary: "SSE event stream, filtered by ?project= and/or ?run= (unknown parameters are refused). Accepts ?token= because EventSource cannot set headers. Last-Event-ID resumes a single-run stream; the all-runs stream has no cursor, so a reconnecting client resyncs from a snapshot.",
 			handler: func(s *Server) http.HandlerFunc { return s.handleEvents }},
 	}
 }
