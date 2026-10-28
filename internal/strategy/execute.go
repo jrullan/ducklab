@@ -2227,7 +2227,7 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 			// The result is summarised, not stored whole: a single fs_read can
 			// return an entire file, and forty of them would make the run log
 			// larger than the repository it describes.
-			data["result"] = SummariseToolResult(tc.Result.Content)
+			data["result"] = SummariseToolResult(tc.Result.Content, tc.Result.IsError)
 		}
 		if tc.Digest != "" {
 			data["digest"] = tc.Digest
@@ -2265,7 +2265,7 @@ func partialTurnNotes(outcome *agent.Outcome) string {
 			pc.Args = string(call.Args)
 		}
 		if call.Result != nil {
-			pc.Result = SummariseToolResult(call.Result.Content)
+			pc.Result = SummariseToolResult(call.Result.Content, call.Result.IsError)
 		}
 		checkpoint.ToolCalls = append(checkpoint.ToolCalls, pc)
 	}
@@ -2299,17 +2299,6 @@ func truncateCheckpointText(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-// maxToolResultBytes bounds what a tool result contributes to the log (I3).
-const maxToolResultBytes = 512
-
-func SummariseToolResult(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= maxToolResultBytes {
-		return s
-	}
-	return s[:maxToolResultBytes] + fmt.Sprintf("\n… %d bytes truncated", len(s)-maxToolResultBytes)
 }
 
 const maxResumeNoteRunes = 12000
