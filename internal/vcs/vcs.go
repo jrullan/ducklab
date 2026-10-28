@@ -1752,3 +1752,24 @@ func (g *Git) IsIgnored(path string) bool {
 	_, err := g.run("check-ignore", "-q", "--", path)
 	return err == nil
 }
+
+// FileVersions returns the committed contents of path (relative to Root),
+// newest first, one entry per commit that changed it, at most max entries.
+// A path with no history yields none.
+func (g *Git) FileVersions(path string, max int) ([]string, error) {
+	rel := filepath.ToSlash(path)
+	out, err := g.run("log", fmt.Sprintf("-n%d", max), "--format=%H", "--", shellEscape(rel))
+	if err != nil {
+		return nil, err
+	}
+	var versions []string
+	for _, sha := range strings.Fields(out) {
+		content, err := g.run("show", shellEscape(sha+":./"+rel))
+		if err != nil {
+			// Deleted in that commit, or renamed away: nothing to read.
+			continue
+		}
+		versions = append(versions, content)
+	}
+	return versions, nil
+}
