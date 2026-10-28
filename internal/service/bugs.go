@@ -129,6 +129,7 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 		if entryErr == nil {
 			b.Attachments = listAttachments(entry.Path, b.ID)
 			b.History = audit[b.ID]
+			b.Next = bugNext(b.Status, b.History)
 			b.NeedsTriage = bugNeedsRetriage(b.History)
 			b.Reopened = reopenedSinceFix(b.History)
 		}
@@ -163,6 +164,14 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 	rec, err := db.GetBug(id)
 	if err != nil {
 		return nil, fmt.Errorf("no bug %s", id)
+	}
+	if err := personOnlyBugMove(rec.ID, bug.Status(to), actor); err != nil {
+		return nil, err
+	}
+	if bug.Status(to) == bug.Fixed {
+		if out, ok, err := undoAgentVerification(entry.Path, db, rec, actor); ok || err != nil {
+			return out, err
+		}
 	}
 	// Reopening a claimed fix starts a new piece of work. Keeping the consumed
 	// task bound here makes promote refuse forever ("already task T-nnn") and
@@ -230,6 +239,109 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "move",
 	})
 	return toBug(rec), nil
+}
+
+// personOnlyBugMove refuses an agent the moves that say a report is answered.
+//
+// B-542. Verification is the judgement that the report is actually answered,
+// and I2 says no model makes it alone. bug_move's description said so and
+// nothing enforced it: an OpenCode coordinator told to "attend B-012" moved it
+// fixed→verified→closed itself, verified B-006 that was waiting for the
+// person, and batch-closed nine more, none of it asked for. An agent carries a
+// bug as far as fixed (an accepted task does that on its own); verified and
+// closed are the person's. Closed is included because closing is the same
+// verdict said louder, and from duplicate or wontfix it ends a report no
+// person looked at.
+func personOnlyBugMove(id string, to bug.Status, actor string) error {
+	if actor == "" || actor == "human" {
+		return nil
+	}
+	if to != bug.Verified && to != bug.Closed {
+		return nil
+	}
+	return fmt.Errorf("moving %s to %s is the person's judgement that the report is answered; %s cannot make it. "+
+		"Tell the person the bug is ready for them, and they move it in the desktop (Bugs) or with `ducklab bug status %s %s`",
+		id, to, actor, id, to)
+}
+
+// verifiedByAgent reports whether a bug's latest verification was not the
+// person's: the last move into verified names an agent. Those verdicts were
+// recorded before B-542 refused them, and nothing could undo them — verified
+// leads only to closed, and closed is final.
+func verifiedByAgent(history []bug.AuditEntry) (bug.AuditEntry, bool) {
+	for i := len(history) - 1; i >= 0; i-- {
+		if bug.Status(history[i].To) != bug.Verified {
+			continue
+		}
+		a := history[i].Actor
+		return history[i], a != "" && a != "human"
+	}
+	return bug.AuditEntry{}, false
+}
+
+// undoAgentVerification returns to fixed a bug whose verification was an
+// agent's (verifiedByAgent), from verified or from the closed that followed
+// it, so the person can make the judgement the agent made for them. ok is
+// false when the move is not that undo; the ordinary rules then apply.
+func undoAgentVerification(projectRoot string, db *store.DB, rec *store.Bug, actor string) (*bug.Bug, bool, error) {
+	from := bug.Status(rec.Status)
+	if from != bug.Verified && from != bug.Closed {
+		return nil, false, nil
+	}
+	history := readBugAudit(projectRoot)[rec.ID]
+	verdict, ok := verifiedByAgent(history)
+	if !ok {
+		return nil, false, nil
+	}
+	if from == bug.Closed && !closedAfter(history, verdict) {
+		return nil, false, nil
+	}
+	rec.Status = string(bug.Fixed)
+	if err := db.UpdateBug(rec); err != nil {
+		return nil, true, err
+	}
+	if actor == "" {
+		actor = "human"
+	}
+	audit := bug.AuditEntry{
+		Bug: rec.ID, From: string(from), To: rec.Status, Actor: actor, Via: "unverify",
+		Note: fmt.Sprintf("returned to fixed: %s verified it, not the person", verdict.Actor),
+	}
+	appendBugAudit(projectRoot, audit)
+	out := toBug(rec)
+	out.History = append(history, audit)
+	out.Next = bugNext(out.Status, out.History)
+	return out, true, nil
+}
+
+// closedAfter reports whether the bug's close came after verdict — i.e. it
+// was closed from that verification, not from a duplicate or wontfix.
+func closedAfter(history []bug.AuditEntry, verdict bug.AuditEntry) bool {
+	seen := false
+	for _, e := range history {
+		if e == verdict {
+			seen = true
+			continue
+		}
+		if seen && bug.Status(e.From) == bug.Verified && bug.Status(e.To) == bug.Closed {
+			return true
+		}
+	}
+	return false
+}
+
+// bugNext is the bug's legal moves, plus the undo of an agent's verification
+// where there is one to undo.
+func bugNext(status bug.Status, history []bug.AuditEntry) []bug.Status {
+	next := bug.NextFrom(status)
+	if status != bug.Verified && status != bug.Closed {
+		return next
+	}
+	verdict, ok := verifiedByAgent(history)
+	if !ok || (status == bug.Closed && !closedAfter(history, verdict)) {
+		return next
+	}
+	return append(next, bug.Fixed)
 }
 
 func (s *Service) openProjectDB(projectID string) (*store.DB, error) {

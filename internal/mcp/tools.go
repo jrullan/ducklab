@@ -396,13 +396,14 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name": "bug_move",
-			"description": "Move a bug between states — most importantly fixed→verified, the judgement " +
-				"that the report is actually answered, which no model makes alone (I2). Only move to " +
-				"verified when the human you speak for has confirmed it.",
+			"description": "Move a bug between states. verified and closed are the person's: verified is the judgement " +
+				"that the report is actually answered, which no model makes alone (I2), and the engine refuses both from " +
+				"an operator — an accepted task already moves its bug to fixed; tell the person it is ready and they move it. " +
+				"fixed also undoes a verification an agent made (the bug's next list offers it).",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("the bug, B-..."),
-				"status":     str("target status, e.g. verified | closed"),
+				"status":     str("target status, e.g. triaged | in_progress | fixed"),
 			}, "project_id", "bug_id", "status"),
 		},
 		{

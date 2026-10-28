@@ -850,6 +850,21 @@ describe("moving a bug by hand", () => {
     await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "in_progress"));
   });
 
+  // B-542: an agent verified bugs nobody asked it to. The engine offers
+  // verified → fixed only for such a verdict; the desktop says what it undoes.
+  it("names the undo of an agent's verification", async () => {
+    const verified = { ...stuck, status: "verified", next: ["closed", "fixed"] };
+    const c = client();
+    (c.bugs as ReturnType<typeof vi.fn>).mockResolvedValue([verified]);
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText("vertex drag never starts"));
+
+    expect(screen.getByTestId("bug-move-fixed").textContent).toBe("back to fixed");
+    expect(screen.getByTestId("bug-unverify-help").textContent).toContain("An agent recorded this verification");
+    fireEvent.click(screen.getByTestId("bug-move-fixed"));
+    await waitFor(() => expect(c.moveBug).toHaveBeenCalledWith("p", "B-001", "fixed"));
+  });
+
   it("requires a fresh triage contract after reopen", async () => {
     const reopened = {
       ...stuck, status: "triaged", task_id: undefined, needs_triage: true,

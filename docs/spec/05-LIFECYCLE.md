@@ -607,6 +607,12 @@ whose `traceability` edge is `bug → task`. When the task's run is accepted and
 the gate is green, the bug moves to `fixed`; `ducklab bug verify <id>` re-runs
 the gate on `main` and moves it to `verified`.
 
+`verified` and `closed` are the person's (I2): the engine refuses both from an
+agent's credential, MCP operators included, and an agent carries a bug no
+further than `fixed` (B-542). A verification an agent recorded before that rule
+can be undone: such a bug, verified or closed from that verification, may move
+back to `fixed` so the person makes the judgement.
+
 ---
 
 ## 7. Skills
