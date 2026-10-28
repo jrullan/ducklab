@@ -274,11 +274,22 @@ func (s *Service) settleWorker(ctx context.Context, rs *runState) error {
 	select {
 	case <-done:
 		return nil
+	default:
+	}
+	settleWorkerWaiting(rs)
+	select {
+	case <-done:
+		return nil
 	case <-ctx.Done():
 	case <-time.After(settleWorkerLimit):
 	}
 	return &RunFinishingError{RunID: id}
 }
+
+// settleWorkerWaiting observes a door starting to wait for a paused worker.
+// A no-op in the engine; tests use it to order a worker's own accept after
+// the wait began.
+var settleWorkerWaiting = func(*runState) {}
 
 // RunFinishingError refuses a decision or resume while the run's paused
 // worker is still tearing down. Nothing was written; retrying succeeds once

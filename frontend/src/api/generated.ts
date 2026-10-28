@@ -633,6 +633,7 @@ export interface RunlogReviewFinding {
 }
 
 export interface RunlogRun {
+  accept_actor?: string;
   accept_attempt?: string;
   accept_in_progress?: boolean;
   acceptance_gate?: RunlogGateReproduction;

@@ -33,18 +33,18 @@ func approvedInProgress(t *testing.T, s *Service, runID string, gate *heldGate) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
+	leave, leaveNow := context.WithCancel(context.Background())
 	type approved struct {
 		out *ApprovalDecision
 		err error
 	}
 	answered := make(chan approved, 1)
 	go func() {
-		out, err := s.ApprovalRequestApprove(gone, runID, req.ID, "human")
+		out, err := s.ApprovalRequestApprove(leave, runID, req.ID, "human")
 		answered <- approved{out, err}
 	}()
 	gate.awaitStart(t)
+	leaveNow() // the person's request ends once the accept holds the decision
 	got := awaitWithin(t, answered, "the approval's answer")
 	if got.err != nil || got.out == nil || got.out.Accept == nil || !got.out.Accept.InProgress {
 		t.Fatalf("approve while the accept replays = %+v, %v; want an in-progress accept", got.out, got.err)
@@ -155,10 +155,10 @@ func TestAnApprovalJoiningAnAcceptInFlightResolvesOnce(t *testing.T) {
 	afterApprovalSettled = func(r runlog.ApprovalRequest) { settled <- r }
 	t.Cleanup(func() { afterApprovalSettled = func(runlog.ApprovalRequest) {} })
 
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	first := acceptAsync(s, gone, run.ID, "the operator's own accept")
+	leave, leaveNow := context.WithCancel(context.Background())
+	first := acceptAsync(s, leave, run.ID, "the operator's own accept")
 	gate.awaitStart(t)
+	leaveNow() // the caller leaves once its accept holds the decision
 	if got := awaitWithin(t, first, "the first accept's answer"); got.err != nil || !got.res.InProgress {
 		t.Fatalf("first accept = %+v, %v", got.res, got.err)
 	}
@@ -166,6 +166,8 @@ func TestAnApprovalJoiningAnAcceptInFlightResolvesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
 	out, err := s.ApprovalRequestApprove(gone, run.ID, req.ID, "human")
 	if err != nil || out.Request.Status != ApprovalApproved || out.Request.Outcome != "accept in progress" {
 		t.Fatalf("approve joining the accept in flight = %+v, %v", out, err)

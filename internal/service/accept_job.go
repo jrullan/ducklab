@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/registry"
@@ -34,8 +35,9 @@ var ErrDecisionInterrupted = errors.New("decision interrupted")
 // The causes a run-owned decision context is cancelled with, so the record
 // says which one stopped it.
 var (
-	errCauseAborted  = errors.New("the run was aborted")
-	errCauseShutdown = errors.New("the engine is shutting down")
+	errCauseAborted    = errors.New("the run was aborted")
+	errCauseShutdown   = errors.New("the engine is shutting down")
+	errCauseCallerLeft = errors.New("its caller stopped waiting before it could take the run's decision; accept again")
 )
 
 // acceptJob is one accept in flight. Exactly one exists per run at a time: a
@@ -56,6 +58,17 @@ type acceptJob struct {
 	// accept_settled, last_accept). Set when the decision is held; read
 	// only after held or done closes.
 	attempt string
+	// actor is who this accept decides as; it is persisted with the attempt
+	// so recovery can name it.
+	actor string
+	// worker is set when this accept is the run's own worker accepting its
+	// run — from the start, or promoted when the worker joins it before it
+	// held the decision. A worker accept never waits for the worker
+	// (settleWorkerForAccept), and promoted wakes one already waiting.
+	worker      atomic.Bool
+	isHeld      atomic.Bool
+	promoted    chan struct{}
+	promoteOnce sync.Once
 }
 
 // acceptInFlight returns the accept running on this run, or nil.
@@ -89,26 +102,41 @@ var beforeAcceptStart = func(*runState) {}
 // and the accept installed one mid-shutdown that nothing would cancel.
 // interruptAccepts takes acceptMu per run after setting the flag, so a job
 // is either refused here or found and cancelled there.
-func (s *Service) startAccept(rs *runState, work func(ctx context.Context, held func()) (*AcceptResult, error)) (job *acceptJob, joined bool, err error) {
+//
+// A worker caller (the run's worker accepting its own run) joins only an
+// accept it can share (review of #181). One that has not held the decision
+// is promoted to the worker's — it was waiting in settleWorker for this very
+// worker, which now waits for it: a cycle broken only by the limit, after
+// which both lost. One that already holds it was decided for another caller:
+// the worker waits for it to settle (waitFirst) and then accepts itself.
+func (s *Service) startAccept(rs *runState, worker bool, actor string, work func(ctx context.Context, job *acceptJob, held func()) (*AcceptResult, error)) (job *acceptJob, joined, waitFirst bool, err error) {
 	rs.acceptMu.Lock()
 	defer rs.acceptMu.Unlock()
-	if rs.accepting != nil {
-		return rs.accepting, true, nil
+	if existing := rs.accepting; existing != nil {
+		if worker && !existing.worker.Load() {
+			if existing.isHeld.Load() {
+				return existing, true, true, nil
+			}
+			existing.promote()
+		}
+		return existing, true, false, nil
 	}
 	if rs.acceptsBlocked != nil {
-		return nil, false, fmt.Errorf("%w: accept not started because %v", ErrDecisionInterrupted, rs.acceptsBlocked)
+		return nil, false, false, fmt.Errorf("%w: accept not started because %v", ErrDecisionInterrupted, rs.acceptsBlocked)
 	}
 	if s.shuttingDown.Load() {
-		return nil, false, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
+		return nil, false, false, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
-	job = &acceptJob{done: make(chan struct{}), held: make(chan struct{}), cancel: cancel}
+	job = &acceptJob{done: make(chan struct{}), held: make(chan struct{}), cancel: cancel, actor: actor, promoted: make(chan struct{})}
+	job.worker.Store(worker)
 	// Holding the decision is also where the attempt goes on the record:
 	// from here on exactly one accept_settled closes it — written by this
 	// job, or by the next engine's recovery if this one dies first.
 	markHeld := func() {
 		job.heldOnce.Do(func() {
-			job.attempt = s.beginAcceptAttempt(rs)
+			job.isHeld.Store(true)
+			job.attempt = s.beginAcceptAttempt(rs, job.actor)
 			close(job.held)
 		})
 	}
@@ -121,13 +149,76 @@ func (s *Service) startAccept(rs *runState, work func(ctx context.Context, held 
 			rs.acceptMu.Unlock()
 			close(job.done)
 		}()
-		job.result, job.err = work(ctx, markHeld)
+		job.result, job.err = work(ctx, job, markHeld)
 		if job.result != nil {
 			job.result.Attempt = job.attempt
 		}
 		s.settleAcceptAttempt(rs, job.attempt, job.result, job.err)
 	}()
-	return job, false, nil
+	return job, false, false, nil
+}
+
+// workerWaitsForOtherAccept observes the worker's own accept waiting for
+// another caller's accept to settle. A no-op in the engine.
+var workerWaitsForOtherAccept = func(*runState) {}
+
+// promote makes this accept the run's worker's own (see startAccept).
+// Called under acceptMu.
+func (j *acceptJob) promote() {
+	j.promoteOnce.Do(func() {
+		j.worker.Store(true)
+		close(j.promoted)
+	})
+}
+
+// settleWorkerForAccept is settleWorker for an accept job. A worker accept
+// skips it — the worker waits for this accept, not the other way round — and
+// a job promoted to the worker's while it waits stops waiting. A cancelled
+// job is interrupted, not "still finishing".
+func (s *Service) settleWorkerForAccept(ctx context.Context, rs *runState, job *acceptJob) error {
+	if job == nil {
+		return s.settleWorker(ctx, rs)
+	}
+	if job.worker.Load() || ctx.Value(workerKey{}) == rs {
+		return nil
+	}
+	rs.wmu.Lock()
+	status, done, id := rs.run.Status, rs.done, rs.run.ID
+	rs.wmu.Unlock()
+	if status != "paused" || done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-job.promoted:
+		return nil
+	case <-ctx.Done():
+		return interruptedError(ctx, "the accept, waiting for the run's worker to finish,")
+	case <-time.After(settleWorkerLimit):
+	}
+	return &RunFinishingError{RunID: id}
+}
+
+// lockDecisionSettled is how a door other than accept and abort takes the
+// decision (review of #181): it first waits for a paused worker that is
+// still finishing — holding nothing, so a worker that accepts its own run on
+// the way out (auto-triage, the tdd chain) can take the decision and settle
+// — then takes the lock and checks again. The door then decides against the
+// settled run: an accept the worker made is "already accepted".
+func (s *Service) lockDecisionSettled(ctx context.Context, rs *runState, action string) (unlock func(), err error) {
+	if err := s.settleWorker(ctx, rs); err != nil {
+		return nil, err
+	}
+	unlock, err = lockDecisionUnlessAccepting(rs, action)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.settleWorker(ctx, rs); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // newAcceptAttempt names one accept attempt. Unique across engine restarts,
@@ -143,14 +234,14 @@ func newAcceptAttempt() string {
 // accept killed with the engine wrote no settlement, and run_get then
 // reported an older attempt's as last_accept). Only called once the run's
 // worker no longer owns the log.
-func (s *Service) beginAcceptAttempt(rs *runState) string {
+func (s *Service) beginAcceptAttempt(rs *runState, actor string) string {
 	attempt := newAcceptAttempt()
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return attempt
 	}
 	rs.wmu.Lock()
-	rs.run.AcceptAttempt = attempt
+	rs.run.AcceptAttempt, rs.run.AcceptActor = attempt, actor
 	_ = w.WriteState()
 	rs.wmu.Unlock()
 	_ = w.AppendEvent("accept_started", map[string]interface{}{"attempt": attempt})
@@ -190,7 +281,7 @@ func (s *Service) settleAcceptAttempt(rs *runState, attempt string, result *Acce
 	}
 	rs.wmu.Lock()
 	if rs.run.AcceptAttempt == attempt {
-		rs.run.AcceptAttempt = ""
+		rs.run.AcceptAttempt, rs.run.AcceptActor = "", ""
 	}
 	_ = w.WriteState()
 	rs.wmu.Unlock()
@@ -236,7 +327,7 @@ func (s *Service) settleInterruptedAccept(rs *runState) bool {
 		// attempt: it is closed already, and exactly once.
 		if w, werr := s.ensureWriter(rs); werr == nil {
 			rs.wmu.Lock()
-			rs.run.AcceptAttempt = ""
+			rs.run.AcceptAttempt, rs.run.AcceptActor = "", ""
 			_ = w.WriteState()
 			rs.wmu.Unlock()
 		}
@@ -255,8 +346,12 @@ func (s *Service) settleInterruptedAccept(rs *runState) bool {
 		// An isolated run fast-forwards the default branch only after its
 		// clean-checkout reproduction passed; the engine died before the
 		// record said so. The commit on main IS the accept (review of #181).
-		s.landRecoveredAccept(rs, landed)
-		result = &AcceptResult{CommitSHA: landed, Info: "the accept landed before the engine stopped; settled on recovery"}
+		if lerr := s.landRecoveredAccept(rs, landed, run.AcceptActor); lerr != nil {
+			err = lerr
+			break
+		}
+		after := rs.snapshotRun()
+		result = &AcceptResult{CommitSHA: landed, Warning: after.Warning, Info: "the accept landed before the engine stopped; settled on recovery"}
 	case landed != "":
 		// A shared-checkout accept commits BEFORE its reproduction: the
 		// commit exists, but nothing says it reproduced.
@@ -283,25 +378,23 @@ func (s *Service) settleInterruptedAccept(rs *runState) bool {
 // branch before the engine died: the run is accepted with that commit and
 // its isolated worktree released, as the live path ends it. Publication and
 // the autopilot are not replayed — they belong to a live accept.
-func (s *Service) landRecoveredAccept(rs *runState, sha string) {
-	w, err := s.ensureWriter(rs)
-	if err != nil {
-		return
+//
+// It ends through the same finishAcceptedWorktreeRun the live accept does
+// (receipt, bug_fixed, run record, worktree, tdd chain). What recovery
+// cannot replay is said on the run, as a warning: the person's checkout was
+// not synced, and publication (remote.on_accept) and the autopilot did not
+// run for this accept.
+func (s *Service) landRecoveredAccept(rs *runState, sha, actor string) error {
+	if _, err := s.ensureWriter(rs); err != nil {
+		return err
 	}
-	resolution := "accepted; its commit landed on the default branch before the engine stopped (settled on recovery)"
-	rs.wmu.Lock()
-	rs.run.Accepted, rs.run.CommitSHA = true, sha
-	setRunStatus(rs.run, "done", time.Now())
-	rs.run.Resolution = resolution
-	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-	clearPending(rs.run)
-	verdict, hasWorktree := rs.run.Verdict, rs.run.WorktreePath != ""
-	rs.wmu.Unlock()
-	_ = w.AppendEvent("run_end", map[string]interface{}{"verdict": verdict, "resolution": resolution, "commit_sha": sha})
-	_ = w.WriteState()
-	if hasWorktree {
-		s.cleanupRunWorktree(rs, rs.projectPath)
+	if actor == "" {
+		actor = "an accept the engine did not record"
 	}
+	rs.run.Warning = strings.TrimSpace(rs.run.Warning + " main advanced to " + sha + " by an accept that landed as the engine stopped; settled on recovery — your checkout was not synced (run git status), and publication (remote.on_accept) and the autopilot did not run for it")
+	_ = rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
+	return s.finishAcceptedWorktreeRun(context.Background(), rs, rs.projectPath, sha, actor,
+		"accepted by "+actor+"; landed on the default branch before the engine stopped (settled on recovery)")
 }
 
 // attemptRecord reads what the log holds for one accept attempt: whether an

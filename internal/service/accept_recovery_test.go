@@ -18,10 +18,10 @@ func TestAJoinedApprovalOfARefusedAcceptIsSuperseded(t *testing.T) {
 	settled := make(chan runlog.ApprovalRequest, 4)
 	afterApprovalSettled = func(r runlog.ApprovalRequest) { settled <- r }
 	t.Cleanup(func() { afterApprovalSettled = func(runlog.ApprovalRequest) {} })
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	first := acceptAsync(s, gone, run.ID, "the operator's own accept")
+	leave, leaveNow := context.WithCancel(context.Background())
+	first := acceptAsync(s, leave, run.ID, "the operator's own accept")
 	gate.awaitStart(t)
+	leaveNow() // the caller leaves once its accept holds the decision
 	if got := awaitWithin(t, first, "the first accept's answer"); got.err != nil || !got.res.InProgress {
 		t.Fatalf("first accept = %+v, %v", got.res, got.err)
 	}
@@ -29,6 +29,8 @@ func TestAJoinedApprovalOfARefusedAcceptIsSuperseded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
 	out, err := s.ApprovalRequestApprove(gone, run.ID, req.ID, "human")
 	if err != nil || out.Request.Outcome != "accept in progress" {
 		t.Fatalf("approve = %+v, %v", out, err)
@@ -45,10 +47,10 @@ func TestAJoinedApprovalOfARefusedAcceptIsSuperseded(t *testing.T) {
 // its own decision with nothing to say it decided nothing.
 func TestAJoinedCallOfARefusedAcceptIsMarkedJoined(t *testing.T) {
 	s, run, gate, _ := heldAcceptRun(t, "r-b529-joined-sync")
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	first := acceptAsync(s, gone, run.ID, "")
+	leave, leaveNow := context.WithCancel(context.Background())
+	first := acceptAsync(s, leave, run.ID, "")
 	gate.awaitStart(t)
+	leaveNow() // the caller leaves once its accept holds the decision
 	if got := awaitWithin(t, first, "the first accept's answer"); got.err != nil || !got.res.InProgress {
 		t.Fatalf("first accept = %+v, %v", got.res, got.err)
 	}
@@ -73,10 +75,10 @@ func TestLastAcceptAfterAnEngineDiedMidAcceptIsThatAttemptInterrupted(t *testing
 	if got := awaitWithin(t, first, "attempt one"); got.err == nil {
 		t.Fatal("fixture: attempt one should be refused")
 	}
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	second := acceptAsync(s, gone, run.ID, "attempt two")
+	leave, leaveNow := context.WithCancel(context.Background())
+	second := acceptAsync(s, leave, run.ID, "attempt two")
 	gate.awaitStart(t)
+	leaveNow() // the caller leaves once its accept holds the decision
 	got := awaitWithin(t, second, "attempt two")
 	if got.err != nil || !got.res.InProgress || got.res.Attempt == "" {
 		t.Fatalf("attempt two = %+v, %v; want in progress with its attempt id", got.res, got.err)
@@ -167,10 +169,10 @@ func TestAnAcceptThatLandedBeforeTheEngineDiedRecoversAccepted(t *testing.T) {
 // when interrupted.
 func TestEveryAcceptAttemptSettlesExactlyOnce(t *testing.T) {
 	s, run, gate, _ := heldAcceptRun(t, "r-b529-settles-once")
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	first := acceptAsync(s, gone, run.ID, "")
+	leave, leaveNow := context.WithCancel(context.Background())
+	first := acceptAsync(s, leave, run.ID, "")
 	gate.awaitStart(t)
+	leaveNow() // the caller leaves once its accept holds the decision
 	_ = awaitWithin(t, first, "the first accept's answer")
 	joined := acceptAsync(s, context.Background(), run.ID, "")
 	gate.open(t)

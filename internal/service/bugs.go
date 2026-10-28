@@ -537,6 +537,12 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 		return err
 	}
 	defer unlock()
+	// As abort does: holding the decision, this claim waits for the
+	// worker — so an accept the worker starts (auto-triage) is refused and a
+	// waiting one cancelled first, before settleWorker (review of #181). The
+	// relaunch replaces the run; its worker's accept is not wanted.
+	unblock := s.blockAccepts(prior, errors.New("the run is being relaunched"))
+	defer unblock()
 	// A paused original whose worker is still tearing down is not claimed
 	// over it: the claim would write a log that worker is about to close.
 	if err := s.settleWorker(ctx, prior); err != nil {
@@ -556,10 +562,6 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	resolution := "relaunched as " + replacementID
 	live := before.Status == "running" || before.Status == "paused" || before.Status == "queued"
 	if live {
-		// As abort does: the worker this waits for must not be stuck in an
-		// accept waiting on the decision this claim holds (review of #181).
-		unblock := s.blockAccepts(prior, errors.New("the run is being relaunched"))
-		defer unblock()
 		// Stop the worker before writing over its record: a triage writes its
 		// gate when its loop ends, and would overwrite the claim.
 		prior.wmu.Lock()

@@ -226,6 +226,9 @@ type Run struct {
 	// closed by its accept_settled (B-529). Persisted: a next engine that
 	// finds it set settles it, because the engine running it died.
 	AcceptAttempt string `json:"accept_attempt,omitempty"`
+	// AcceptActor is who the open attempt decides as, so recovery can name
+	// it on an accept that landed before the engine died.
+	AcceptActor string `json:"accept_actor,omitempty"`
 	// LastAccept is the newest accept_settled event's data — outcome
 	// (accepted, refused, interrupted), error, commit_sha — derived on read,
 	// so a caller told "in progress" finds the outcome on the run itself.

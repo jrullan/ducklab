@@ -324,9 +324,13 @@ func TestAcceptRefusedByTeardownIsNeverAnsweredInProgress(t *testing.T) {
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 	got := awaitWithin(t, acceptAsync(s, gone, runID, ""), "the accept's answer")
+	// Third review of #181: a caller already gone is not kept waiting for
+	// the teardown either — the accept it started is cancelled before it
+	// held the decision, so the answer is "not started" (interrupted).
+	// Either answer is a refusal; neither is in_progress.
 	var finishing *RunFinishingError
-	if !errors.As(got.err, &finishing) {
-		t.Fatalf("accept while the worker tears down = %+v, %v; want the RunFinishingError itself, never in_progress", got.res, got.err)
+	if !errors.As(got.err, &finishing) && !errors.Is(got.err, ErrDecisionInterrupted) {
+		t.Fatalf("accept while the worker tears down = %+v, %v; want a refusal, never in_progress", got.res, got.err)
 	}
 	stateAfter, _ := os.ReadFile(filepath.Join(dir, "state.json"))
 	eventsAfter, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))

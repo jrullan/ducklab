@@ -187,8 +187,11 @@ func TestAcceptSurvivesItsHTTPClientLeaving(t *testing.T) {
 func TestAcceptAnswersInProgressPastItsBoundedWait(t *testing.T) {
 	s, _, started, release := heldAcceptProject(t, "r-b529-http-wait")
 	api := New(s, bus.New(16), "token", "test", "")
-	// The gate is held until release below, so any wait expires first.
-	api.acceptWait = time.Millisecond
+	// The gate is held until release below, so the wait expires with the
+	// accept holding the decision and replaying. Long enough for the accept
+	// to take the decision first: a caller whose bound ends before that is
+	// answered "not started" instead (third review of #181).
+	api.acceptWait = 2 * time.Second
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
 

@@ -2147,6 +2147,9 @@
       },
       "RunlogRun": {
         "properties": {
+          "accept_actor": {
+            "type": "string"
+          },
           "accept_attempt": {
             "type": "string"
           },

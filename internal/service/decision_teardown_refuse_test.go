@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -65,10 +64,6 @@ func heldRun(t *testing.T, door string) (s *Service, root, runID string, release
 	return s, root, runID, release
 }
 
-// errAnsweredInProgress marks an accept that answered without an error —
-// in_progress or settled (B-529).
-var errAnsweredInProgress = errors.New("answered in_progress")
-
 func runDoor(s *Service, ctx context.Context, door, runID string) error {
 	switch door {
 	case "resume":
@@ -116,41 +111,27 @@ func TestADoorRefusesWhileThePausedWorkerIsStillFinishing(t *testing.T) {
 					settleWorkerLimit = 50 * time.Millisecond
 					defer func() { settleWorkerLimit = previous }()
 				}
-				// B-529: an accept runs on the run's own context, so a caller
-				// that is already gone does not refuse it: the accept waits
-				// out the teardown on its own. It is not answered while the
-				// worker is alive (review of #181: an "in progress" answer
-				// there could be followed by a teardown refusal that must
-				// write nothing, so the caller would never hear it). It
-				// writes nothing meanwhile (checked below), answers once the
-				// worker has returned, and lands.
+				// An accept whose caller is already gone (B-529, third review
+				// of #181) is bounded by that caller: it is cancelled before
+				// it could hold the decision and answered "not started"
+				// (interrupted) at once — never in_progress, never kept
+				// waiting for the teardown — and it writes nothing.
 				outlived := door == "accept" && how == "cancelled"
 				result := make(chan error, 1)
-				go func() {
-					if outlived {
-						res, err := s.RunAccept(ctx, runID, "")
-						if err == nil && res == nil {
-							err = fmt.Errorf("answered nothing")
-						}
-						if err == nil {
-							err = errAnsweredInProgress
-						}
-						result <- err
-						return
-					}
-					result <- runDoor(s, ctx, door, runID)
-				}()
+				go func() { result <- runDoor(s, ctx, door, runID) }()
 				var err error
-				if !outlived {
-					select {
-					case err = <-result:
-					case <-time.After(20 * time.Second):
-						t.Fatalf("%s hung behind the live worker instead of refusing", door)
+				select {
+				case err = <-result:
+				case <-time.After(20 * time.Second):
+					t.Fatalf("%s hung behind the live worker instead of refusing", door)
+				}
+				var finishing *RunFinishingError
+				if outlived {
+					if !errors.Is(err, ErrDecisionInterrupted) {
+						t.Fatalf("accept from a departed caller while the worker is alive = %v, want it not started", err)
 					}
-					var finishing *RunFinishingError
-					if !errors.As(err, &finishing) {
-						t.Fatalf("%s while the worker is alive = %v, want a retryable RunFinishingError", door, err)
-					}
+				} else if !errors.As(err, &finishing) {
+					t.Fatalf("%s while the worker is alive = %v, want a retryable RunFinishingError", door, err)
 				}
 				stateAfter, _ := os.ReadFile(filepath.Join(dir, "state.json"))
 				eventsAfter, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))
@@ -162,21 +143,7 @@ func TestADoorRefusesWhileThePausedWorkerIsStillFinishing(t *testing.T) {
 				}
 
 				release()
-				if outlived {
-					select {
-					case err = <-result:
-					case <-time.After(20 * time.Second):
-						t.Fatal("the departed caller's accept never answered after the worker returned")
-					}
-					if !errors.Is(err, errAnsweredInProgress) {
-						t.Fatalf("accept from a departed caller after the worker returned = %v, want an answer", err)
-					}
-				}
-				// Only the bound case shortened it. In the outlived case the
-				// accept may still be running and reading the limit (B-529).
-				if how == "bound" {
-					settleWorkerLimit = 30 * time.Second
-				}
+				settleWorkerLimit = 30 * time.Second
 				if err := runDoor(s, context.Background(), door, runID); err != nil {
 					t.Fatalf("%s after the worker returned: %v", door, err)
 				}

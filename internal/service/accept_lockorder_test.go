@@ -66,8 +66,8 @@ func TestRunGetNeverWaitsBehindAQueuedDoor(t *testing.T) {
 	rs.wmu.Lock()
 	rs.done = tearingDown
 	rs.wmu.Unlock()
-	waiting := make(chan struct{}, 1)
-	decisionWaiting = func(r *runState) {
+	waiting := make(chan struct{}, 2)
+	settleWorkerWaiting = func(r *runState) {
 		if r == rs {
 			select {
 			case waiting <- struct{}{}:
@@ -75,12 +75,13 @@ func TestRunGetNeverWaitsBehindAQueuedDoor(t *testing.T) {
 			}
 		}
 	}
-	t.Cleanup(func() { decisionWaiting = func(*runState) {} })
+	t.Cleanup(func() { settleWorkerWaiting = func(*runState) {} })
 
 	doors := make(chan error, 2)
 	go func() { doors <- s.RunRejectAs(context.Background(), run.ID, "", "human") }()
 	go func() { doors <- s.RunLand(context.Background(), run.ID, "deadbeef", "human", "") }()
-	_ = awaitWithin(t, waiting, "a door queueing behind the other's settleWorker")
+	_ = awaitWithin(t, waiting, "the first door waiting for the worker")
+	_ = awaitWithin(t, waiting, "the second door waiting for the worker")
 	got := make(chan error, 1)
 	go func() { _, err := s.RunGet(context.Background(), run.ID); got <- err }()
 	select {
