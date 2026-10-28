@@ -32,7 +32,10 @@ export type AcceptState =
    * announced by its gate_started, or by an in_progress answer from an
    * accept that outlived the request (B-529). Still pending: no commit is
    * shown until the engine confirms one (accept_settled). */
-  | { kind: "pending"; verifying?: boolean; attempt?: string }
+  /** external: the accept was started elsewhere — an MCP operator, the
+   * CLI, another window — and by names who decides when it is not the
+   * person (B-543). Both absent for this client's own accept. */
+  | { kind: "pending"; verifying?: boolean; attempt?: string; by?: string; external?: boolean }
   /** warning/info: the accept's publication consequences (a failed push,
    * a local-only commit), carried however the settlement arrived — the
    * HTTP answer, the live accept_settled, or last_accept on a run read. */
@@ -80,6 +83,10 @@ export interface RunsState {
   /** Applies a frame's worth of streamed text in one update (AC-33). */
   applyDeltaBatch: (byRun: Map<string, Map<string, string>>) => void;
   setRuns: (runs: Run[]) => void;
+  /** Runs showing an accept started elsewhere (B-543). Their settlement
+   * arrives only on the stream; after a reconnect, an overflow or an engine
+   * restart the run read must settle them (refetchExternalAccepts). */
+  externalAccepts: () => string[];
   setRun: (run: Run) => void;
   /** Replaces a run's events wholesale after an overflow resync. */
   resyncRun: (run: Run, events: DucklabEvent[]) => void;
@@ -144,6 +151,13 @@ function discardTurn(
  */
 export function reconcileAccept(acceptState: Record<string, AcceptState>, run: Run): Record<string, AcceptState> {
   const st = acceptState[run.id];
+  // B-543: an accept this client did not start (an MCP operator's, the
+  // CLI's) is still an accept in flight. Read mid-accept — a reconnect, a
+  // view opened while it verifies — the run says so; the gate must not offer
+  // a decision that is already being taken.
+  if (run.accept_in_progress && st?.kind !== "pending") {
+    return { ...acceptState, [run.id]: externalAccept(run.accept_attempt, run.accept_actor) };
+  }
   if (st?.kind !== "pending" || !st.verifying || run.accept_in_progress) return acceptState;
   const last = run.last_accept;
   // Review of #181: only THIS attempt's settlement is this accept's outcome.
@@ -169,6 +183,16 @@ export function reconcileAccept(acceptState: Record<string, AcceptState>, run: R
     };
   }
   return acceptState;
+}
+
+/** The pending state of an accept started elsewhere (B-543): already past
+ * its request, so verifying, and settled by its own attempt's accept_settled
+ * like any other. */
+function externalAccept(attempt?: unknown, by?: unknown): AcceptState {
+  const st: AcceptState = { kind: "pending", verifying: true, external: true };
+  if (typeof attempt === "string" && attempt) st.attempt = attempt;
+  if (typeof by === "string" && by && by !== "human") st.by = by;
+  return st;
 }
 
 // Approval statuses that are final: a request in one of them never moves
@@ -227,7 +251,7 @@ export function settlementState(payload: Record<string, unknown> | undefined | n
   return outcome === "interrupted" ? { kind: "error", message, interrupted: true } : { kind: "error", message };
 }
 
-export const useRuns = create<RunsState>((set) => ({
+export const useRuns = create<RunsState>((set, get) => ({
   runs: {},
   events: {},
   deltas: {},
@@ -403,7 +427,23 @@ export const useRuns = create<RunsState>((set) => ({
       // and how it ended — the only place the outcome of an accept answered
       // in_progress ever arrives. A commit is shown only once settled.
       let acceptState = state.acceptState;
-      if (acceptState[runId]?.kind === "pending") {
+      // B-543: the engine announces every accept on the run's stream, not
+      // just the ones this client started. An operator's accept left the gate
+      // offering Accept for minutes while the engine was already deciding.
+      // This client's own pending accept keeps its state: its HTTP answer
+      // names the attempt, and the join is the engine's (B-529).
+      //
+      // Adopted when nothing is pending, or over an earlier outside accept
+      // whose settlement this client never received (a dropped stream): a
+      // new attempt means that one is over. Never over a commit — a run is
+      // accepted once, and this client's own fast accept can settle before
+      // the stream's accept_started for it arrives (review of B-543).
+      const cur = acceptState[runId];
+      const replaces = cur?.kind !== "pending" || (cur.external === true && cur.attempt !== e.data?.attempt);
+      if (e.type === "accept_started" && replaces && cur?.kind !== "committed" && !runs[runId]?.accepted && typeof e.data?.attempt === "string") {
+        const settled = (state.events[runId] ?? []).some((x) => x.type === "accept_settled" && x.data?.attempt === e.data?.attempt);
+        if (!settled) acceptState = { ...acceptState, [runId]: externalAccept(e.data.attempt, e.data.actor) };
+      } else if (acceptState[runId]?.kind === "pending") {
         const pendingAttempt = (acceptState[runId] as { attempt?: string }).attempt;
         if (e.type === "gate_started" && e.data?.phase === "accept") {
           acceptState = { ...acceptState, [runId]: { ...acceptState[runId], kind: "pending", verifying: true } };
@@ -456,6 +496,11 @@ export const useRuns = create<RunsState>((set) => ({
       runs: Object.fromEntries(list.map((r) => [r.id, keepApprovalProgress(state.runs[r.id], r)])),
       runsEpoch: state.runsEpoch + 1,
     })),
+
+  externalAccepts: () =>
+    Object.entries(get().acceptState)
+      .filter(([, st]) => st.kind === "pending" && st.external === true)
+      .map(([id]) => id),
 
   setRun: (run) =>
     set((state) => ({

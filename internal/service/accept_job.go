@@ -244,7 +244,9 @@ func (s *Service) beginAcceptAttempt(rs *runState, actor string) string {
 	rs.run.AcceptAttempt, rs.run.AcceptActor = attempt, actor
 	_ = w.WriteState()
 	rs.wmu.Unlock()
-	_ = w.AppendEvent("accept_started", map[string]interface{}{"attempt": attempt})
+	// The actor lets a client that did not start this accept say who is
+	// deciding while it verifies (B-543).
+	_ = w.AppendEvent("accept_started", map[string]interface{}{"attempt": attempt, "actor": resumeActor(actor)})
 	return attempt
 }
 

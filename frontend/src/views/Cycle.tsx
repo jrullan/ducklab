@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Artifact, ArtifactLintResult, ConfigFinding, Duckling, EngineClient, ProjectLifecycle, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
 import { LifecycleStrip } from "../components/LifecycleStrip";
 import { useRuns } from "../store/runs";
+import { acceptingLabel } from "../lib/accept";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
@@ -360,6 +361,8 @@ export function Cycle({
   // just rejected a draft came back to a screen still awaiting their decision.
   const [proposalDecided, setProposalDecided] = useState(false);
   const proposalRunId = artifact?.proposal?.run_id ?? "";
+  const proposalAcceptState = useRuns((s) => (proposalRunId ? s.acceptState[proposalRunId] : undefined));
+  const proposalAccepting = proposalAcceptState?.kind === "pending";
   useEffect(() => {
     if (!proposalRunId) {
       setProposalNext([]);
@@ -373,6 +376,8 @@ export function Cycle({
         if (cancelled) return;
         setProposalNext(d.run.next ?? []);
         setProposalRun(d.run);
+        // The store reads an accept already in flight from the run (B-543).
+        useRuns.getState().setRun(d.run);
         setProposalDecided(d.run.status === "done" || d.run.status === "failed");
       })
       .catch(() => !cancelled && setProposalNext([]));
@@ -850,7 +855,10 @@ export function Cycle({
               consequence={artifact.approved && (artifact.sections?.length ?? 0) > 0
                 ? `replaces the approved ${documentLabel(active.kind)} and closes the run`
                 : `approves this as the project's first ${documentLabel(active.kind)} and closes the run`}
-              accepting={promoting}
+              // An accept of the proposing run started elsewhere (an MCP
+              // operator) is in flight too (B-543).
+              accepting={promoting || proposalAccepting}
+              acceptingLabel={proposalAccepting ? acceptingLabel(proposalAcceptState) : undefined}
               onAccept={() => void accept()}
               onReject={() => void reject()}
               onRequestChanges={requestChanges}

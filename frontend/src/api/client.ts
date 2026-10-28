@@ -370,6 +370,10 @@ export interface Run {
   /** An accept is running for this run (B-529). Set on a run read
    * (GET /v1/runs/{id}), absent from lists. */
   accept_in_progress?: boolean;
+  /** The open accept attempt and who it decides as, until its
+   * accept_settled (B-529; B-543 reads them for an accept started elsewhere). */
+  accept_attempt?: string;
+  accept_actor?: string;
   /** The newest accept_settled payload: outcome accepted | refused |
    * interrupted, with commit_sha or error. Set on a run read. */
   last_accept?: { attempt?: string; outcome?: string; commit_sha?: string; error?: string; warning?: string; info?: string };

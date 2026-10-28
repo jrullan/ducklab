@@ -26,6 +26,7 @@ import { parseRoute, routeHref, type Route } from "./routes";
 import { ConsultantPane, useConsultantShortcut } from "../components/ConsultantPane";
 import { useConsultant, type ConsultantSubject } from "../store/consultant";
 import { loadTheme, type Theme } from "./theme";
+import { refetchExternalAccepts } from "../lib/accept";
 
 /** Must match internal/build.Version: the engine rejects a client whose
  * major version differs. */
@@ -364,7 +365,7 @@ export function App() {
       // replace the run list from HTTP after the new stream is open.
       // Run-holding surfaces outside the route (the consultant pane) refetch
       // their record too: whatever the dead stream carried is not in it.
-      onReconnect: () => { refresh(); useRuns.getState().requestResync(); },
+      onReconnect: () => { refresh(); useRuns.getState().requestResync(); refetchExternalAccepts(c); },
       staleAfterMs: 30_000,
       // Overflow means we fell behind and the engine dropped us. Refetching
       // the run LIST is not enough: the conversation lives in the run detail,
@@ -374,6 +375,7 @@ export function App() {
         const store = useRuns.getState();
         store.markOverflow();
         refresh();
+        refetchExternalAccepts(c);
         const current = parseRoute(location.hash);
         if (current.name === "run") {
           c.run(current.id)
@@ -386,6 +388,9 @@ export function App() {
       },
     });
     sub.start();
+    // A new connection is a new engine: whatever an outside accept was doing
+    // on the old one settled where this client could not see it.
+    refetchExternalAccepts(c);
     return () => {
       sub.stop();
       batcher.drain();

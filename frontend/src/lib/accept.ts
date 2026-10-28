@@ -15,7 +15,28 @@ export const ACCEPT_VERIFYING_LABEL = "Accepting… verifying from a clean check
 
 /** The button's words while an accept is pending. */
 export function acceptingLabel(state: AcceptState | undefined): string {
+  if (state?.kind === "pending" && state.by) {
+    // Someone else's accept (B-543): say who is deciding.
+    return `${state.by} is accepting… verifying from a clean checkout`;
+  }
   return state?.kind === "pending" && state.verifying ? ACCEPT_VERIFYING_LABEL : "Accepting…";
+}
+
+/**
+ * Settles outside accepts from the run record (review of B-543). The all-runs
+ * stream has no cursor: an accept_settled written while this client was
+ * disconnected — an engine restart's recovery, a refusal — never arrives,
+ * and the gate stayed "accepting…" with Accept disabled for good. The run
+ * read carries accept_in_progress and last_accept; setRun settles from them.
+ * This client's own accepts have the same path in settled().
+ */
+export function refetchExternalAccepts(client: Pick<EngineClient, "run">): void {
+  for (const runId of useRuns.getState().externalAccepts()) {
+    client
+      .run(runId)
+      .then((d) => useRuns.getState().setRun(d.run))
+      .catch(() => {});
+  }
 }
 
 export class AcceptSettledError extends Error {

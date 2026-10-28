@@ -33,7 +33,7 @@ import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { documentLabel, runLabel } from "../lib/runview";
 import { retryRoute, reviseRun, revisesDocument, type RevisionNote } from "../lib/retry";
-import { ACCEPT_VERIFYING_LABEL, acceptAndSettle, acceptingLabel } from "../lib/accept";
+import { acceptAndSettle, acceptingLabel } from "../lib/accept";
 import { VisualCheck } from "../components/VisualCheck";
 import { ApprovalRequests } from "../components/ApprovalRequests";
 
@@ -2238,7 +2238,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
       {acceptState.kind === "pending" && acceptState.verifying && (
         <p className="m-2 text-ink-secondary" data-testid="accept-verifying">
-          {ACCEPT_VERIFYING_LABEL} — the engine continues on its own; the outcome appears here
+          {acceptingLabel(acceptState)} — the engine continues on its own; the outcome appears here
         </p>
       )}
       {acceptState.kind === "committed" && !publicationFailure && !effectivePublicationInfo && (
