@@ -104,10 +104,38 @@ type runState struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	wmu         sync.Mutex
+	// Lock order (review of #181 — a reproduced deadlock came from breaking
+	// it): decisionMu → acceptMu → wmu, and lastMu is a leaf.
+	//
+	//   - decisionMu may be held across slow work (an accept's gate replay,
+	//     settleWorker, waiting on the worker's done). Nothing ever BLOCKS on
+	//     it while holding another of these locks: doors take it with
+	//     lockDecisionUnlessAccepting and an accept with lockDecisionForAccept,
+	//     both of which poll TryLock holding nothing else.
+	//   - acceptMu guards accepting and acceptsBlocked only. It is held for a
+	//     few field reads and writes — never across I/O, a lock wait, or a
+	//     channel wait.
+	//   - wmu guards the run record and its writer; held for a state write.
+	//   - lastMu guards lastAccept; run_get reads it and nothing else.
+	//
 	// decisionMu makes accept, reject, and manual land a compare-and-set on one
 	// run. The writer mutex cannot serve this purpose: acceptance calls helpers
 	// that reopen and write the run log while the decision is active.
 	decisionMu sync.Mutex
+	// accepting is the accept in flight (accept_job.go), guarded by acceptMu.
+	// It is separate from decisionMu because a second accept, an abort and a
+	// shutdown must all see it WITHOUT waiting out a gate replay (B-529).
+	// acceptsBlocked, when set, refuses new accepts: an abort or a relaunch
+	// holds the decision while it stops the worker, and an accept the worker
+	// started then would wait on that same decision forever.
+	acceptMu       sync.Mutex
+	accepting      *acceptJob
+	acceptsBlocked error
+	// lastAccept is the newest accept's settlement in this engine, kept in
+	// memory as well as on the stream: run_get must show an outcome even
+	// when the run log refused its accept_settled write (review of #181).
+	lastMu     sync.Mutex
+	lastAccept map[string]interface{}
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
@@ -1292,6 +1320,21 @@ type AcceptResult struct {
 	CommitSHA string `json:"commit_sha"`
 	Warning   string `json:"warning,omitempty"`
 	Info      string `json:"info,omitempty"`
+	// InProgress means the caller stopped waiting before the accept settled
+	// (B-529). Nothing is decided yet and commit_sha is empty: the accept
+	// continues on the run's own context, and its outcome arrives as the
+	// run's accept_settled event. Info says so in words.
+	InProgress bool `json:"in_progress,omitempty"`
+	// Attempt identifies the accept this answer is about: accept_settled and
+	// run_get's last_accept carry the same id, so a caller told "in
+	// progress" can tell its own settlement from an older attempt's.
+	Attempt string `json:"attempt,omitempty"`
+	// job is the accept an InProgress answer is waiting on, and joined says
+	// this call joined an accept someone else started (it decided nothing).
+	// Engine-internal: an approved accept (B-530) settles its request when
+	// this job does.
+	job    *acceptJob
+	joined bool
 }
 
 // AcceptOptions contains explicit, non-default recovery choices. A caller may
@@ -2638,13 +2681,22 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// "running" forever with nothing left alive. The work already passed
 		// its own gate, so the honest state is paused-at-gate wearing the
 		// acceptance failure, exactly like reviewer dissent.
-		if aerr := s.acceptRun(ctx, rs, entry, "", ""); aerr != nil {
+		if aerr := s.unattendedAccept(ctx, rs, entry, ""); aerr != nil {
 			detail := fmt.Sprintf("auto-accept failed: %v — decide it yourself", aerr)
 			setRunStatus(rs.run, "paused", time.Now())
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
+			if errors.Is(aerr, ErrDecisionInterrupted) {
+				// Abort or shutdown stopped the reproduction (B-529). The
+				// run's own gate passed; its clean-checkout replay never
+				// finished, so there is no gate result to page a person
+				// about. It waits at its gate; an accept reproduces again.
+				rs.run.PendingData["detail"] = fmt.Sprintf("auto-accept interrupted: %v", aerr)
+				rs.writer.WriteState()
+				return
+			}
 			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail}
 			if rs.run.DesktopStale {
 				rs.run.PendingData["desktop_stale"] = desktopStaleMessage
@@ -3414,8 +3466,12 @@ func (s *Service) acceptRunWithOptions(ctx context.Context, rs *runState, entry 
 				"detail": fmt.Sprintf("the unreproducible commit %s could not be taken back: %v", short(sha), uerr),
 			})
 		} else {
+			detail := "the accept commit did not reproduce from a clean checkout; its diff stays in the tree, uncommitted"
+			if errors.Is(err, ErrDecisionInterrupted) {
+				detail = "the accept was interrupted before its clean-checkout reproduction finished; its diff stays in the tree, uncommitted"
+			}
 			rs.writer.AppendEvent("commit_withdrawn", map[string]interface{}{
-				"sha": sha, "detail": "the accept commit did not reproduce from a clean checkout; its diff stays in the tree, uncommitted",
+				"sha": sha, "detail": detail,
 			})
 		}
 		return err
@@ -3673,6 +3729,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			rs.run.GateReproduced = reproduction
 			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
 		}
+		if errors.Is(verifyErr, ErrDecisionInterrupted) {
+			// The run keeps the gate it was waiting at, unchanged: the next
+			// accept rebases (or finds the rebase done) and reproduces again.
+			return verifyErr
+		}
 		if verifyErr != nil {
 			output := ""
 			if reproduction != nil {
@@ -3732,10 +3793,20 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
 		}
 	}
+	return s.finishAcceptedWorktreeRun(ctx, rs, entry.Path, rebasedSHA, actor, "accepted by "+actor)
+}
+
+// finishAcceptedWorktreeRun is the one ending of an isolated run whose commit
+// is on the default branch: the live accept and recovery's "landed before the
+// engine stopped" both end here (review of #181: recovery's own copy wrote no
+// receipt, no bug_fixed, no run record and never continued the tdd chain).
+// The caller has already moved the default branch (and, live, synced the
+// person's checkout).
+func (s *Service) finishAcceptedWorktreeRun(ctx context.Context, rs *runState, projectRoot, sha, actor, resolution string) error {
 	defer s.continueChain(ctx, rs)
-	rs.run.Accepted, rs.run.CommitSHA = true, rebasedSHA
+	rs.run.Accepted, rs.run.CommitSHA = true, sha
 	setRunStatus(rs.run, "done", time.Now())
-	rs.run.Resolution = "accepted by " + actor
+	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	if rs.run.Stage == "build" {
@@ -3746,11 +3817,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	if err := s.logResolution(rs, "accept", actor); err != nil {
 		return err
 	}
-	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
+	if err := writeAcceptanceReceipt(projectRoot, rs.run, actor); err != nil {
 		return fmt.Errorf("write acceptance receipt: %w", err)
 	}
-	s.commitRunRecord(entry.Path, rs)
-	s.cleanupRunWorktree(rs, entry.Path)
+	s.commitRunRecord(projectRoot, rs)
+	s.cleanupRunWorktree(rs, projectRoot)
 	return nil
 }
 
@@ -3808,6 +3879,8 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 		setup := config.Verify{Mode: string(verify.GateCustom), Custom: cfg.Verify.Setup, TimeoutS: cfg.Verify.TimeoutS}
 		if result, err := verify.Run(ctx, checkout, setup, identity); err != nil {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance: %w", err)
+		} else if ctx.Err() != nil {
+			return nil, interruptedError(ctx, "the clean-checkout setup for "+short(sha))
 		} else if !verify.IsGreen(result) {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance failed:\n%s", result.Output)
 		}
@@ -3816,6 +3889,15 @@ func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, s
 	result, err := verify.Run(ctx, checkout, cfg.Verify, identity)
 	if err != nil {
 		return nil, fmt.Errorf("run gate from clean checkout: %w", err)
+	}
+	// Killed because the decision was cancelled (abort, shutdown), not because
+	// the gate failed or hit its own timeout: no reproduction is reported, so
+	// no "exit -1" reaches the record and no one is asked to decide a gate
+	// that never finished (B-529). The gate's own timeout_s is a different
+	// thing — the suite really did not finish in its budget — and stays a
+	// failure below.
+	if ctx.Err() != nil {
+		return nil, interruptedError(ctx, "the clean-checkout reproduction of "+short(sha))
 	}
 	// A project with no configured executable gate retains its existing
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
@@ -4508,8 +4590,36 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	// rewrote the claimed original's resolution, and recovery then dropped
 	// the replacement as unclaimed. A run another decision consumed is not
 	// aborted over it.
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
+	//
+	// An accept in flight holds that lock for its whole gate replay, on its
+	// own context rather than the caller's (B-529), and abort is one of the
+	// two things that may stop it. So it is cancelled first, outside the
+	// lock: its replay is killed and it settles "interrupted" — never as a
+	// failed gate — and releases the lock. If it landed before the cancel
+	// reached it, the decided check below says so.
+	// Atomic with the lock: an accept that starts between the cancel and the
+	// lock would otherwise hold it for its whole replay. Cancelled again
+	// until the lock is taken with no accept in flight; one started after
+	// that waits behind this abort and finds the run settled.
+	var unlock func()
+	for {
+		if job := rs.cancelAccept(errCauseAborted); job != nil {
+			<-job.done
+		}
+		var lockErr error
+		if unlock, lockErr = lockDecisionUnlessAccepting(rs, "abort"); lockErr == nil {
+			break
+		}
+	}
+	defer unlock()
+	// Holding the decision, abort waits for the worker (settleWorker, and
+	// below). An accept that worker starts now (auto-triage, the tdd chain,
+	// yolo) would wait on this decision while abort waits on the worker:
+	// refused until abort is done, and any one already waiting cancelled —
+	// BEFORE settleWorker, whose wait is the first such (review of #181:
+	// after it, abort stalled the full limit and the accept then landed).
+	unblock := s.blockAccepts(rs, errCauseAborted)
+	defer unblock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return err
 	}
@@ -4761,6 +4871,13 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// its safe point, or continuing — for clients that read the run and not
 	// its event stream (MCP run_get). Derived on read like Next.
 	run.Escalation = escalationView(run, events)
+	run.AcceptInProgress = rs.acceptInFlight() != nil
+	run.LastAccept = rs.lastAcceptSettlement()
+	for i := len(events) - 1; i >= 0 && run.LastAccept == nil; i-- {
+		if events[i] != nil && events[i].Type == "accept_settled" {
+			run.LastAccept = events[i].Data
+		}
+	}
 	return &RunDetail{
 		Run: run, Events: events, LandingOffer: offer,
 	}, nil
@@ -4832,6 +4949,11 @@ func writeAcceptanceReceipt(root string, run *runlog.Run, actor string) error {
 		return fmt.Errorf("receipt diff: %w", err)
 	}
 	g := run.GateReproduced
+	if g == nil {
+		// Recovery of an accept that landed before the engine recorded its
+		// reproduction: the fast-forward follows only a green one.
+		g = &runlog.GateReproduction{Green: true}
+	}
 	verdict := "red"
 	if g.Green {
 		verdict = "green"
@@ -4863,18 +4985,127 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	return s.runAcceptWithOptions(ctx, id, msg, actor, AcceptOptions{})
 }
 
-func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg string, actor string, options AcceptOptions) (result *AcceptResult, err error) {
+// runAcceptWithOptions runs the accept on the run's own context and waits for
+// it only as long as ctx lives. When ctx ends first the accept goes on, and
+// the caller is answered InProgress (B-529); a call that arrives while an
+// accept is in flight joins it rather than starting a second replay.
+func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg string, actor string, options AcceptOptions) (*AcceptResult, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
-	if err := s.settleWorker(ctx, rs); err != nil {
+	beforeAcceptStart(rs)
+	// Only cancellation is cut off from the caller. The run's own worker
+	// accepting itself (the tdd chain) stays marked, so the decision does
+	// not wait on that worker's teardown — which waits on this decision.
+	worker := ctx.Value(workerKey{}) == rs
+	var job *acceptJob
+	var joined bool
+	for {
+		var waitFirst bool
+		var err error
+		job, joined, waitFirst, err = s.startAccept(rs, worker, actor, func(jobCtx context.Context, j *acceptJob, held func()) (*AcceptResult, error) {
+			if worker {
+				jobCtx = asWorker(jobCtx, rs)
+			}
+			return s.decideAccept(jobCtx, rs, j, id, msg, actor, options, held)
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !waitFirst {
+			break
+		}
+		// The worker's own accept found another caller's accept already
+		// deciding (review of #181): it waits for that one to settle, then
+		// accepts for itself — never inheriting an outcome decided for
+		// someone else, never lost. The new job finds the run accepted if
+		// the other one landed.
+		workerWaitsForOtherAccept(rs)
+		<-job.done
+	}
+	settled := func() (*AcceptResult, error) {
+		if joined {
+			return joinedNote(job.result, msg), job.err
+		}
+		return job.result, job.err
+	}
+	// A settled job wins over a caller that is also gone: never answer "in
+	// progress" for an accept that already has its outcome.
+	select {
+	case <-job.done:
+		return settled()
+	default:
+	}
+	// Never "in progress" before the accept holds the decision (review of
+	// #181). Until then it can still be refused by B-522's teardown guard,
+	// which must write nothing while the paused worker owns the log — so a
+	// caller told "in progress" would never hear that refusal. Bounded by
+	// settleWorkerLimit; the gate replay itself comes after.
+	//
+	// And bounded by the caller (review of #181): an accept waiting for the
+	// decision behind another door, or for a paused worker's teardown, made
+	// its caller wait up to settleWorkerLimit — the B-529 symptom again. A
+	// caller that leaves first gets a definite answer. The accept it started
+	// is cancelled, so "not started" is true (if it took the decision at
+	// that very moment it settles interrupted, and the answer says so). A
+	// joined caller is told another caller's accept is still starting. The
+	// worker's own accept is never cancelled for a caller: it holds as soon
+	// as it has the lock, needing no settleWorker.
+	heldAlready := false
+	select {
+	case <-job.held:
+		heldAlready = true
+	default:
+	}
+	select {
+	case <-job.done:
+		return settled()
+	case <-job.held:
+	case <-ctx.Done():
+		switch {
+		case heldAlready || job.isHeld.Load():
+			// Held by now: the in_progress answer below is definite.
+		case job.worker.Load():
+			select {
+			case <-job.done:
+				return settled()
+			case <-job.held:
+			}
+		case joined:
+			return nil, fmt.Errorf("this call started nothing: another accept of this run is starting and has not yet taken the run's decision; nothing has been decided — read run_get (accept_in_progress, last_accept) before accepting again")
+		default:
+			job.cancel(errCauseCallerLeft)
+			<-job.done
+			return settled()
+		}
+	}
+	select {
+	case <-job.done:
+		return settled()
+	default:
+	}
+	select {
+	case <-job.done:
+		return settled()
+	case <-ctx.Done():
+		return &AcceptResult{InProgress: true, Info: acceptInProgressInfo(joined), Attempt: job.attempt, job: job, joined: joined}, nil
+	}
+}
+
+func (s *Service) decideAccept(ctx context.Context, rs *runState, job *acceptJob, id string, msg string, actor string, options AcceptOptions, held func()) (result *AcceptResult, err error) {
+	if err := lockDecisionForAccept(ctx, rs); err != nil {
 		return nil, err
 	}
+	defer rs.decisionMu.Unlock()
+	if err := s.settleWorkerForAccept(ctx, rs, job); err != nil {
+		return nil, err
+	}
+	// From here every outcome is written as accept_settled: the worker has
+	// returned, so the log is the decision's to write.
+	held()
 	// Accepted is the compare-and-set winner. A second client may have entered
 	// before the first response reached it; return the durable result instead
 	// of trying to inspect the worktree the winner has already removed.
@@ -4906,7 +5137,9 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 	// Registered before the manual-verification check so a refused human-only
 	// confirmation is on the record with its real actor too (B-530).
 	defer func() {
-		if err == nil {
+		// An interrupted accept was not refused: nothing was decided, and its
+		// accept_settled event says "interrupted" with the cause (B-529).
+		if err == nil || errors.Is(err, ErrDecisionInterrupted) {
 			return
 		}
 		w, writerErr := s.ensureWriter(rs)
@@ -5165,11 +5398,11 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
-	if err := s.settleWorker(ctx, rs); err != nil {
+	unlock, err := s.lockDecisionSettled(ctx, rs, "land")
+	if err != nil {
 		return err
 	}
+	defer unlock()
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		if strings.TrimSpace(sha) == "" || sha == rs.run.CommitSHA {
@@ -5504,11 +5737,11 @@ func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (er
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
-	if err := s.settleWorker(ctx, rs); err != nil {
-		return err
+	unlock, lockErr := s.lockDecisionSettled(ctx, rs, "reject")
+	if lockErr != nil {
+		return lockErr
 	}
+	defer unlock()
 	if rs.run.Accepted {
 		_, _ = s.reconcileAcceptedRun(rs)
 		return fmt.Errorf("run %q is already accepted as %s; its work is on record and there is nothing to reject", id, short(rs.run.CommitSHA))

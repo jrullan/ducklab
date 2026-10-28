@@ -178,8 +178,11 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			if changed, err := s.reconcileAcceptedRun(rs); err == nil && changed {
 				repaired++
 			}
-			// After the accepted-run repair, so an approval whose accept
-			// landed before the crash reads as landed (B-530).
+			// After the accepted-run repair, so an accept (and an approval)
+			// that landed before the crash reads as landed, not interrupted.
+			if s.settleInterruptedAccept(rs) {
+				repaired++
+			}
 			if s.settleInterruptedApprovals(rs) {
 				repaired++
 			}
@@ -271,11 +274,22 @@ func (s *Service) settleWorker(ctx context.Context, rs *runState) error {
 	select {
 	case <-done:
 		return nil
+	default:
+	}
+	settleWorkerWaiting(rs)
+	select {
+	case <-done:
+		return nil
 	case <-ctx.Done():
 	case <-time.After(settleWorkerLimit):
 	}
 	return &RunFinishingError{RunID: id}
 }
+
+// settleWorkerWaiting observes a door starting to wait for a paused worker.
+// A no-op in the engine; tests use it to order a worker's own accept after
+// the wait began.
+var settleWorkerWaiting = func(*runState) {}
 
 // RunFinishingError refuses a decision or resume while the run's paused
 // worker is still tearing down. Nothing was written; retrying succeeds once
@@ -646,6 +660,7 @@ func (s *Service) PauseAllRuns(ctx context.Context) error {
 	// The apps the engine manages die with it — a process nobody can see or
 	// stop from any surface is worse than a stopped app.
 	s.stopAllApps()
+	s.interruptAccepts(ctx)
 
 	s.runsMu.RLock()
 	var active []*runState

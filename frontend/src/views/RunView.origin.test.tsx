@@ -48,6 +48,42 @@ describe("RunView publication consequences", () => {
     expect(client.projectPush).toHaveBeenCalledWith("project-1");
   });
 
+  // Review of #181 (4394889562): the accept outlived its request (in
+  // progress), the stream lost accept_settled, and the reconnect's list
+  // refresh prompted a run read. The failed push lives in that read's
+  // last_accept and must still reach the retry affordance.
+  it("offers the publish retry for a push failure recovered from a run read", async () => {
+    const paused = { id: "run-1", project_id: "project-1", stage: "build", mode: "solo", task_id: "task-1", status: "paused", pending_kind: "gate", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z", next: ["accept"] };
+    useRuns.setState({
+      runs: { "run-1": paused as never },
+      events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open",
+    });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.projectGet = vi.fn().mockResolvedValue({ config: { remote: { name: "origin", on_accept: "push" }, github: { pr_base: "main" } } });
+    client.projectPush = vi.fn().mockResolvedValue({ status: "pushed", branch: "main" });
+    let settledOnEngine = false;
+    client.accept = vi.fn(() => {
+      settledOnEngine = true;
+      return Promise.resolve({ commit_sha: "", in_progress: true, attempt: "acc-1", info: "accept in progress" });
+    });
+    client.run = vi.fn(() => Promise.resolve({
+      run: settledOnEngine
+        ? { ...paused, status: "done", accepted: true, commit_sha: "abc123456", next: [],
+          last_accept: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc123456", warning: "committed as abc123456; push failed: permission denied" } }
+        : paused,
+      events: [],
+    }));
+
+    render(<RunView runId="run-1" client={client as never} />);
+    screen.getByTestId("cycle-accept").click();
+    await waitFor(() => expect(useRuns.getState().acceptState["run-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" }));
+    // The reconnect's refresh: a list payload, no last_accept.
+    useRuns.getState().setRuns([paused as never]);
+    expect(await screen.findByTestId("publication-failure")).toHaveTextContent("committed locally as abc123456; push failed: permission denied");
+    screen.getByTestId("retry-publication").click();
+    expect(client.projectPush).toHaveBeenCalledWith("project-1");
+  });
+
   it("does not mislabel an unrelated accept warning as a failed push", async () => {
     useRuns.setState({
       runs: { "run-1": { id: "run-1", project_id: "project-1", stage: "spec", mode: "council", task_id: "", status: "paused", verdict: "UNVERIFIED", started_at: "2026-01-01T00:00:00Z", next: ["accept"] } },

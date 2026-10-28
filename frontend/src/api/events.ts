@@ -290,6 +290,14 @@ export const KNOWN_EVENT_TYPES = [
   // A refused decision is durable evidence too: retain the reason and custody
   // roots after the HTTP response and the client that received it are gone.
   "accept_refused",
+  // How an accept ended — accepted (with commit_sha), refused, or interrupted
+  // by abort/shutdown. The accept runs on the run's own context, so a caller
+  // told "in_progress" learns the outcome here (B-529).
+  "accept_settled",
+  // An accept attempt put on the record (its id); exactly one accept_settled
+  // with the same attempt closes it — live, or by recovery after an engine
+  // that died mid-accept (review of #181).
+  "accept_started",
   // Which reference documents a stage loaded, and what its caps dropped.
   "references_loaded",
   "reference_digested",

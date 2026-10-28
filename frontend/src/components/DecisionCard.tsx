@@ -31,6 +31,7 @@ export function DecisionCard({
   resumeNote,
   onAbort,
   accepting,
+  acceptingLabel = "Accepting…",
   extraAction,
   revisionRun,
   redoNote,
@@ -67,6 +68,9 @@ export function DecisionCard({
   resumeNote?: boolean;
   onAbort?: () => void;
   accepting?: boolean;
+  /** The Accept button's words while accepting — "Accepting… verifying from
+   * a clean checkout" once the engine is replaying the gate (B-529). */
+  acceptingLabel?: string;
   /** A view-specific control, like the Cycle view's read/diff toggle. */
   extraAction?: React.ReactNode;
   /** The run started by the last Request changes, so it can be watched. */
@@ -197,7 +201,7 @@ export function DecisionCard({
               data-testid="cycle-accept"
               className="rounded border border-hairline px-3 py-1 text-sm text-ink disabled:opacity-50"
             >
-              {accepting ? "Accepting…" : "Accept"}
+              {accepting ? acceptingLabel : "Accept"}
             </button>
           )}
           {offers("reject") && (

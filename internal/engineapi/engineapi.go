@@ -55,7 +55,13 @@ type Server struct {
 	// replay/subscribe window, which is the only way to prove that window
 	// loses nothing.
 	hookDuringReplay func()
+	// acceptWait bounds how long POST /accept waits for the accept to settle
+	// before answering in_progress (B-529). A field so a test can shorten it.
+	acceptWait time.Duration
 }
+
+// defaultAcceptWait leaves headroom under engineclt's 30 s client timeout.
+const defaultAcceptWait = 20 * time.Second
 
 // New creates a new engine API server.
 func New(svc *service.Service, b *bus.Bus, token, version, provenance string, allowOrigins ...string) *Server {
@@ -75,7 +81,8 @@ func New(svc *service.Service, b *bus.Bus, token, version, provenance string, al
 			}
 			return ""
 		}(),
-		mux: http.NewServeMux(),
+		mux:        http.NewServeMux(),
+		acceptWait: defaultAcceptWait,
 	}
 	s.runDirFn = func(runID string) string { return svc.RunDir(runID) }
 	s.projectIDFn = func(runID string) string {
@@ -1827,7 +1834,16 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.Unmarshal(raw, &body)
-	result, err := s.svc.RunAcceptAsWithOptions(r.Context(), id, body.Message, s.actor(r, body.Actor), service.AcceptOptions{
+	// B-529: the accept itself runs on the run's context; this only bounds
+	// how long the request waits for it. Past acceptWait — or when the client
+	// leaves first — the answer is in_progress and the outcome arrives as the
+	// run's accept_settled event. The bound sits under every client's own
+	// timeout (engineclt: 30 s), so a long gate replay answers in words
+	// instead of a dropped connection that reads as a failure to retry.
+	wait, cancel := context.WithTimeout(r.Context(), s.acceptWait)
+	defer cancel()
+	// The actor comes from the credential (B-530), never from the body alone.
+	result, err := s.svc.RunAcceptAsWithOptions(wait, id, body.Message, s.actor(r, body.Actor), service.AcceptOptions{
 		ResolveAdditiveConflicts: body.ResolveAdditiveConflicts,
 		HumanVerified:            body.HumanVerified,
 		LaneWidening:             body.LaneWidening,

@@ -6,6 +6,7 @@ import { waitingFor, moneyOrZero } from "../lib/format";
 import { useState } from "react";
 import { EvidenceDrawerHost } from "./EvidenceDrawer";
 import { useRuns } from "../store/runs";
+import { acceptingLabel } from "../lib/accept";
 
 function waitingExplanation(run: Run): string {
   if (["intake", "spec", "plan"].includes(run.stage)) {
@@ -80,6 +81,11 @@ export function WaitingCard({
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
+  // B-529: while the engine replays the gate from a clean checkout, say so.
+  const acceptSt = useRuns((s) => s.acceptState[run.id]);
+  const acceptLabel = acceptingLabel(acceptSt);
+  // An interrupted accept decided nothing; it is not a failure (B-529).
+  const acceptInterrupted = acceptSt?.kind === "error" && acceptSt.interrupted === true;
   // B-247: the task's work already landed under another accepted run. The
   // T-181 phantom re-run was accepted from a card that looked like any other.
   const landedAs = useRuns((s) =>
@@ -205,7 +211,7 @@ export function WaitingCard({
             disabled={accepting}
             className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
-            {accepting ? "Accepting…" : "Accept"}
+            {accepting ? acceptLabel : "Accept"}
           </button>
         )}
         {next.includes("abort") && (
@@ -292,8 +298,8 @@ export function WaitingCard({
         </p>
       )}
       {acceptError && (
-        <p className="mt-1 text-xs text-critical" data-testid="now-accept-error">
-          accept failed: {acceptError}
+        <p className={`mt-1 text-xs ${acceptInterrupted ? "text-warning" : "text-critical"}`} data-testid="now-accept-error">
+          {acceptInterrupted ? "accept interrupted — nothing was decided" : "accept failed"}: {acceptError}
         </p>
       )}
       <EvidenceDrawerHost run={run} captureClient={client} open={evidenceOpen} onClose={() => setEvidenceOpen(false)} />

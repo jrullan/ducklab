@@ -193,7 +193,8 @@ export function ConversationTurn({
         )}
         {isGate && block.done && block.gate && block.gate !== "running" && (
           <StatusChip
-            role={block.gate === "green" ? "good" : "serious"}
+            // An interrupted replay (B-529) is neither pass nor fail.
+            role={block.gate === "green" ? "good" : block.gate === "interrupted" ? "muted" : "serious"}
             label={block.gate}
           />
         )}

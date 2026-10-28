@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -430,24 +431,37 @@ func TestAcceptWorktreeReceiptNamesRebasedSHA(t *testing.T) {
 
 // An interrupted clean-checkout reproduction is not an unconfigured gate. It
 // must leave the candidate on its run branch and the decision open to retry.
+//
+// Rewritten for B-529. This test used to interrupt the replay by giving
+// RunAccept a 10 ms caller deadline and pinned the result as a recorded
+// "exit -1" reproduction — exactly the ti36xpro failure, where a client's
+// 30 s timeout killed every replay of a longer suite. A caller's deadline no
+// longer interrupts anything (accept_job_test.go). What still does is the
+// run's own cancellation — abort or engine shutdown — and that interruption
+// is reported as one: ErrDecisionInterrupted, no reproduction recorded, the
+// candidate kept, the decision open.
 func TestAcceptWorktreeRefusesInterruptedCleanCheckoutReproduction(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
-	appendVerifyPreparation(t, dir, `mode = "custom"
-custom = "sleep 1"
-timeout_s = 30`)
+	gate := newHeldGate(t, dir)
 	git := gitProject(t, dir)
 	base := mustHead(t, git)
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-interrupted-clean-checkout")
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "candidate.txt"), []byte("candidate\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	_, err := s.RunAccept(ctx, run.ID, "")
-	if err == nil || !strings.Contains(err.Error(), "clean-checkout verification was interrupted") {
-		t.Fatalf("accept error = %v, want interrupted clean-checkout verification", err)
+	accepting := acceptAsync(s, context.Background(), run.ID, "")
+	gate.awaitStart(t)
+	// The engine's own cancellation, as shutdown's sweep issues it — without
+	// the shutdown flag, which would also refuse the retry below.
+	rs.cancelAccept(errCauseShutdown)
+	err := awaitWithin(t, accepting, "the interrupted accept's outcome").err
+	if !errors.Is(err, ErrDecisionInterrupted) || !strings.Contains(err.Error(), "clean-checkout reproduction") {
+		t.Fatalf("accept error = %v, want an interrupted clean-checkout reproduction", err)
 	}
 	if got := mustHead(t, git); got != base {
 		t.Fatalf("default HEAD = %s after interrupted reproduction, want %s", got, base)
@@ -462,19 +476,27 @@ timeout_s = 30`)
 	if !contains(detail.Run.Next, "accept") || !contains(detail.Run.Next, "reject") {
 		t.Fatalf("next = %v, want an open decision", detail.Run.Next)
 	}
-	if detail.Run.GateReproduced == nil || detail.Run.GateReproduced.Green || detail.Run.GateReproduced.ExitCode != -1 {
-		t.Fatalf("reproduction = %+v, want recorded interrupted gate", detail.Run.GateReproduced)
+	// A replay that never finished has no result to record: no exit -1, no
+	// verdict for a person to judge.
+	if detail.Run.GateReproduced != nil {
+		t.Fatalf("reproduction = %+v, want none recorded for an interrupted replay", detail.Run.GateReproduced)
+	}
+	if detail.Run.PendingKind != "gate" {
+		t.Fatalf("pending = %q, want the run still at its gate", detail.Run.PendingKind)
 	}
 	for _, event := range detail.Events {
-		if event.Type == "bug_fixed" || event.Type == "accept" {
+		if event.Type == "bug_fixed" || event.Type == "accept" || event.Type == "human_needed" {
 			t.Fatalf("interrupted reproduction wrote forbidden event %q", event.Type)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".ducklab", "runs", run.ID, "receipt.json")); !os.IsNotExist(err) {
 		t.Fatalf("interrupted reproduction wrote an acceptance receipt: %v", err)
 	}
-	if _, err := s.RunAccept(context.Background(), run.ID, "retry after interruption"); err != nil {
-		t.Fatalf("retry after interrupted reproduction: %v", err)
+	retry := acceptAsync(s, context.Background(), run.ID, "retry after interruption")
+	gate.awaitStart(t)
+	gate.open(t)
+	if got := awaitWithin(t, retry, "the retried accept"); got.err != nil {
+		t.Fatalf("retry after interrupted reproduction: %v", got.err)
 	}
 }
 

@@ -306,8 +306,12 @@ func (s *Service) claimRevisionParent(projectRoot string, req StageRequest, plan
 		// engine's record): nothing to claim.
 		return nil
 	}
-	rs.decisionMu.Lock()
-	defer rs.decisionMu.Unlock()
+	// Not queued behind an accept's gate replay (B-529): refused, named.
+	unlock, err := lockDecisionUnlessAccepting(rs, "request_changes")
+	if err != nil {
+		return refuseLaunch("%v", err)
+	}
+	defer unlock()
 	run := rs.snapshotRun()
 	if m := revisedByPattern.FindStringSubmatch(run.Resolution); m != nil {
 		return refuseLaunch("run %s was already revised by %s — revise the newest draft instead", parent, m[1])

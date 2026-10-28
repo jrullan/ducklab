@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -52,7 +53,12 @@ func appendDecision(w *runlog.Writer, action, actor, reason string) (func(error)
 	}
 	return func(result error) {
 		data := map[string]interface{}{"action": action, "outcome": "taken"}
-		if result != nil {
+		switch {
+		case errors.Is(result, ErrDecisionInterrupted):
+			// Abort or shutdown stopped the door's work; nothing refused it
+			// (B-529). The words stay recorded; the decision was not made.
+			data["outcome"], data["error"] = "interrupted", result.Error()
+		case result != nil:
 			data["outcome"], data["error"] = "refused", result.Error()
 		}
 		_ = w.AppendEvent("decision_outcome", data)

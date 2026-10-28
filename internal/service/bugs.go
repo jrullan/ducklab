@@ -531,8 +531,18 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	if !ok {
 		return fmt.Errorf("run %q not found", originalID)
 	}
-	prior.decisionMu.Lock()
-	defer prior.decisionMu.Unlock()
+	// Not queued behind an accept's gate replay (B-529): refused, named.
+	unlock, err := lockDecisionUnlessAccepting(prior, "relaunch")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// As abort does: holding the decision, this claim waits for the
+	// worker — so an accept the worker starts (auto-triage) is refused and a
+	// waiting one cancelled first, before settleWorker (review of #181). The
+	// relaunch replaces the run; its worker's accept is not wanted.
+	unblock := s.blockAccepts(prior, errors.New("the run is being relaunched"))
+	defer unblock()
 	// A paused original whose worker is still tearing down is not claimed
 	// over it: the claim would write a log that worker is about to close.
 	if err := s.settleWorker(ctx, prior); err != nil {
@@ -948,7 +958,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			rs.writer.WriteState()
 			rs.wmu.Unlock()
 			if entry, err := s.entryFor(rs); err == nil {
-				if err := s.acceptRun(ctx, rs, entry, "", "auto-triage"); err == nil {
+				if err := s.unattendedAccept(ctx, rs, entry, "auto-triage"); err == nil {
 					return
 				}
 			}

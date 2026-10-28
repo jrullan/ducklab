@@ -4,7 +4,7 @@
 // legitimate door — the request is shown with who asks, what and why, and
 // Approve/Decline go to the engine with the person's own client.
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ApprovalRequest, EngineClient, Run } from "../api/client";
 import { ApprovalRequests, PendingApprovals } from "./ApprovalRequests";
 import { pendingApprovals, useRuns } from "../store/runs";
@@ -140,6 +140,52 @@ describe("approval requests in Now", () => {
   it("renders nothing when no agent is waiting", () => {
     const { container } = render(<PendingApprovals client={clientWith()} items={[]} />);
     expect(container.innerHTML).toBe("");
+  });
+});
+
+// Review of #181 (R4): an approved accept that outlives its request answers
+// "approved — accept in progress"; the request settles later on the stream.
+// The display must follow it to its final status and never move back —
+// not when the HTTP answer lands after approval_resolved, not after a
+// reconnect's list refresh.
+describe("an approved accept in progress, displayed", () => {
+  function Live({ client }: { client: EngineClient }) {
+    const live = useRuns((s) => s.runs[run.id]);
+    return live ? <ApprovalRequests client={client} run={live} /> : null;
+  }
+
+  it("shows in progress, then the settlement, and never regresses", async () => {
+    seed([run]);
+    let answer: (v: unknown) => void = () => {};
+    const client = clientWith({
+      approveRequest: vi.fn(() => new Promise((resolve) => { answer = resolve; })),
+    } as never);
+    render(<Live client={client} />);
+    fireEvent.click(screen.getByTestId("approval-approve"));
+    const inProgress = { ...request, status: "approved", decided_by: "human", outcome: "accept in progress" };
+    // The engine claimed it (approval_granted), then settled it before the
+    // approve's HTTP answer reached the desktop.
+    useRuns.getState().applyEvent({ type: "approval_granted", run_id: run.id, seq: 1, data: { request: inProgress } });
+    expect((await screen.findByTestId("approval-outcome")).textContent).toContain("approved by human — accept in progress");
+    const landed = { ...request, status: "landed", decided_by: "human", outcome: "accepted as abc1234" };
+    useRuns.getState().applyEvent({ type: "approval_resolved", run_id: run.id, seq: 2, data: { request: landed } });
+    await waitFor(() => expect(screen.getByTestId("approval-outcome").textContent).toContain("landed by human — accepted as abc1234"));
+    // The late HTTP answer, flushed through the component's own update.
+    await act(async () => {
+      answer({ request: inProgress, accept: { commit_sha: "", in_progress: true } });
+    });
+    expect(screen.getByTestId("approval-outcome").textContent).toContain("landed by human — accepted as abc1234");
+    // A reconnect replaces the run list with a snapshot taken mid-flight.
+    act(() => useRuns.getState().setRuns([{ ...run, approval_requests: [inProgress] }]));
+    expect(screen.getByTestId("approval-outcome").textContent).toContain("landed by human — accepted as abc1234");
+  });
+
+  it("follows the settlement after a reconnect when the stream lost it", async () => {
+    seed([{ ...run, approval_requests: [{ ...request, status: "approved", decided_by: "human", outcome: "accept in progress" }] }]);
+    render(<Live client={clientWith()} />);
+    expect(screen.getByTestId("approval-outcome").textContent).toContain("accept in progress");
+    useRuns.getState().setRuns([{ ...run, approval_requests: [{ ...request, status: "failed", decided_by: "human", outcome: "refused: rebased commit failed its gate" }] }]);
+    await waitFor(() => expect(screen.getByTestId("approval-outcome").textContent).toContain("failed by human — refused: rebased commit failed its gate"));
   });
 });
 

@@ -633,6 +633,9 @@ export interface RunlogReviewFinding {
 }
 
 export interface RunlogRun {
+  accept_actor?: string;
+  accept_attempt?: string;
+  accept_in_progress?: boolean;
   acceptance_gate?: RunlogGateReproduction;
   accepted?: boolean;
   active_since?: string;
@@ -664,6 +667,7 @@ export interface RunlogRun {
   id?: string;
   intent?: string;
   interrupted_turn?: RunlogInterruptedTurn;
+  last_accept?: Record<string, unknown>;
   local_only?: boolean;
   mode?: string;
   mode_source?: string;
@@ -737,7 +741,9 @@ export interface RunlogVisualGate {
 }
 
 export interface ServiceAcceptResult {
+  attempt?: string;
   commit_sha?: string;
+  in_progress?: boolean;
   info?: string;
   warning?: string;
 }

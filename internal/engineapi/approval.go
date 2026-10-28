@@ -1,6 +1,7 @@
 package engineapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,7 +39,13 @@ func (s *Server) handleApprovalRequestApprove(w http.ResponseWriter, r *http.Req
 	if !s.requireHuman(w, r, "approving a request") {
 		return
 	}
-	out, err := s.svc.ApprovalRequestApprove(r.Context(), r.PathValue("id"), r.PathValue("req"), s.actor(r, ""))
+	// An approved accept is an accept (B-529): it runs on the run's own
+	// context, and this request waits for it only as long as the accept
+	// door does. Past that the request answers "approved · accept in
+	// progress" and settles when the accept does.
+	wait, cancel := context.WithTimeout(r.Context(), s.acceptWait)
+	defer cancel()
+	out, err := s.svc.ApprovalRequestApprove(wait, r.PathValue("id"), r.PathValue("req"), s.actor(r, ""))
 	if err != nil {
 		if out != nil {
 			// Approved and recorded, but the decision itself was refused:

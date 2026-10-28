@@ -111,6 +111,12 @@ func TestADoorRefusesWhileThePausedWorkerIsStillFinishing(t *testing.T) {
 					settleWorkerLimit = 50 * time.Millisecond
 					defer func() { settleWorkerLimit = previous }()
 				}
+				// An accept whose caller is already gone (B-529, third review
+				// of #181) is bounded by that caller: it is cancelled before
+				// it could hold the decision and answered "not started"
+				// (interrupted) at once — never in_progress, never kept
+				// waiting for the teardown — and it writes nothing.
+				outlived := door == "accept" && how == "cancelled"
 				result := make(chan error, 1)
 				go func() { result <- runDoor(s, ctx, door, runID) }()
 				var err error
@@ -120,7 +126,11 @@ func TestADoorRefusesWhileThePausedWorkerIsStillFinishing(t *testing.T) {
 					t.Fatalf("%s hung behind the live worker instead of refusing", door)
 				}
 				var finishing *RunFinishingError
-				if !errors.As(err, &finishing) {
+				if outlived {
+					if !errors.Is(err, ErrDecisionInterrupted) {
+						t.Fatalf("accept from a departed caller while the worker is alive = %v, want it not started", err)
+					}
+				} else if !errors.As(err, &finishing) {
 					t.Fatalf("%s while the worker is alive = %v, want a retryable RunFinishingError", door, err)
 				}
 				stateAfter, _ := os.ReadFile(filepath.Join(dir, "state.json"))

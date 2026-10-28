@@ -33,6 +33,7 @@ import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { documentLabel, runLabel } from "../lib/runview";
 import { retryRoute, reviseRun, revisesDocument, type RevisionNote } from "../lib/retry";
+import { ACCEPT_VERIFYING_LABEL, acceptAndSettle, acceptingLabel } from "../lib/accept";
 import { VisualCheck } from "../components/VisualCheck";
 import { ApprovalRequests } from "../components/ApprovalRequests";
 
@@ -1068,17 +1069,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 	  setActionError("Confirm every manual verification item before accepting.");
 	  return;
 	}
-    const store = useRuns.getState();
-    store.beginAccept(runId);
     try {
-      const res = await client.accept(
+      // Waits through an in_progress answer to the settled outcome (B-529);
+      // the store carries the accept's state, errors included.
+      const res = await acceptAndSettle(
+        client,
         runId,
         "",
         resolveAdditiveConflicts,
         humanVerified,
         approvedLaneWidening,
       );
-      store.confirmAccept(runId, res.commit_sha);
       // Accept responses also carry unrelated caveats (for example, the
       // benchmark's same-model self-review warning). Treating every warning
       // as a publication failure made a local-only accept claim that a push
@@ -1086,9 +1087,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       const pushFailure = /push failed:\s*(.+)$/i.exec(res.warning ?? "");
       setPublicationFailure(pushFailure ? { sha: res.commit_sha, error: pushFailure[1]! } : null);
       setPublicationInfo(res.info ?? null);
-    } catch (e) {
-      // Never show a commit the engine did not confirm (AC-34).
-      store.failAccept(runId, e instanceof Error ? e.message : String(e));
+    } catch {
+      // Never show a commit the engine did not confirm (AC-34): the failure
+      // is already the store's accept state, shown below.
     }
   };
   const onAccept = () => acceptRun(false);
@@ -1157,6 +1158,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         consequence={consequence}
         cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
         accepting={acceptState.kind === "pending"}
+        acceptingLabel={acceptingLabel(acceptState)}
         onAccept={onAccept}
         extraAction={(rolledBackRebaseConflict || laneWidening.length > 0) ? (
           <>
@@ -1242,8 +1244,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               "The previous run passed its gate but its reviewer requested changes. " +
               "Address these outstanding findings:\n" +
               dissent.notes.map((n) => `- ${n}`).join("\n");
-            void client
-              .accept(run.id)
+            // The relaunch waits for the accept to land, not merely to be
+            // answered: an in_progress accept has not committed (B-529).
+            void acceptAndSettle(client, run.id)
               .then(() => relaunch({ mode: run.mode, ducklings: [], note }))
               .then((id) => {
                 if (id) location.hash = `#/runs/${id}`;
@@ -2229,8 +2232,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </p>
       )}
       {acceptState.kind === "error" && (
-        <p className="m-2 text-critical" data-testid="accept-error">
-          accept failed: {acceptState.message}
+        <p className={`m-2 ${acceptState.interrupted ? "text-warning" : "text-critical"}`} data-testid="accept-error">
+          {acceptState.interrupted ? "accept interrupted — nothing was decided" : "accept failed"}: {acceptState.message}
+        </p>
+      )}
+      {acceptState.kind === "pending" && acceptState.verifying && (
+        <p className="m-2 text-ink-secondary" data-testid="accept-verifying">
+          {ACCEPT_VERIFYING_LABEL} — the engine continues on its own; the outcome appears here
         </p>
       )}
       {acceptState.kind === "committed" && !publicationFailure && !effectivePublicationInfo && (
