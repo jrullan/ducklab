@@ -1359,6 +1359,14 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 			testPortions = append(testPortions, i)
 		}
 	}
+	// Before the other test-lane rules: their refusals are not ones the engine
+	// can repair, and this shape is (a code portion whose slice says "proven by
+	// a failing test" would otherwise be refused as owning no test path).
+	if strings.EqualFold(strings.TrimSpace(rec.TestStrategy), "test-first") && len(out) > 1 {
+		if err := testFirstSplitProblem(projectRoot, out, testClaims, cfg.Verify.TestGlobs); err != nil {
+			return nil, err
+		}
+	}
 	if len(testPortions) == 0 && verify.MentionsTests(rec.Deliverables+"\n"+rec.TestStrategy+"\n"+rec.TestReason) {
 		if len(out) == 1 {
 			testPortions = []int{0}
@@ -1413,6 +1421,87 @@ func preparePromotionPortions(projectRoot string, rec *store.Bug, portions []age
 		}
 	}
 	return out, nil
+}
+
+// testFirstSplitError is a test-first split that parks the regression test
+// in a portion of its own, away from the code it exercises. Test-first runs
+// inside ONE task's lane: the fix task cannot write the test and the test task
+// cannot touch the code, so neither can run it (TI-36X B-006: T-008 owned
+// app.js, T-009 owned test/e2e.py, and the honest red test was refused as out
+// of lane). The engine repairs the plain case by merging the two portions.
+type testFirstSplitError struct {
+	msg      string
+	testOnly []int
+	code     []int
+}
+
+func (e *testFirstSplitError) Error() string { return e.msg }
+
+// testFirstSplitProblem refuses a test-first split in which some portion owns
+// tests but no source code while another portion owns the code. A split whose
+// every test portion also owns code is fine, and so is any split under
+// build-only, where nothing writes a test before the fix.
+func testFirstSplitProblem(projectRoot string, out []promotionPortion, testClaims [][]string, globs []string) error {
+	var testOnly, code []int
+	for i, portion := range out {
+		if portionOwnsCode(projectRoot, portion.Owns, globs) {
+			code = append(code, i)
+		} else if len(testClaims[i]) > 0 {
+			testOnly = append(testOnly, i)
+		}
+	}
+	if len(testOnly) == 0 || len(code) == 0 {
+		return nil
+	}
+	describe := func(indexes []int) string {
+		parts := make([]string, len(indexes))
+		for n, i := range indexes {
+			parts[n] = fmt.Sprintf("portion %d %q (owns: %s)", i+1, out[i].Title, strings.Join(out[i].Owns, ", "))
+		}
+		return strings.Join(parts, "; ")
+	}
+	return &testFirstSplitError{
+		msg: fmt.Sprintf("test-first split puts the regression test in %s, apart from the code it exercises in %s; "+
+			"test-first writes that test inside the fix task's lane, so neither task could run it. "+
+			"Give the test paths and their slice to the portion that owns the behavior under test, or merge the portions",
+			describe(testOnly), describe(code)),
+		testOnly: testOnly,
+		code:     code,
+	}
+}
+
+// sourceExtensions are what "the code a test exercises" is written in. A
+// test portion's companions — the package.json or Makefile that runs the
+// suite, a README, a fixture's JSON — are not, whatever stack registers them.
+var sourceExtensions = map[string]bool{
+	".go": true, ".py": true, ".rs": true, ".js": true, ".mjs": true, ".cjs": true, ".jsx": true,
+	".ts": true, ".tsx": true, ".mts": true, ".cts": true, ".vue": true, ".svelte": true,
+	".html": true, ".htm": true, ".css": true, ".scss": true, ".c": true, ".cc": true, ".cpp": true,
+	".cxx": true, ".h": true, ".hh": true, ".hpp": true, ".hxx": true, ".m": true, ".mm": true,
+	".java": true, ".kt": true, ".kts": true, ".swift": true, ".rb": true, ".php": true, ".cs": true,
+	".scala": true, ".dart": true, ".lua": true, ".sh": true, ".bash": true, ".zig": true, ".ex": true,
+	".exs": true, ".erl": true, ".hs": true, ".ml": true, ".fs": true, ".clj": true, ".sql": true,
+}
+
+// portionOwnsCode reports whether a lane claims source code outside the test
+// lane: a source file, or a directory that is not a test root.
+func portionOwnsCode(projectRoot string, owns, globs []string) bool {
+	for _, owned := range owns {
+		path := cleanLanePath(owned)
+		if path == "" || verify.ClaimsTestLane(path, globs) {
+			continue
+		}
+		if sourceExtensions[strings.ToLower(filepath.Ext(path))] {
+			return true
+		}
+		if strings.HasSuffix(owned, "/") || strings.HasSuffix(owned, "/**") {
+			return true
+		}
+		if info, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(path))); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func promotionNamedTestPaths(projectRoot string, rec *store.Bug, globs []string) []string {

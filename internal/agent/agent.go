@@ -2777,6 +2777,13 @@ Every suspected file must belong to one portion. Include
 an existing sibling header when its source may change. A portion promising
 tests, coverage, or regression proof must own the relevant test root and the
 stack file that registers those tests. Keep portion lanes disjoint.
+Split only concerns that can land on their own. A fix and its regression test
+are one concern: under "test-first" the test path belongs to the same portion
+as the code it exercises, never to a separate tests-only portion, because
+test-first writes the test inside the fix task's lane. An existing test that
+asserts what a portion changes belongs to that portion too. Each portion must
+leave the full gate green on its own, and each acceptance criterion must be
+checkable inside its own lane.
 The proposal is advice only; it never creates tasks until a person promotes it.`
 
 // usageMap is what goes to llm.jsonl for one call.
