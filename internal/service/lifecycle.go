@@ -26,6 +26,22 @@ import (
 // checkpoint.
 const pauseWaitPerRun = 5 * time.Second
 
+// publishPersisted forwards to the bus the first event of eventType a run
+// has already persisted — for an event written before the run's writer was
+// attached, with its real seq and payload.
+func (s *Service) publishPersisted(projectID, runDir, eventType string) {
+	events, err := runlog.ReadEvents(runDir)
+	if err != nil {
+		return
+	}
+	for _, e := range events {
+		if e != nil && e.Type == eventType {
+			s.publishEvent(projectID, e)
+			return
+		}
+	}
+}
+
 // publishEvent forwards a persisted run event to the bus, carrying its seq so
 // subscribers can deduplicate against a replayed backlog.
 func (s *Service) publishEvent(projectID string, e *runlog.Event) {

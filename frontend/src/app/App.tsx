@@ -3,6 +3,7 @@ import { EngineClient, type Project, type ProjectStartResult } from "../api/clie
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
+import { makeUnknownRunAdopter } from "../lib/unknownRuns";
 import { interruptions, advisorAutoAnswerInterruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
 import { Sidebar } from "../components/Sidebar";
@@ -334,6 +335,13 @@ export function App() {
       useRuns.getState().applyDeltaBatch(mergeDeltas(batch)),
     );
 
+    const adoptUnknownRun = makeUnknownRunAdopter({
+      projectId: () => projectRef.current ?? undefined,
+      known: (runId) => runId in useRuns.getState().runs,
+      fetchRun: (runId) => c.run(runId),
+      adopt: (run, events) => useRuns.getState().resyncRun(run, events),
+    });
+
     const sub = new EventSubscriber({
       baseUrl: cfg.baseUrl,
       token: cfg.token,
@@ -347,6 +355,7 @@ export function App() {
         // none, and dropping them would silence the connection indicator and
         // every streamed turn.
         if (e.project_id && projectRef.current && e.project_id !== projectRef.current) return;
+        adoptUnknownRun(e);
         if (batcher.push(e)) return;
         useRuns.getState().applyEvent(e);
       },
