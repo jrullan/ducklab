@@ -166,7 +166,10 @@ A run that reaches a token, dollar, turn, wallclock, or calls-per-reply ceiling
 pauses with its work intact. The binding cap must be lifted before `resume`
 becomes a legal next action; a direct resume request while the cap still stands
 is refused without starting another turn. Each live meter, including
-wallclock, exposes its own one-way `no cap` control. Lifting one cap leaves all
+wallclock, exposes its own one-way `no cap` control. A lift is the person's
+decision: an agent's credential is refused, and an MCP operator asks with an
+`approval_request` (action `budget_lift`) that the person approves (B-541).
+Lifting one cap leaves all
 other caps in force, records the action, and makes `resume` available in the
 returned run state. This applies after an engine restart as well as within the
 process that created the run. A wallclock lift also removes the live deadline

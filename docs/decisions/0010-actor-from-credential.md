@@ -52,16 +52,19 @@ auto-start that loses the race adopts the engine that won.
   writes a literal `"human"` (`TestNoHandlerTrustsABodyActor`).
 - Because `human` can only come from the person's credential, the service's
   human-only rules — lane widening at accept and on an answer, confirming
-  manual verification, answering a test-first oracle dispute — are now
+  manual verification, answering a test-first oracle dispute, and (B-541)
+  lifting a budget cap — are now
   credential checks. Each refusal is recorded (`accept_refused` for accept)
   with the derived actor, and names the legitimate door.
 
 **The legitimate door: approval requests.** An operator that has the
 person's agreement files `approval_request` over MCP (`POST
-/v1/runs/{id}/approval-requests`): the action (`accept` or `answer`), why, and
-the paths or slices or answer. It is bound to the run's pending decision
-(`pending_kind` + `pending_since`); approving one whose run has moved on is
-refused and marks it superseded. The engine emits `approval_requested`, a
+/v1/runs/{id}/approval-requests`): the action (`accept`, `answer` or
+`budget_lift`), why, and the paths or slices or answer or cap. It is bound to
+the run's pending decision (`pending_kind` + `pending_since`); approving one
+whose run has moved on is refused and marks it superseded. A `budget_lift`
+request is bound to the run instead, since a cap binds a running run as well
+as a paused one: it stands until the run ends. The engine emits `approval_requested`, a
 webhook doorbell. The desktop lists pending requests on the run and in Now
 with Approve / Decline. Approve and decline need the person's credential
 (`403` otherwise); MCP has no tool for either. Approved, the decision runs as

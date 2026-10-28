@@ -4470,7 +4470,15 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 // RunBudgetLiftAs is RunBudgetLift with the lifter named: an operator's lift
 // was recorded "by: human" because the actor the MCP sent never reached
 // here (B-530 audit).
+//
+// B-541: a cap is the person's limit on what an unattended agent may spend,
+// and the one rail that bounds a coordinator that is wrong with conviction.
+// Over MCP the agent that hit the cap could remove it on its own say-so;
+// like lane widening (B-530), it now goes through an approval request.
 func (s *Service) RunBudgetLiftAs(ctx context.Context, id, kind, actor string) (*runlog.Run, error) {
+	if actor != "" && actor != "human" {
+		return nil, fmt.Errorf("not lifted — lifting a budget cap is the person's decision; %s cannot lift it: %s (action budget_lift, budget_kind %s)", actor, humanOnlyHint, kind)
+	}
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()

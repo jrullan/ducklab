@@ -310,7 +310,7 @@ export interface RedoNote {
  * the person's and the record keeps both actors. */
 export interface ApprovalRequest {
   id: string;
-  /** "accept" or "answer". */
+  /** "accept", "answer" or "budget_lift". */
   action: string;
   /** The agent's why — typically what the person agreed to in chat. */
   reason: string;
@@ -322,6 +322,8 @@ export interface ApprovalRequest {
   question_id?: string;
   answer?: string;
   widen_lane?: string[];
+  /** budget_lift: the cap to lift (B-541). */
+  budget_kind?: string;
   requested_by: string;
   requested_at: string;
   /** pending | approved (decision in flight) | declined | landed | failed | superseded | interrupted */

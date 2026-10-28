@@ -241,20 +241,26 @@ func TestNoHandlerTrustsABodyActor(t *testing.T) {
 }
 
 // B-530 audit: the MCP sent its name with a budget lift and the engine
-// dropped it, recording "by: human" for an operator's lift.
-func TestABudgetLiftIsRecordedAsTheCredentialsActor(t *testing.T) {
+// dropped it, recording "by: human" for an operator's lift. B-541 went
+// further: a cap is the person's limit on what an agent may spend, so an
+// agent credential is refused outright — whatever actor it names — and only
+// the person's lift lands, recorded as theirs.
+func TestOnlyThePersonsCredentialLiftsABudget(t *testing.T) {
 	s, server, runID := laneWideningServer(t)
-	for _, c := range []struct{ token, body, want string }{
-		{agentTok, `{"kind":"calls","actor":"human"}`, "agent"},
-		{agentTok, `{"kind":"calls","actor":"mcp:opencode"}`, "mcp:opencode"},
-		{humanTok, `{"kind":"calls"}`, "human"},
-	} {
-		if status, out := call(t, server, c.token, "POST", "/v1/runs/"+runID+"/budget/lift", c.body); status != http.StatusOK {
-			t.Fatalf("lift = %d %s", status, out)
+	for _, body := range []string{`{"kind":"calls","actor":"human"}`, `{"kind":"calls","actor":"mcp:opencode"}`, `{"kind":"calls"}`} {
+		status, out := call(t, server, agentTok, "POST", "/v1/runs/"+runID+"/budget/lift", body)
+		if status != http.StatusConflict || !strings.Contains(out, "approval_request") {
+			t.Fatalf("agent lift %s = %d %s, want a refusal naming the approval request", body, status, out)
 		}
-		lifted := runEvents(t, s, runID, "budget_lifted")
-		if got := lifted[len(lifted)-1].Data["by"]; got != c.want {
-			t.Fatalf("lift with %s recorded by %v, want %s", c.body, got, c.want)
-		}
+	}
+	if lifted := runEvents(t, s, runID, "budget_lifted"); len(lifted) != 0 {
+		t.Fatalf("a refused lift was recorded: %+v", lifted[0].Data)
+	}
+	if status, out := call(t, server, humanTok, "POST", "/v1/runs/"+runID+"/budget/lift", `{"kind":"calls"}`); status != http.StatusOK {
+		t.Fatalf("the person's lift = %d %s", status, out)
+	}
+	lifted := runEvents(t, s, runID, "budget_lifted")
+	if len(lifted) != 1 || lifted[0].Data["by"] != "human" {
+		t.Fatalf("the person's lift recorded as %+v", lifted)
 	}
 }

@@ -77,6 +77,9 @@ var decideApproval = func(s *Service, ctx context.Context, runID string, req run
 			return nil, s.RunAnswerWithLaneAs(ctx, runID, req.QuestionID, req.Answer, req.WidenLane, actor)
 		}
 		return nil, s.RunAnswerAs(ctx, runID, req.QuestionID, req.Answer, actor)
+	case "budget_lift":
+		_, err := s.RunBudgetLiftAs(ctx, runID, req.BudgetKind, actor)
+		return nil, err
 	}
 	return nil, fmt.Errorf("unknown approval action %q", req.Action)
 }
@@ -84,8 +87,8 @@ var decideApproval = func(s *Service, ctx context.Context, runID string, req run
 // ApprovalRequestInput is what an agent files: the decision it wants the
 // person to make, and why.
 type ApprovalRequestInput struct {
-	// Action is "accept" or "answer" — the doors whose human-only parts an
-	// agent cannot take itself.
+	// Action is "accept", "answer" or "budget_lift" — the doors whose
+	// human-only parts an agent cannot take itself.
 	Action string `json:"action"`
 	// Reason is why — what the person said, where. Required.
 	Reason string `json:"reason"`
@@ -99,6 +102,8 @@ type ApprovalRequestInput struct {
 	QuestionID string   `json:"question_id,omitempty"`
 	Answer     string   `json:"answer,omitempty"`
 	WidenLane  []string `json:"widen_lane,omitempty"`
+	// BudgetKind: the cap to lift (tokens | usd | turns | wallclock | calls).
+	BudgetKind string `json:"budget_kind,omitempty"`
 	// Actor names the requesting agent ("mcp:<client>"). The engine derives
 	// the recorded requester from the credential; this only says which agent.
 	Actor string `json:"actor,omitempty"`
@@ -143,11 +148,19 @@ func (s *Service) ApprovalRequestFile(ctx context.Context, runID string, in Appr
 	mu.Lock()
 	defer mu.Unlock()
 	current := rs.snapshotRun()
-	if current.Status != "paused" || current.PendingKind == "" {
+	action := strings.TrimSpace(in.Action)
+	// A cap binds a live run whether or not it is paused on it: a run can be
+	// stopped at a question with its wallclock nearly spent. Every other
+	// request names the decision the run is waiting on.
+	if action == "budget_lift" {
+		if !budgetLiftable(current.Status) {
+			return nil, fmt.Errorf("run %q is %s; only a running or paused run has a cap to lift", runID, current.Status)
+		}
+	} else if current.Status != "paused" || current.PendingKind == "" {
 		return nil, fmt.Errorf("run %q has no pending decision to request (status %s)", runID, current.Status)
 	}
 	req := runlog.ApprovalRequest{
-		Action:       strings.TrimSpace(in.Action),
+		Action:       action,
 		Reason:       strings.TrimSpace(in.Reason),
 		PendingKind:  current.PendingKind,
 		PendingSince: current.PendingSince,
@@ -192,8 +205,14 @@ func (s *Service) ApprovalRequestFile(ctx context.Context, runID string, in Appr
 		req.QuestionID = qid
 		req.Answer = in.Answer
 		req.WidenLane = slices.Clone(in.WidenLane)
+	case "budget_lift":
+		kind := strings.TrimSpace(in.BudgetKind)
+		if !slices.Contains(budgetKinds, kind) {
+			return nil, fmt.Errorf("a budget_lift request needs budget_kind, one of %s", strings.Join(budgetKinds, " | "))
+		}
+		req.BudgetKind = kind
 	default:
-		return nil, fmt.Errorf("unknown approval action %q: request accept or answer", in.Action)
+		return nil, fmt.Errorf("unknown approval action %q: request accept, answer or budget_lift", in.Action)
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -212,6 +231,13 @@ func (s *Service) ApprovalRequestFile(ctx context.Context, runID string, in Appr
 	})
 	return &req, nil
 }
+
+// budgetKinds are the caps a budget_lift request may name, as
+// RunBudgetLiftAs reads them.
+var budgetKinds = []string{"tokens", "usd", "turns", "wallclock", "calls"}
+
+// budgetLiftable is whether a run in this status still has caps that bind.
+func budgetLiftable(status string) bool { return status == "running" || status == "paused" }
 
 // setApproval replaces one request on the record and persists it.
 func (s *Service) setApproval(rs *runState, req runlog.ApprovalRequest) error {
@@ -292,14 +318,23 @@ func (s *Service) claimApproval(rs *runState, reqID, actor string) (runlog.Appro
 	}
 	current := rs.snapshotRun()
 	now := time.Now().UTC().Format(time.RFC3339)
-	if current.Accepted || current.Status != "paused" || current.PendingKind != req.PendingKind || current.PendingSince != req.PendingSince {
+	moved := current.Accepted || current.Status != "paused" || current.PendingKind != req.PendingKind || current.PendingSince != req.PendingSince
+	if req.Action == "budget_lift" {
+		// Not bound to a pending decision (ApprovalRequestFile): it stands
+		// for as long as the run can still spend.
+		moved = !budgetLiftable(current.Status)
+	}
+	if moved {
 		req.Status, req.DecidedBy, req.DecidedAt = ApprovalSuperseded, actor, now
 		req.Outcome = "the decision it named is no longer pending; nothing was decided"
+		if req.Action == "budget_lift" {
+			req.Outcome = "the run is " + current.Status + " and spends nothing more; nothing was lifted"
+		}
 		_ = s.setApproval(rs, req)
 		if w, werr := s.ensureWriter(rs); werr == nil {
 			_ = w.AppendEvent("approval_resolved", map[string]interface{}{"request": req})
 		}
-		return req, fmt.Errorf("approval request %s was filed against a decision that is no longer pending; nothing was decided", reqID)
+		return req, fmt.Errorf("approval request %s: %s", reqID, req.Outcome)
 	}
 	pending := req
 	req.Status, req.DecidedBy, req.DecidedAt = ApprovalApproved, actor, now
