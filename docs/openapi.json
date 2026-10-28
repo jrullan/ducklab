@@ -1612,6 +1612,9 @@
           "answer": {
             "type": "string"
           },
+          "budget_kind": {
+            "type": "string"
+          },
           "decided_at": {
             "type": "string"
           },
@@ -2684,6 +2687,9 @@
             "type": "string"
           },
           "answer": {
+            "type": "string"
+          },
+          "budget_kind": {
             "type": "string"
           },
           "human_verified": {

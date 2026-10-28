@@ -475,6 +475,7 @@ export interface ReportRow {
 export interface RunlogApprovalRequest {
   action?: string;
   answer?: string;
+  budget_kind?: string;
   decided_at?: string;
   decided_by?: string;
   decline_reason?: string;
@@ -787,6 +788,7 @@ export interface ServiceApprovalRequestInput {
   action?: string;
   actor?: string;
   answer?: string;
+  budget_kind?: string;
   human_verified?: number[];
   lane_widening?: string[];
   message?: string;

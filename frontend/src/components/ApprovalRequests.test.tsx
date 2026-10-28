@@ -76,6 +76,20 @@ describe("approval requests on a run", () => {
     expect(screen.getByTestId("approval-decline")).toBeTruthy();
   });
 
+  // B-541: lifting a budget cap is the person's decision too; the card names
+  // the cap in words the person reads, not the engine's kind token.
+  it("names the cap a budget-lift request would remove", () => {
+    const lift: ApprovalRequest = {
+      ...request, action: "budget_lift", budget_kind: "usd", lane_widening: undefined,
+      pending_kind: "budget", reason: "the person agreed to spend more on T-004",
+    };
+    const paused: Run = { ...run, pending_kind: "budget", approval_requests: [lift] };
+    seed([paused]);
+    render(<ApprovalRequests client={clientWith()} run={paused} />);
+    expect(screen.getByTestId("approval-request").textContent).toContain("lift the run's dollar cap");
+    expect(screen.getByTestId("approval-approve")).toBeTruthy();
+  });
+
   it("approves through the person's client and shows the outcome", async () => {
     const client = clientWith();
     render(<ApprovalRequests client={client} run={run} />);

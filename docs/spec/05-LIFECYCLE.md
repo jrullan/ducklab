@@ -166,7 +166,10 @@ A run that reaches a token, dollar, turn, wallclock, or calls-per-reply ceiling
 pauses with its work intact. The binding cap must be lifted before `resume`
 becomes a legal next action; a direct resume request while the cap still stands
 is refused without starting another turn. Each live meter, including
-wallclock, exposes its own one-way `no cap` control. Lifting one cap leaves all
+wallclock, exposes its own one-way `no cap` control. A lift is the person's
+decision: an agent's credential is refused, and an MCP operator asks with an
+`approval_request` (action `budget_lift`) that the person approves (B-541).
+Lifting one cap leaves all
 other caps in force, records the action, and makes `resume` available in the
 returned run state. This applies after an engine restart as well as within the
 process that created the run. A wallclock lift also removes the live deadline
@@ -606,6 +609,13 @@ detection is proposed by the model but applied only after the human gate under
 whose `traceability` edge is `bug → task`. When the task's run is accepted and
 the gate is green, the bug moves to `fixed`; `ducklab bug verify <id>` re-runs
 the gate on `main` and moves it to `verified`.
+
+`verified` and `closed` are the person's (I2): the engine refuses both from an
+agent's credential, MCP operators included, and an agent carries a bug no
+further than `fixed` (B-542). A verification an agent recorded before that rule
+can be undone by the person: while it still stands (the bug is verified, or an
+agent closed it straight from that verification), it may move back to `fixed`
+so the person makes the judgement.
 
 ---
 
