@@ -484,6 +484,13 @@ func (s *Service) prepareTriage(ctx context.Context, projectID string, req BugTr
 	s.runsMu.Lock()
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
+	// run_start was persisted before the writer reached the bus — it has to
+	// be, so a relaunch whose claim fails leaves no published ghost — and so
+	// no subscriber ever heard it. The desktop makes a run's row from that
+	// event and ignores events for runs it does not know, so a new triage
+	// stayed invisible until something refetched the list (B-538). Announce
+	// it now that the run is real.
+	s.publishPersisted(run.ProjectID, writer.RunDir(), "run_start")
 	return &triageLaunch{rs: rs, ctx: runCtx, root: entry.Path, todo: todo, all: all}, nil
 }
 
