@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -207,7 +208,11 @@ func (s *Service) settleTriageProposal(rs *runState, projectRoot string, p map[s
 		rs.writer.AppendEvent("triage_repair", data)
 	}
 	if candidate != nil {
-		if repaired, note, ok := repairUnclaimedTestWork(projectRoot, candidate, p, problem); ok {
+		repaired, note, ok := repairUnclaimedTestWork(projectRoot, candidate, p, problem)
+		if !ok {
+			repaired, note, ok = repairTestFirstSplit(p, problem)
+		}
+		if ok {
 			if _, again := s.triageProposalProblem(projectID, projectRoot, repaired); again == nil {
 				repaired["proposal_repair"] = "repaired by the engine: " + note
 				record("engine", note)
@@ -379,6 +384,67 @@ func repairUnclaimedTestWork(projectRoot string, rec *store.Bug, p map[string]in
 		out[k] = v
 	}
 	out["proposal"] = portions
+	return out, note, true
+}
+
+// repairTestFirstSplit merges a test-only portion into the code portion when
+// the split has exactly one of each: the test goes where test-first can write
+// it. The merged portion keeps the code portion's title and slices; a test
+// slice joins them only while the contract's two-slice limit allows, since
+// test-first itself is the regression proof. Any other shape — two code
+// portions the test could belong to, two test-only portions — is a judgement,
+// and judgements go back to the triager.
+func repairTestFirstSplit(p map[string]interface{}, problem error) (map[string]interface{}, string, bool) {
+	var split *testFirstSplitError
+	if !errors.As(problem, &split) || len(split.testOnly) != 1 || len(split.code) != 1 {
+		return nil, "", false
+	}
+	raw, err := json.Marshal(p["proposal"])
+	if err != nil {
+		return nil, "", false
+	}
+	var portions []agent.SplitProposal
+	if err := json.Unmarshal(raw, &portions); err != nil {
+		return nil, "", false
+	}
+	t, c := split.testOnly[0], split.code[0]
+	if t >= len(portions) || c >= len(portions) {
+		return nil, "", false
+	}
+	test, code := portions[t], portions[c]
+	merged := agent.SplitProposal{
+		Title:      code.Title,
+		Acceptance: append([]string(nil), code.Acceptance...),
+		Owns:       append([]string(nil), code.Owns...),
+	}
+	for _, path := range test.Owns {
+		if !slices.Contains(merged.Owns, path) {
+			merged.Owns = append(merged.Owns, path)
+		}
+	}
+	if len(merged.Acceptance) < 2 && len(test.Acceptance) > 0 {
+		merged.Acceptance = append(merged.Acceptance, test.Acceptance[0])
+	}
+	var repaired []agent.SplitProposal
+	for i, portion := range portions {
+		switch i {
+		case c:
+			repaired = append(repaired, merged)
+		case t:
+		default:
+			repaired = append(repaired, portion)
+		}
+	}
+	if _, err := bug.ValidatePortions(splitToPortions(repaired)); err != nil {
+		return nil, "", false
+	}
+	out := make(map[string]interface{}, len(p)+1)
+	for k, v := range p {
+		out[k] = v
+	}
+	out["proposal"] = repaired
+	note := fmt.Sprintf("merged test-only portion %d %q into portion %d %q so test-first writes its test in the fix task's lane",
+		t+1, test.Title, c+1, code.Title)
 	return out, note, true
 }
 

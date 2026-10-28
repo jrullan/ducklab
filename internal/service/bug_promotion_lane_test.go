@@ -267,6 +267,8 @@ func TestBugPromotionGivesSplitTestPortionRegistrationAndSiblingHeader(t *testin
 // searched its prose for the nouns "test" and "coverage". "Cover ..." was a
 // perfectly clear title and, more importantly, Owns was an authoritative lane;
 // forcing the person to rewrite English to unlock it made the contract weaker.
+// Build-only: under test-first a tests-only portion beside the code is refused
+// on its own grounds (B-539), which is not what this test is about.
 func TestBugPromotionRecognizesATestPortionFromItsOwnedLane(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DefaultProject("p", "P")
@@ -282,7 +284,7 @@ func TestBugPromotionRecognizesATestPortionFromItsOwnedLane(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rec := &store.Bug{TestStrategy: "test-first"}
+	rec := &store.Bug{TestStrategy: "build-only", Deliverables: "A regression test covers the fixed behavior"}
 	portions := []agent.SplitProposal{
 		{Title: "Wire the startup frame into the overlay", Acceptance: []string{"the overlay renders the startup frame"}, Owns: []string{"src/app/composition.c"}},
 		{Title: "Cover composed frozen-frame rendering", Acceptance: []string{"the fake portal frame is rendered by the Meson regression target"}, Owns: []string{"tests/test_composition_startup.c"}},
@@ -312,7 +314,7 @@ func TestBugPromotionUsesTheProjectsTestGlobsForPortionClaims(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rec := &store.Bug{TestStrategy: "test-first"}
+	rec := &store.Bug{TestStrategy: "build-only", Deliverables: "A regression test covers the fixed behavior"}
 	portions := []agent.SplitProposal{
 		{Title: "Correct the widget", Acceptance: []string{"the widget keeps its state"}, Owns: []string{"src/widget.go"}},
 		{Title: "Exercise saved state", Acceptance: []string{"the saved state survives reload"}, Owns: []string{"checks/widget.case"}},
