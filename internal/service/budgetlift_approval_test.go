@@ -208,4 +208,3 @@ func TestAnInterruptedLiftThatLandedSettlesLanded(t *testing.T) {
 		t.Fatalf("a lift that wrote its state settled as %+v", got)
 	}
 }
-

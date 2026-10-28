@@ -283,4 +283,3 @@ func TestAnAgentCannotSetItsOwnCaps(t *testing.T) {
 		}
 	}
 }
-

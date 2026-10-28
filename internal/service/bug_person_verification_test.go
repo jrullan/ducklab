@@ -238,4 +238,3 @@ func TestAnAgentCannotUndoAVerification(t *testing.T) {
 		t.Fatalf("a refused undo changed the bug: %s", bugs[0].Status)
 	}
 }
-

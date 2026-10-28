@@ -90,7 +90,7 @@ func toolList() []map[string]interface{} {
 			}, "run_id", "action", "reason"),
 		},
 		{
-			"name":        "budget_lift",
+			"name": "budget_lift",
 			"description": "Remove one budget cap from a live or paused run so resume can proceed. One-way and per-cap (kind tokens | usd | turns | wallclock | calls). " +
 				"A cap is the person's limit on what an agent may spend, so the engine refuses this from an operator: " +
 				"with the person's agreement, file approval_request with action budget_lift and budget_kind instead.",
