@@ -447,7 +447,7 @@ type ResumeNote struct {
 // carries both actors — who asked and who approved.
 type ApprovalRequest struct {
 	ID string `json:"id"`
-	// Action is the decision requested: "accept" or "answer".
+	// Action is the decision requested: "accept", "answer" or "budget_lift".
 	Action string `json:"action"`
 	// Reason is the agent's why — typically what the person said in chat.
 	Reason string `json:"reason"`
@@ -464,6 +464,9 @@ type ApprovalRequest struct {
 	QuestionID string   `json:"question_id,omitempty"`
 	Answer     string   `json:"answer,omitempty"`
 	WidenLane  []string `json:"widen_lane,omitempty"`
+	// What the budget lift would remove: tokens | usd | turns | wallclock |
+	// calls (B-541).
+	BudgetKind string `json:"budget_kind,omitempty"`
 
 	RequestedBy string `json:"requested_by"`
 	RequestedAt string `json:"requested_at"`

@@ -19,6 +19,9 @@ import { StatusChip } from "./StatusChip";
 import type { StatusRole } from "../lib/colors";
 
 function what(req: ApprovalRequest): string {
+  if (req.action === "budget_lift") {
+    return `lift the run's ${budgetCap(req.budget_kind)} cap`;
+  }
   if (req.action === "answer") {
     return req.widen_lane?.length ? "answer the question and widen the task's lane" : "answer the question";
   }
@@ -26,6 +29,17 @@ function what(req: ApprovalRequest): string {
   if (req.lane_widening?.length) parts.push("widen the task's lane");
   if (req.human_verified?.length) parts.push("confirm manual verification");
   return parts.length ? `accept and ${parts.join(" and ")}` : "accept the run";
+}
+
+function budgetCap(kind?: string): string {
+  switch (kind) {
+    case "usd":
+      return "dollar";
+    case "calls":
+      return "calls-per-reply";
+    default:
+      return kind ?? "budget";
+  }
 }
 
 function statusRole(status: string): StatusRole {

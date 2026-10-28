@@ -91,7 +91,9 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "budget_lift",
-			"description": "Remove one budget cap from a live or paused run so resume can proceed. One-way, per-cap, and attributed to this MCP operator; use kind tokens | usd | turns | wallclock | calls.",
+			"description": "Remove one budget cap from a live or paused run so resume can proceed. One-way and per-cap (kind tokens | usd | turns | wallclock | calls). " +
+				"A cap is the person's limit on what an agent may spend, so the engine refuses this from an operator: " +
+				"with the person's agreement, file approval_request with action budget_lift and budget_kind instead.",
 			"inputSchema": obj(map[string]interface{}{
 				"run_id": str("the run id, r-..."),
 				"kind":   str("the cap to remove: tokens | usd | turns | wallclock | calls"),
@@ -120,14 +122,14 @@ func toolList() []map[string]interface{} {
 			"name": "approval_request",
 			"description": "Ask the person to make a decision only a person may make, when they have agreed to it with you " +
 				"(in chat, say) and the engine refused you as an operator: widening a task's lane at accept, confirming " +
-				"manual verification, answering a test-first oracle dispute. You file what and why; the person sees it " +
+				"manual verification, answering a test-first oracle dispute, lifting a budget cap. You file what and why; the person sees it " +
 				"in the desktop (the run, and Now) with Approve and Decline, and a configured webhook rings. Approved, " +
 				"the decision runs as the person's and the record names you as the requester. You cannot approve it " +
 				"yourself and must not try another way: the engine knows your credential, and an agent is never " +
 				"recorded as human. Read the outcome in run_get's approval_requests.",
 			"inputSchema": obj(map[string]interface{}{
 				"run_id": str("the run id, r-..."),
-				"action": str("accept | answer — the decision you are asking the person to make"),
+				"action": str("accept | answer | budget_lift — the decision you are asking the person to make"),
 				"reason": str("why: what the person agreed to and where. Shown to them beside the buttons"),
 				"lane_widening": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"},
 					"description": "accept: the lane paths to approve; omit for every path the pending decision offers"},
@@ -137,6 +139,7 @@ func toolList() []map[string]interface{} {
 				"answer":      str("answer: the person's answer"),
 				"widen_lane": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"},
 					"description": "answer: lane paths the answer widens"},
+				"budget_kind": str("budget_lift: the cap to lift, tokens | usd | turns | wallclock | calls"),
 			}, "run_id", "action", "reason"),
 		},
 		{
@@ -748,7 +751,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 				req[k] = v
 			}
 		}
-		for _, k := range []string{"question_id", "answer"} {
+		for _, k := range []string{"question_id", "answer", "budget_kind"} {
 			if v := a.str(k); v != "" {
 				req[k] = v
 			}

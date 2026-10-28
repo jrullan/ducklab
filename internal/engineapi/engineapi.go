@@ -411,6 +411,11 @@ func (s *Server) handleBudgetDefaults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBudgetDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	// The defaults are every later run's caps: raising them is a lift by
+	// another name (review of B-541).
+	if !s.requireHuman(w, r, "changing the budget defaults") {
+		return
+	}
 	var update service.BudgetUpdate
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -565,6 +570,9 @@ func (s *Server) handleTestStart(w http.ResponseWriter, r *http.Request) {
 			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
+	}
+	if s.refuseAgentCaps(w, r, nil, req.AgentTurns) {
+		return
 	}
 	run, err := s.svc.TestStart(r.Context(), r.PathValue("id"), req)
 	if err != nil {
@@ -1724,6 +1732,9 @@ func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if s.refuseAgentCaps(w, r, req.Budget, req.AgentTurns) {
+		return
+	}
 	run, err := s.svc.RunStart(r.Context(), projectID, req)
 	if err != nil {
 		// A refused request is the caller's to fix, and its message is
@@ -2146,6 +2157,9 @@ func (s *Server) handleStageStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Stage = r.PathValue("stage")
+	if s.refuseAgentCaps(w, r, nil, req.AgentTurns) {
+		return
+	}
 	run, err := s.svc.StageStart(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())

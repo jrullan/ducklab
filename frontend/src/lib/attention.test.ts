@@ -22,6 +22,19 @@ describe("what merits interrupting the person", () => {
     expect(got[0]!.body).toContain("PASSED");
   });
 
+  // B-541 review: a budget-lift request can wait on a running run; it rang
+  // nothing, so the person learned of it only by opening Now.
+  it("an agent's new approval request, even on a running run", () => {
+    const ask = { id: "ar-1", action: "budget_lift", budget_kind: "usd", reason: "ok in chat", pending_kind: "",
+      requested_by: "mcp:opencode", requested_at: "2026-10-28T23:00:00Z", status: "pending" };
+    const before = { "r-1": run({ status: "running" }) };
+    const after = { "r-1": run({ status: "running", approval_requests: [ask] }) };
+    const got = interruptions(before, after);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.title).toContain("asks for your approval");
+    expect(interruptions(after, after)).toHaveLength(0);
+  });
+
   it("a run newly failed, with the reason's first line", () => {
     const before = { "r-1": run({ status: "running" }) };
     const after = {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { EngineClient, type Project, type ProjectStartResult } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
-import { useRuns, pendingForHuman } from "../store/runs";
+import { useRuns, pendingForHuman, pendingApprovals } from "../store/runs";
 import { makeUnknownRunAdopter } from "../lib/unknownRuns";
 import { interruptions, advisorAutoAnswerInterruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
@@ -459,7 +459,12 @@ export function App() {
       setMainDisabledReason(null);
     }
   }, [connection, degraded, stale, staleDetail, initialMissingKeys.join(",")]);
-  const waitingCount = pendingForHuman(runs).length;
+  // A budget-lift request can wait on a run that is still running (B-541
+  // review): it is waiting for the person all the same.
+  const waitingCount = new Set([
+    ...pendingForHuman(runs).map((r) => r.id),
+    ...pendingApprovals(runs).map(({ run }) => run.id),
+  ]).size;
 
   // The attention surface. The store sees every state change; this is the one
   // place that turns transitions into interruptions — an OS notification when

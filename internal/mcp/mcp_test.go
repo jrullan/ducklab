@@ -1478,3 +1478,17 @@ func TestOperatorCannotWidenALane(t *testing.T) {
 		t.Errorf("answered as %q; the operator's answer must stay attributed to it", eng.answerActor)
 	}
 }
+
+// B-541: refused a budget lift, an operator with the person's agreement asks
+// for it; the cap it names reaches the engine with the request.
+func TestApprovalRequestCarriesTheBudgetKind(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame, callFrame(2, "approval_request",
+		`{"run_id":"r-cap","action":"budget_lift","budget_kind":"usd","reason":"the person said spend up to $5 more"}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatal("approval_request failed")
+	}
+	if eng.approvalRun != "r-cap" || eng.approvalReq["action"] != "budget_lift" || eng.approvalReq["budget_kind"] != "usd" {
+		t.Fatalf("filed %s %v", eng.approvalRun, eng.approvalReq)
+	}
+}

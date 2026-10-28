@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/budget"
 )
 
 // B-530. An OpenCode session operating through MCP was refused a lane
@@ -113,4 +115,20 @@ func (s *Server) requireHuman(w http.ResponseWriter, r *http.Request, what strin
 			"this request carries an agent credential. An operator files an approval request "+
 			"(MCP approval_request) and the person confirms or declines it in the desktop")
 	return false
+}
+
+// refuseAgentCaps refuses a launch in which an agent sets its own spending
+// limits. B-541 made lifting a run's cap the person's decision; review found
+// the same lift one step earlier — abort, then start again with a budget of
+// the agent's choosing or agent_turns -1 (no calls-per-reply cap). An agent
+// launches with the configured caps; a positive agent_turns stays its to set,
+// with the token and dollar caps still guarding every call.
+func (s *Server) refuseAgentCaps(w http.ResponseWriter, r *http.Request, b *budget.Budget, agentTurns int) bool {
+	if requestCredential(r) == credHuman || (b == nil && agentTurns >= 0) {
+		return false
+	}
+	s.error(w, http.StatusForbidden, "human_credential_required",
+		"a run's budget is the person's to set: an agent launches with the configured caps, and agent_turns below 0 "+
+			"(no per-reply cap) is the person's too. Ask the person to raise the defaults or launch it themselves")
+	return true
 }
