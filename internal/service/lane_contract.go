@@ -6,6 +6,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -33,16 +34,18 @@ func taskLaneFindings(projectRoot, taskID string, changed []string) []conv.Findi
 		return nil
 	}
 	var allowed []laneClaim
-	owners := map[string][]laneClaim{}
+	var owners []laneOwner
+	var fixes []string
 	for _, milestone := range plan.Sections {
 		for _, task := range milestone.Children {
 			claims := sectionLaneClaims(task)
 			if len(claims) == 0 {
 				claims = ownsClaims(milestone.Owns)
 			}
-			owners[task.ID] = claims
+			owners = append(owners, laneOwner{id: task.ID, claims: claims, fixes: taskFixedBugs(task.Body)})
 			if strings.EqualFold(task.ID, taskID) {
 				allowed = claims
+				fixes = taskFixedBugs(task.Body)
 			}
 		}
 	}
@@ -56,22 +59,91 @@ func taskLaneFindings(projectRoot, taskID string, changed []string) []conv.Findi
 		if path == "" || anyClaimContains(allowed, path) {
 			continue
 		}
-		owner := "no task"
-		for id, claims := range owners {
-			if !strings.EqualFold(id, taskID) && anyClaimContains(claims, path) {
-				owner = id
-				break
-			}
-		}
 		findings = append(findings, conv.Finding{
 			Severity: "critical", File: path,
-			Issue:     fmt.Sprintf("edit is outside %s's declared write lane (owned by %s)", taskID, owner),
-			Fix:       "approve the offered lane widening at the Accept gate, or revert the edit",
+			Issue:     fmt.Sprintf("edit is outside %s's declared write lane (owned by %s)", taskID, laneOwnersOf(owners, taskID, fixes, path)),
+			Fix:       laneWideningFix,
 			Invariant: "a run may modify only paths in its task's Produces/Modifies/Owns lane",
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return findings
+}
+
+// laneWideningFix says who may approve a lane widening. "Approve the offered
+// lane widening" alone sent an operator agent (TI-36X T-008, B-540) digging
+// through the engine's source for a way to approve it itself: the agent was
+// never told the decision is the person's, nor how to ask for it.
+const laneWideningFix = "the person approves the offered lane widening at the Accept gate (an operator agent cannot: " + humanOnlyHint + "), or revert the edit"
+
+// laneRefusalDetail is what an out-of-lane Accept refusal says, to the person
+// and to an operator agent alike.
+func laneRefusalDetail(edits int, taskID string) string {
+	return fmt.Sprintf("accept refused: %d edit(s) are outside %s's declared Produces/Modifies/Owns lane; "+
+		"the person approves the offered lane widening (an operator agent cannot: %s), or revert those edits", edits, taskID, humanOnlyHint)
+}
+
+type laneOwner struct {
+	id     string
+	claims []laneClaim
+	fixes  []string
+}
+
+var fixesBugPattern = regexp.MustCompile(`(?m)^Fixes ((?:B-\d+)(?:,\s*B-\d+)*)\.?\s*$`)
+
+// maxLaneOwnersNamed bounds a finding's owner list: a milestone-wide lane is
+// inherited by every task under it, and the list is read by a model.
+const maxLaneOwnersNamed = 5
+
+// taskFixedBugs reads the "Fixes B-006." line a bug promotion writes. Only
+// the task's own part counts: the reporter's text below "## Reported" is
+// quoted verbatim and may say anything, "Fixes B-002." included.
+func taskFixedBugs(body string) []string {
+	if cut := strings.Index(body, "\n## Reported"); cut >= 0 {
+		body = body[:cut]
+	}
+	var ids []string
+	for _, m := range fixesBugPattern.FindAllStringSubmatch(body, -1) {
+		for _, id := range strings.Split(m[1], ",") {
+			if id = strings.TrimSpace(id); id != "" && !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// laneOwnersOf names every other task whose lane claims path, in plan order,
+// with the tasks that fix the same bug as taskID first and marked: that is
+// usually where the edit belongs. Picking one owner from a map named a
+// different, unrelated task on each attempt (T-007, then T-002) and never the
+// sibling (T-009) the split had given the test to.
+func laneOwnersOf(owners []laneOwner, taskID string, fixes []string, path string) string {
+	var siblings, others []string
+	for _, owner := range owners {
+		if strings.EqualFold(owner.id, taskID) || !anyClaimContains(owner.claims, path) {
+			continue
+		}
+		var shared []string
+		for _, id := range owner.fixes {
+			if slices.Contains(fixes, id) {
+				shared = append(shared, id)
+			}
+		}
+		if len(shared) > 0 {
+			siblings = append(siblings, fmt.Sprintf("%s, which also fixes %s", owner.id, strings.Join(shared, ", ")))
+		} else {
+			others = append(others, owner.id)
+		}
+	}
+	all := append(siblings, others...)
+	if len(all) == 0 {
+		return "no task"
+	}
+	if len(all) > maxLaneOwnersNamed {
+		return fmt.Sprintf("%s; and %d more", strings.Join(all[:maxLaneOwnersNamed], "; "), len(all)-maxLaneOwnersNamed)
+	}
+	return strings.Join(all, "; ")
 }
 
 func laneFindingPaths(findings []conv.Finding) []string {
