@@ -208,8 +208,11 @@ export function DecisionCard({
             <button
               type="button"
               onClick={onReject}
+              // The engine refuses another decision while an accept is in
+              // flight, whoever started it (B-543): do not offer one.
+              disabled={accepting}
               data-testid="reject-button"
-              className="rounded border border-hairline px-3 py-1 text-sm"
+              className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
             >
               {documentGate ? "Discard draft" : "Reject"}
             </button>
@@ -407,7 +410,7 @@ export function DecisionCard({
             <button
               type="button"
               onClick={() => void ask()}
-              disabled={asking || !note.trim()}
+              disabled={asking || accepting || !note.trim()}
               data-testid="request-changes-button"
               className="rounded border border-good bg-good px-2 py-1 text-sm text-page disabled:opacity-40"
             >

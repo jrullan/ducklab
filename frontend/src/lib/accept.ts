@@ -22,6 +22,23 @@ export function acceptingLabel(state: AcceptState | undefined): string {
   return state?.kind === "pending" && state.verifying ? ACCEPT_VERIFYING_LABEL : "Accepting…";
 }
 
+/**
+ * Settles outside accepts from the run record (review of B-543). The all-runs
+ * stream has no cursor: an accept_settled written while this client was
+ * disconnected — an engine restart's recovery, a refusal — never arrives,
+ * and the gate stayed "accepting…" with Accept disabled for good. The run
+ * read carries accept_in_progress and last_accept; setRun settles from them.
+ * This client's own accepts have the same path in settled().
+ */
+export function refetchExternalAccepts(client: Pick<EngineClient, "run">): void {
+  for (const runId of useRuns.getState().externalAccepts()) {
+    client
+      .run(runId)
+      .then((d) => useRuns.getState().setRun(d.run))
+      .catch(() => {});
+  }
+}
+
 export class AcceptSettledError extends Error {
   constructor(message: string, readonly interrupted: boolean) {
     super(message);

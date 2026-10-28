@@ -229,7 +229,9 @@ export function WaitingCard({
             type="button"
             data-testid="now-reject"
             onClick={onReject}
-            className="rounded border border-hairline px-2 py-1 text-xs"
+            // No second decision while an accept is in flight (B-543).
+            disabled={accepting}
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
             Reject
           </button>
@@ -239,7 +241,8 @@ export function WaitingCard({
             type="button"
             data-testid="now-request-changes"
             onClick={() => setChangesOpen((open) => !open)}
-            className="rounded border border-hairline px-2 py-1 text-xs"
+            disabled={accepting}
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
             Request changes
           </button>
