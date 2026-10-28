@@ -599,8 +599,10 @@ func (f *fakeEngine) events_(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("from_seq"); v != "" {
 		fromSeq, _ = strconv.Atoi(v)
 	}
-	if last := r.Header.Get("Last-Event-ID"); last != "" {
-		if i := strings.LastIndex(last, ":"); i >= 0 {
+	// Same rule as the real engine (B-537): Last-Event-ID resumes the run the
+	// stream follows and never applies to another run or the all-runs stream.
+	if last := r.Header.Get("Last-Event-ID"); last != "" && runID != "" {
+		if i := strings.LastIndex(last, ":"); i >= 0 && last[:i] == runID {
 			if n, err := strconv.Atoi(last[i+1:]); err == nil {
 				fromSeq = n
 			}

@@ -1997,7 +1997,19 @@ func (s *Server) replayBacklog(w http.ResponseWriter, flusher http.Flusher, runI
 }
 
 // handleEvents handles SSE.
+// eventStreamParams are the query parameters /v1/events understands. Any
+// other is refused: an unknown one was ignored, so a misspelt filter
+// (?project_id=) silently streamed every project's events (B-537).
+var eventStreamParams = map[string]bool{"project": true, "run": true, "from_seq": true, "token": true}
+
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	for name := range r.URL.Query() {
+		if !eventStreamParams[name] {
+			s.error(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("unknown event stream parameter %q; the stream takes project, run and from_seq", name))
+			return
+		}
+	}
 	projectID := r.URL.Query().Get("project")
 	runID := r.URL.Query().Get("run")
 	fromSeq := 0
@@ -2006,14 +2018,18 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Last-Event-ID ("<runID>:<seq>") takes precedence over from_seq so a
-	// reconnecting client resumes exactly where it was cut off.
-	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" {
-		if i := strings.LastIndex(lastID, ":"); i >= 0 {
+	// reconnecting client resumes exactly where it was cut off — on the one
+	// run the stream follows. It never chooses which runs the stream covers:
+	// it used to set the run filter on a stream that had none, so a client
+	// resuming the all-runs stream (every SSE client sends the header on
+	// reconnect) was narrowed to the run its last event came from — usually
+	// one long finished — and heard nothing but heartbeats from then on
+	// (B-537). A seq is per run, so it means nothing to another run's stream
+	// or to the all-runs stream; there the client resyncs from a snapshot.
+	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" && runID != "" {
+		if i := strings.LastIndex(lastID, ":"); i >= 0 && lastID[:i] == runID {
 			if n, err := strconv.Atoi(lastID[i+1:]); err == nil {
 				fromSeq = n
-				if runID == "" {
-					runID = lastID[:i]
-				}
 			}
 		}
 	}
