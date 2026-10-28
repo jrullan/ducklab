@@ -264,3 +264,23 @@ func TestOnlyThePersonsCredentialLiftsABudget(t *testing.T) {
 		t.Fatalf("the person's lift recorded as %+v", lifted)
 	}
 }
+
+// Review of B-541: refused the lift, an agent could abort and launch again
+// with a budget of its choosing, or agent_turns -1, or raise the defaults
+// every later run starts from. Those are the person's too.
+func TestAnAgentCannotSetItsOwnCaps(t *testing.T) {
+	_, server, _ := laneWideningServer(t)
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/v1/defaults/budget", `{"max_usd":1000}`},
+		{"POST", "/v1/projects/p/runs", `{"task_id":"T-001","budget":{"max_usd":1000}}`},
+		{"POST", "/v1/projects/p/runs", `{"task_id":"T-001","agent_turns":-1}`},
+		{"POST", "/v1/projects/p/tests", `{"task_id":"T-001","agent_turns":-1}`},
+		{"POST", "/v1/projects/p/stages/spec", `{"agent_turns":-1}`},
+	} {
+		status, out := call(t, server, agentTok, c.method, c.path, c.body)
+		if status != http.StatusForbidden || !strings.Contains(out, "human_credential_required") {
+			t.Errorf("agent %s %s %s = %d %s, want refused", c.method, c.path, c.body, status, out)
+		}
+	}
+}
+

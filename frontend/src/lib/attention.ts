@@ -54,6 +54,17 @@ export function interruptions(
       continue;
     }
 
+    // An agent asking the person for a decision is a call too, on a run
+    // that may still be running (a budget-lift request — B-541 review). A
+    // paused run already rang above.
+    const asks = (r?: Run) => new Set((r?.approval_requests ?? []).filter((q) => q.status === "pending").map((q) => q.id));
+    const askedBefore = asks(before);
+    const newAsk = [...asks(run)].some((id) => !askedBefore.has(id));
+    if (newAsk && !waitsNow) {
+      out.push({ runId: run.id, title: `${label}: an agent asks for your approval`, body: "open it to approve or decline" });
+      continue;
+    }
+
     const failedNow = run.status === "failed";
     const failedBefore = !!before && before.status === "failed";
     if (failedNow && !failedBefore) {

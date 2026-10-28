@@ -23,12 +23,13 @@ func budgetPausedRun(t *testing.T, s *Service) string {
 		StartedAt: "2026-10-28T21:00:00Z",
 	}
 	run.Budget.Limit.Tokens = 20
+	run.Budget.Limit.WallclockS = 3600
 	w, err := runlog.NewWriter(dir, run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
-	rs.setTracker(budget.NewTracker(&budget.Budget{MaxTokens: 20}))
+	rs.setTracker(budget.NewTracker(&budget.Budget{MaxTokens: 20, MaxWallclockS: 3600}))
 	s.runsMu.Lock()
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
@@ -144,12 +145,9 @@ func TestABudgetLiftRequestStandsUntilTheRunEnds(t *testing.T) {
 	rs.wmu.Lock()
 	rs.run.Status = "failed"
 	rs.wmu.Unlock()
-	out, err := s.ApprovalRequestApprove(ctx, id, second.ID, "human")
+	_, err = s.ApprovalRequestApprove(ctx, id, second.ID, "human")
 	if err == nil {
 		t.Fatal("a lift was approved on an ended run")
-	}
-	if out != nil && out.Request.Status != ApprovalSuperseded {
-		t.Errorf("request on an ended run = %+v", out.Request)
 	}
 	for _, r := range rs.snapshotRun().ApprovalRequests {
 		if r.ID == second.ID && (r.Status != ApprovalSuperseded || !strings.Contains(r.Outcome, "spends nothing more")) {
@@ -157,3 +155,57 @@ func TestABudgetLiftRequestStandsUntilTheRunEnds(t *testing.T) {
 		}
 	}
 }
+
+// Review of B-541: a request for a cap that is already gone decided nothing
+// and still read "landed", writing a second budget_lifted with was 0; and
+// nothing stopped the same request being filed twice.
+func TestALiftRequestNeedsACapToLift(t *testing.T) {
+	ctx := context.Background()
+	s := serviceWithDucklings(t, "pato-uno")
+	id := budgetPausedRun(t, s)
+
+	if _, err := s.ApprovalRequestFile(ctx, id, ApprovalRequestInput{Action: "budget_lift", Reason: "x", BudgetKind: "usd"}, "mcp:opencode"); err == nil {
+		t.Fatal("a request to lift a dollar cap the run never had was filed")
+	}
+	first, err := s.ApprovalRequestFile(ctx, id, ApprovalRequestInput{Action: "budget_lift", Reason: "x", BudgetKind: "tokens"}, "mcp:opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApprovalRequestFile(ctx, id, ApprovalRequestInput{Action: "budget_lift", Reason: "again", BudgetKind: "tokens"}, "mcp:opencode"); err == nil {
+		t.Fatal("a second pending request for the same cap was filed")
+	}
+	// The person lifts it directly; the request then decides nothing.
+	if _, err := s.RunBudgetLift(ctx, id, "tokens"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApprovalRequestApprove(ctx, id, first.ID, "human"); err == nil {
+		t.Fatal("approving a request for a cap already lifted reported success")
+	}
+	for _, r := range s.runs[id].snapshotRun().ApprovalRequests {
+		if r.ID == first.ID && (r.Status != ApprovalSuperseded || !strings.Contains(r.Outcome, "already lifted")) {
+			t.Errorf("stale request reads %+v", r)
+		}
+	}
+}
+
+// Review of B-541: a lift writes the run's state before its request is
+// resolved. An engine that stopped between the two left the request
+// "approved", and recovery called it interrupted — "nothing landed" — with
+// the cap already gone.
+func TestAnInterruptedLiftThatLandedSettlesLanded(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id := budgetPausedRun(t, s)
+	rs := s.runs[id]
+	rs.wmu.Lock()
+	rs.run.Budget.Limit.Tokens = 0
+	rs.run.ApprovalRequests = []runlog.ApprovalRequest{{ID: "ar-1", Action: "budget_lift", BudgetKind: "tokens", Status: ApprovalApproved, DecidedBy: "human"}}
+	rs.wmu.Unlock()
+	if !s.settleInterruptedApprovals(rs) {
+		t.Fatal("recovery changed nothing")
+	}
+	got := rs.snapshotRun().ApprovalRequests[0]
+	if got.Status != ApprovalLanded {
+		t.Fatalf("a lift that wrote its state settled as %+v", got)
+	}
+}
+

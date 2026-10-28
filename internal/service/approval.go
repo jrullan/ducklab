@@ -210,6 +210,14 @@ func (s *Service) ApprovalRequestFile(ctx context.Context, runID string, in Appr
 		if !slices.Contains(budgetKinds, kind) {
 			return nil, fmt.Errorf("a budget_lift request needs budget_kind, one of %s", strings.Join(budgetKinds, " | "))
 		}
+		if capLifted(current, kind) {
+			return nil, fmt.Errorf("run %q has no %s cap to lift", runID, kind)
+		}
+		for _, other := range current.ApprovalRequests {
+			if other.Action == "budget_lift" && other.BudgetKind == kind && other.Status == ApprovalPending {
+				return nil, fmt.Errorf("run %q already has a pending request to lift its %s cap (%s)", runID, kind, other.ID)
+			}
+		}
 		req.BudgetKind = kind
 	default:
 		return nil, fmt.Errorf("unknown approval action %q: request accept, answer or budget_lift", in.Action)
@@ -238,6 +246,25 @@ var budgetKinds = []string{"tokens", "usd", "turns", "wallclock", "calls"}
 
 // budgetLiftable is whether a run in this status still has caps that bind.
 func budgetLiftable(status string) bool { return status == "running" || status == "paused" }
+
+// capLifted reports whether the run no longer has the named cap: never set,
+// or already lifted. A lift request for it would decide nothing, and one
+// approved and then interrupted by an engine stop did land (review of B-541).
+func capLifted(run *runlog.Run, kind string) bool {
+	switch kind {
+	case "tokens":
+		return run.Budget.Limit.Tokens == 0
+	case "usd":
+		return run.Budget.Limit.USD == 0
+	case "turns":
+		return run.Budget.Limit.Turns == 0
+	case "wallclock":
+		return run.Budget.Limit.WallclockS == 0
+	case "calls":
+		return run.AgentTurns < 0
+	}
+	return false
+}
 
 // setApproval replaces one request on the record and persists it.
 func (s *Service) setApproval(rs *runState, req runlog.ApprovalRequest) error {
@@ -319,15 +346,20 @@ func (s *Service) claimApproval(rs *runState, reqID, actor string) (runlog.Appro
 	current := rs.snapshotRun()
 	now := time.Now().UTC().Format(time.RFC3339)
 	moved := current.Accepted || current.Status != "paused" || current.PendingKind != req.PendingKind || current.PendingSince != req.PendingSince
+	alreadyLifted := false
 	if req.Action == "budget_lift" {
 		// Not bound to a pending decision (ApprovalRequestFile): it stands
-		// for as long as the run can still spend.
-		moved = !budgetLiftable(current.Status)
+		// for as long as the run can still spend, and while its cap does.
+		alreadyLifted = capLifted(current, req.BudgetKind)
+		moved = !budgetLiftable(current.Status) || alreadyLifted
 	}
 	if moved {
 		req.Status, req.DecidedBy, req.DecidedAt = ApprovalSuperseded, actor, now
 		req.Outcome = "the decision it named is no longer pending; nothing was decided"
-		if req.Action == "budget_lift" {
+		switch {
+		case alreadyLifted:
+			req.Outcome = "the " + req.BudgetKind + " cap was already lifted; nothing was decided"
+		case req.Action == "budget_lift":
 			req.Outcome = "the run is " + current.Status + " and spends nothing more; nothing was lifted"
 		}
 		_ = s.setApproval(rs, req)
@@ -455,6 +487,10 @@ func (s *Service) settleInterruptedApprovals(rs *runState) bool {
 		}
 		if req.Action == "accept" && run.Accepted && run.CommitSHA != "" {
 			req.Status, req.Outcome = ApprovalLanded, "accepted as "+run.CommitSHA+" (settled after an engine restart)"
+		} else if req.Action == "budget_lift" && capLifted(run, req.BudgetKind) {
+			// The lift wrote its state before the engine stopped (review of
+			// B-541): the cap is gone, so it landed.
+			req.Status, req.Outcome = ApprovalLanded, req.BudgetKind+" cap lifted (settled after an engine restart)"
 		} else {
 			req.Status, req.Outcome = ApprovalInterrupted, "the engine stopped while this decision was in flight; nothing landed — the agent files a new request if it is still wanted"
 		}

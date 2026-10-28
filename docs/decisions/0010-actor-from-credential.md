@@ -64,7 +64,10 @@ person's agreement files `approval_request` over MCP (`POST
 the run's pending decision (`pending_kind` + `pending_since`); approving one
 whose run has moved on is refused and marks it superseded. A `budget_lift`
 request is bound to the run instead, since a cap binds a running run as well
-as a paused one: it stands until the run ends. The engine emits `approval_requested`, a
+as a paused one: it stands until the run ends or the cap is gone. The same
+caps cannot be loosened one step earlier either: an agent credential may not
+change the budget defaults, nor launch a run with its own budget or with
+`agent_turns` below 0. The engine emits `approval_requested`, a
 webhook doorbell. The desktop lists pending requests on the run and in Now
 with Approve / Decline. Approve and decline need the person's credential
 (`403` otherwise); MCP has no tool for either. Approved, the decision runs as
