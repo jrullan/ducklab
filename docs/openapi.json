@@ -5568,7 +5568,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "SSE event stream. Accepts ?token= because EventSource cannot set headers."
+        "summary": "SSE event stream, filtered by ?project= and/or ?run= (unknown parameters are refused). Accepts ?token= because EventSource cannot set headers. Last-Event-ID resumes a single-run stream; the all-runs stream has no cursor, so a reconnecting client resyncs from a snapshot."
       }
     },
     "/v1/health": {
