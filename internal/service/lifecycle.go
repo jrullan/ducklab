@@ -102,6 +102,50 @@ func (s *Service) ensureWriter(rs *runState) (*runlog.Writer, error) {
 	return w, nil
 }
 
+// planHistoryTaskHashes maps every hash a task's body has carried in the
+// plan's committed history — in each spelling a run may have recorded — to
+// that body's current normalized hash, keyed "<task>\x00<recorded hash>".
+//
+// It heals runs recorded before the lane stopped counting toward a task's
+// meaning (B-536): their hash includes an **Owns:** line that a lane widening
+// has since rewritten, so no spelling of the current body matches them. The
+// body they ran against is in the plan's history; if it differs from today's
+// only in lines the hash now ignores, its normalized hash equals today's and
+// the run is rebound. A body whose substance changed maps elsewhere and the
+// run stays detached, as a recycled id should.
+func planHistoryTaskHashes(projectRoot string) map[string]string {
+	out := map[string]string{}
+	rel, err := filepath.Rel(projectRoot, artifact.Path(projectRoot, artifact.KindPlan))
+	if err != nil {
+		return out
+	}
+	versions, err := vcs.New(projectRoot).FileVersions(rel, planHistoryLimit)
+	if err != nil {
+		return out
+	}
+	for _, content := range versions {
+		doc, err := artifact.Parse(content, artifact.KindPlan)
+		if err != nil {
+			continue
+		}
+		for _, m := range doc.Sections {
+			for _, t := range m.Children {
+				now := taskBodyHash(t.Body)
+				for _, recorded := range []string{now, rawTaskBodyHash(t.Body), rawTaskBodyHash(legacyNormalizeTaskBody(t.Body))} {
+					key := t.ID + "\x00" + recorded
+					if _, seen := out[key]; !seen {
+						out[key] = now
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// planHistoryLimit bounds how many plan revisions recovery reads.
+const planHistoryLimit = 500
+
 // RecoverRuns rehydrates every run from disk and repairs runs that were left
 // mid-flight by a dead engine.
 //
@@ -120,6 +164,9 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 	for _, entry := range entries {
 		plan, _ := artifact.Load(entry.Path, artifact.KindPlan)
 		hashes := taskBodyHashes(plan)
+		// Read lazily: only a project with a run its plan no longer
+		// recognises pays for walking the plan's history.
+		var history map[string]string
 		ids, err := runlog.ListRuns(entry.Path)
 		if err != nil {
 			// A project on an unmounted drive must not stop the engine.
@@ -141,6 +188,27 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 				if hash := hashes[run.TaskID]; hash != "" {
 					run.TaskBodyHash = hash
 					legacyBound = true
+				}
+			}
+			// Rebind every record to the current spelling (B-536). One that
+			// matches through an older spelling is the same task today, and
+			// left alone it would detach the moment the engine next widens
+			// that task's lane. One no spelling matches may still be the same
+			// task under a lane the plan has since rewritten; its history says.
+			//
+			// In memory only: some projects track state.json, and rewriting
+			// every finished run's record on a restart would dirty their
+			// checkout. Recovery recomputes the binding each start.
+			if current := hashes[run.TaskID]; run.TaskID != "" && run.TaskBodyHash != "" && current != "" && run.TaskBodyHash != current {
+				same := taskBodyHashMatches(run.TaskBodyHash, run.TaskID, hashes)
+				if !same {
+					if history == nil {
+						history = planHistoryTaskHashes(entry.Path)
+					}
+					same = history[run.TaskID+"\x00"+run.TaskBodyHash] == current
+				}
+				if same {
+					run.TaskBodyHash = current
 				}
 			}
 			abandoned := false

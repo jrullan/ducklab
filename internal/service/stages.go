@@ -3063,18 +3063,41 @@ func taskBodyHashForTask(ctx context.Context, s *Service, projectID, taskID stri
 }
 
 // normalizeTaskBody is what the hash covers: the task's substance, not its
-// traceability. Accepting a spec-alignment that added ONE **Implements:**
-// line to 64 tasks changed every raw hash, the recycled-id boundary
-// discarded every accepted run, and 64 shipped tasks reappeared in todo
-// (B-093). An Implements line is an edge to the spec, not the work
+// traceability or its lane. Accepting a spec-alignment that added ONE
+// **Implements:** line to 64 tasks changed every raw hash, the recycled-id
+// boundary discarded every accepted run, and 64 shipped tasks reappeared in
+// todo (B-093). An Implements line is an edge to the spec, not the work
 // definition — annotating it must not orphan the task's history.
+//
+// The **Owns:** line is the same kind of edit: it is where the work may
+// write, not what the work is, and the engine itself rewrites it when a
+// person widens a lane at accept or answer time. Hashing it detached the very
+// run that asked for the widening: T-004's build was accepted and the board
+// showed it todo (B-536).
 func normalizeTaskBody(body string) string {
+	return normalizeTaskBodyDropping(body, "**Implements:**", "**Owns:**")
+}
+
+// legacyNormalizeTaskBody is the B-093..B-536 normalization (Implements
+// only). Runs recorded in that window carry its hash.
+func legacyNormalizeTaskBody(body string) string {
+	return normalizeTaskBodyDropping(body, "**Implements:**")
+}
+
+func normalizeTaskBodyDropping(body string, prefixes ...string) string {
 	var kept []string
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "**Implements:**") {
-			continue
+		trimmed := strings.TrimSpace(line)
+		drop := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(trimmed, prefix) {
+				drop = true
+				break
+			}
 		}
-		kept = append(kept, line)
+		if !drop {
+			kept = append(kept, line)
+		}
 	}
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
@@ -3094,7 +3117,7 @@ func rawTaskBodyHash(body string) string {
 // acceptedHistoryRewriteCount reports task bodies whose accepted history
 // currently counts but would stop counting if the proposed plan were accepted.
 // taskBodyHash deliberately compares normalized bodies, so Implements-only
-// traceability edits do not produce this warning.
+// traceability edits and Owns-only lane edits do not produce this warning.
 func acceptedHistoryRewriteCount(runs []*runlog.Run, current, proposed *artifact.Document) int {
 	currentHashes := taskBodyHashes(current)
 	accepted := map[string]bool{}
@@ -3139,8 +3162,10 @@ func (s *Service) mutablePlanTasksForAmendment(ctx context.Context, projectID st
 	return mutable
 }
 
-// taskBodyHashes carries both accepted spellings per task: the normalized
-// hash (what new runs record) and the raw one (what old runs recorded).
+// taskBodyHashes carries every accepted spelling per task: the normalized
+// hash (what new runs record), the legacy normalized hash (what runs recorded
+// before Owns was normalized away, B-536) and the raw one (what runs recorded
+// before any normalization, B-093).
 func taskBodyHashes(plan *artifact.Document) map[string]string {
 	out := map[string]string{}
 	if plan == nil {
@@ -3150,22 +3175,29 @@ func taskBodyHashes(plan *artifact.Document) map[string]string {
 		for _, t := range m.Children {
 			out[t.ID] = taskBodyHash(t.Body)
 			out[t.ID+"\x00raw"] = rawTaskBodyHash(t.Body)
-			// A record written before this plan revision hashed the body as
-			// it stood THEN. The only edit normalization forgives is the
-			// Implements line, so the normalized form IS that older raw body
-			// when nothing else changed — covered by the normalized entry.
-			out[t.ID+"\x00rawnorm"] = rawTaskBodyHash(normalizeTaskBody(t.Body))
+			out[t.ID+"\x00legacy"] = rawTaskBodyHash(legacyNormalizeTaskBody(t.Body))
 		}
 	}
 	return out
 }
 
+// taskBodyHashMatches reports whether a run's recorded hash is one of the
+// spellings the task's current body has worn. An empty recorded hash is a
+// legacy record and matches; a task the plan no longer has matches too —
+// the boundary is for recycled ids, not for removed tasks.
+func taskBodyHashMatches(recorded, taskID string, hashes map[string]string) bool {
+	current, ok := hashes[taskID]
+	if !ok || recorded == "" {
+		return true
+	}
+	return recorded == current ||
+		recorded == hashes[taskID+"\x00raw"] ||
+		recorded == hashes[taskID+"\x00legacy"]
+}
+
 // runsForCurrentTaskBodies is the single history boundary used by all status
 // consumers. Empty hashes are legacy records and remain usable; new records
-// from a changed task body are historical for the recycled ID. A recorded
-// hash matches if it is the current body's normalized hash, its raw hash, or
-// the raw hash of its normalized text — the three spellings one unchanged
-// task has worn across the B-093 fix.
+// from a changed task body are historical for the recycled ID.
 func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*runlog.Run {
 	out := make([]*runlog.Run, 0, len(runs))
 	for _, r := range runs {
@@ -3176,10 +3208,7 @@ func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*r
 		if r.TaskBodyHash == "" && strings.HasPrefix(r.StartedAt, "2020-") {
 			continue
 		}
-		if current, ok := hashes[r.TaskID]; ok && r.TaskBodyHash != "" &&
-			r.TaskBodyHash != current &&
-			r.TaskBodyHash != hashes[r.TaskID+"\x00raw"] &&
-			r.TaskBodyHash != hashes[r.TaskID+"\x00rawnorm"] {
+		if !taskBodyHashMatches(r.TaskBodyHash, r.TaskID, hashes) {
 			continue
 		}
 		out = append(out, r)
