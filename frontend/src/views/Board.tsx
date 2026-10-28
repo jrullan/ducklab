@@ -1845,6 +1845,8 @@ function BugNext({
             <span className="text-xs text-ink-muted">move to</span>
             {(bug.next ?? []).map((to) => {
               const reopens = bug.status === "fixed" && to === "in_progress";
+              // Only an agent's verification offers this move (B-542).
+              const unverifies = (bug.status === "verified" || bug.status === "closed") && to === "fixed";
               return (
                 <button
                   key={to}
@@ -1854,11 +1856,16 @@ function BugNext({
                   onClick={() => act(() => client.moveBug(projectId, bug.id, to))}
                   className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
                 >
-                  {reopens ? "reopen" : to.replace("_", " ")}
+                  {reopens ? "reopen" : unverifies ? "back to fixed" : to.replace("_", " ")}
                 </button>
               );
             })}
           </div>
+          {(bug.status === "verified" || bug.status === "closed") && (bug.next ?? []).includes("fixed") && (
+            <p className="text-xs text-ink-muted" data-testid="bug-unverify-help">
+              An agent recorded this verification, not you. Move it back to fixed and verify it yourself.
+            </p>
+          )}
           {bug.status === "fixed" && (bug.next ?? []).includes("in_progress") && (
             <p className="text-xs text-ink-muted" data-testid="bug-reopen-help">
               Reopen when the fix did not answer the report. It clears the previous task binding and returns the bug to triaged so you can promote a new fix.
