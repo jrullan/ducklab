@@ -184,6 +184,11 @@ func TestEveryAcceptAttemptSettlesExactlyOnce(t *testing.T) {
 		switch e.Type {
 		case "accept_started":
 			started[e.Data["attempt"]]++
+			// B-543: a client that did not start the accept reads who
+			// decides from here (acceptAsync accepts as an operator).
+			if e.Data["actor"] != "mcp:test" {
+				t.Errorf("accept_started names actor %v, want the operator that accepted", e.Data["actor"])
+			}
 		case "accept_settled":
 			settled[e.Data["attempt"]]++
 		}

@@ -32,7 +32,9 @@ export type AcceptState =
    * announced by its gate_started, or by an in_progress answer from an
    * accept that outlived the request (B-529). Still pending: no commit is
    * shown until the engine confirms one (accept_settled). */
-  | { kind: "pending"; verifying?: boolean; attempt?: string }
+  /** by: who decides, when the accept was started elsewhere — an MCP
+   * operator, the CLI, another window (B-543). Absent for this client's own. */
+  | { kind: "pending"; verifying?: boolean; attempt?: string; by?: string }
   /** warning/info: the accept's publication consequences (a failed push,
    * a local-only commit), carried however the settlement arrived — the
    * HTTP answer, the live accept_settled, or last_accept on a run read. */
@@ -144,6 +146,13 @@ function discardTurn(
  */
 export function reconcileAccept(acceptState: Record<string, AcceptState>, run: Run): Record<string, AcceptState> {
   const st = acceptState[run.id];
+  // B-543: an accept this client did not start (an MCP operator's, the
+  // CLI's) is still an accept in flight. Read mid-accept — a reconnect, a
+  // view opened while it verifies — the run says so; the gate must not offer
+  // a decision that is already being taken.
+  if (run.accept_in_progress && st?.kind !== "pending") {
+    return { ...acceptState, [run.id]: externalAccept(run.accept_attempt, run.accept_actor) };
+  }
   if (st?.kind !== "pending" || !st.verifying || run.accept_in_progress) return acceptState;
   const last = run.last_accept;
   // Review of #181: only THIS attempt's settlement is this accept's outcome.
@@ -169,6 +178,16 @@ export function reconcileAccept(acceptState: Record<string, AcceptState>, run: R
     };
   }
   return acceptState;
+}
+
+/** The pending state of an accept started elsewhere (B-543): already past
+ * its request, so verifying, and settled by its own attempt's accept_settled
+ * like any other. */
+function externalAccept(attempt?: unknown, by?: unknown): AcceptState {
+  const st: AcceptState = { kind: "pending", verifying: true };
+  if (typeof attempt === "string" && attempt) st.attempt = attempt;
+  if (typeof by === "string" && by && by !== "human") st.by = by;
+  return st;
 }
 
 // Approval statuses that are final: a request in one of them never moves
@@ -403,7 +422,15 @@ export const useRuns = create<RunsState>((set) => ({
       // and how it ended — the only place the outcome of an accept answered
       // in_progress ever arrives. A commit is shown only once settled.
       let acceptState = state.acceptState;
-      if (acceptState[runId]?.kind === "pending") {
+      // B-543: the engine announces every accept on the run's stream, not
+      // just the ones this client started. An operator's accept left the gate
+      // offering Accept for minutes while the engine was already deciding.
+      // This client's own pending accept keeps its state: its HTTP answer
+      // names the attempt, and the join is the engine's (B-529).
+      if (e.type === "accept_started" && acceptState[runId]?.kind !== "pending" && typeof e.data?.attempt === "string") {
+        const settled = (state.events[runId] ?? []).some((x) => x.type === "accept_settled" && x.data?.attempt === e.data?.attempt);
+        if (!settled) acceptState = { ...acceptState, [runId]: externalAccept(e.data.attempt, e.data.actor) };
+      } else if (acceptState[runId]?.kind === "pending") {
         const pendingAttempt = (acceptState[runId] as { attempt?: string }).attempt;
         if (e.type === "gate_started" && e.data?.phase === "accept") {
           acceptState = { ...acceptState, [runId]: { ...acceptState[runId], kind: "pending", verifying: true } };

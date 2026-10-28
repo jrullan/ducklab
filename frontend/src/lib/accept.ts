@@ -15,6 +15,10 @@ export const ACCEPT_VERIFYING_LABEL = "Accepting… verifying from a clean check
 
 /** The button's words while an accept is pending. */
 export function acceptingLabel(state: AcceptState | undefined): string {
+  if (state?.kind === "pending" && state.by) {
+    // Someone else's accept (B-543): say who is deciding.
+    return `${state.by} is accepting… verifying from a clean checkout`;
+  }
   return state?.kind === "pending" && state.verifying ? ACCEPT_VERIFYING_LABEL : "Accepting…";
 }
 
