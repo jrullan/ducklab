@@ -307,7 +307,7 @@ func TestShutdownDuringAcceptReplayLeavesTheGateUntouched(t *testing.T) {
 // guard — which must write nothing — so no accept_settled ever came and the
 // caller waited forever. An accept is not answered "in progress" before it
 // holds the decision: a refusal in that window reaches its caller directly,
-// still writes nothing to the log, and run_get's last_accept carries it.
+// still writes nothing to the log, and leaves run_get's last_accept alone.
 func TestAcceptRefusedByTeardownIsNeverAnsweredInProgress(t *testing.T) {
 	s, root, runID, release := heldRun(t, "accept")
 	defer release()
@@ -337,8 +337,10 @@ func TestAcceptRefusedByTeardownIsNeverAnsweredInProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Run.AcceptInProgress || detail.Run.LastAccept["outcome"] != "refused" {
-		t.Fatalf("run_get after the refusal: in_progress=%v last_accept=%v; want the refusal observable", detail.Run.AcceptInProgress, detail.Run.LastAccept)
+	// Second review of #181: the refusal reached its caller directly and
+	// left no trace — run_get's last_accept agrees with the log (none).
+	if detail.Run.AcceptInProgress || detail.Run.LastAccept != nil {
+		t.Fatalf("run_get after the refusal: in_progress=%v last_accept=%v; want neither", detail.Run.AcceptInProgress, detail.Run.LastAccept)
 	}
 }
 

@@ -32,19 +32,19 @@ type Outcome = {
 const outcomes: Outcome[] = [
   {
     name: "accepted",
-    detail: { ...paused, status: "done", accepted: true, commit_sha: "abc1234", next: [], last_accept: { outcome: "accepted", commit_sha: "abc1234" } },
+    detail: { ...paused, status: "done", accepted: true, commit_sha: "abc1234", next: [], last_accept: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc1234" } },
     listed: { ...paused, status: "done", accepted: true, commit_sha: "abc1234", next: [] },
     expectState: { kind: "committed", sha: "abc1234" },
   },
   {
     name: "refused",
-    detail: { ...paused, last_accept: { outcome: "refused", error: "rebased commit failed its gate" } },
+    detail: { ...paused, last_accept: { attempt: "acc-1", outcome: "refused", error: "rebased commit failed its gate" } },
     listed: paused,
     expectState: { kind: "error", message: "rebased commit failed its gate" },
   },
   {
     name: "interrupted",
-    detail: { ...paused, last_accept: { outcome: "interrupted", error: "the run was aborted" } },
+    detail: { ...paused, last_accept: { attempt: "acc-1", outcome: "interrupted", error: "the run was aborted" } },
     listed: paused,
     expectState: { kind: "error", message: "the run was aborted", interrupted: true },
   },
@@ -63,7 +63,7 @@ const client = (detail: Run) =>
     tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "Waiting one", milestone: "M-01", status: "review", next: [] }])),
     projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
     // The accept outlives its request; the outcome is only on the run read.
-    accept: vi.fn(() => Promise.resolve({ commit_sha: "", in_progress: true, info: "accept in progress" })),
+    accept: vi.fn(() => Promise.resolve({ commit_sha: "", in_progress: true, attempt: "acc-1", info: "accept in progress" })),
     run: vi.fn(() => Promise.resolve({ run: detail, events: [] })),
   }) as unknown as EngineClient;
 
@@ -73,7 +73,7 @@ beforeEach(() => {
 
 const verifyingThenReconnect = async (c: EngineClient, listed: Run) => {
   fireEvent.click(await screen.findByTestId("now-accept"));
-  await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true }));
+  await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" }));
   expect(screen.getByTestId("now-accept").textContent).toBe("Accepting… verifying from a clean checkout");
   // The stream dropped accept_settled; the reconnect refreshes the list.
   act(() => useRuns.getState().setRuns([listed]));

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // B-529: an accept that rebased onto a moved default branch replayed its gate
@@ -94,6 +95,9 @@ func (s *Service) startAccept(rs *runState, work func(ctx context.Context, held 
 	if rs.accepting != nil {
 		return rs.accepting, true, nil
 	}
+	if rs.acceptsBlocked != nil {
+		return nil, false, fmt.Errorf("%w: accept not started because %v", ErrDecisionInterrupted, rs.acceptsBlocked)
+	}
 	if s.shuttingDown.Load() {
 		return nil, false, fmt.Errorf("%w: accept not started because the engine is shutting down; accept again once it is back", ErrDecisionInterrupted)
 	}
@@ -163,17 +167,18 @@ func (s *Service) beginAcceptAttempt(rs *runState) string {
 // told "in progress" for it, the refusal reached its caller directly, and
 // the door's promise is that it wrote nothing.
 func (s *Service) settleAcceptAttempt(rs *runState, attempt string, result *AcceptResult, err error) {
-	data := settlementData(result, err)
-	if attempt != "" {
-		data["attempt"] = attempt
-	}
-	rs.acceptMu.Lock()
-	rs.lastAccept = data
-	rs.acceptMu.Unlock()
+	// An accept that never held the decision has no attempt and leaves no
+	// trace — not even in memory: run_get must not disagree with the log
+	// (review of #181). Its caller got the refusal directly.
 	var finishing *RunFinishingError
 	if attempt == "" || errors.As(err, &finishing) {
 		return
 	}
+	data := settlementData(result, err)
+	data["attempt"] = attempt
+	rs.lastMu.Lock()
+	rs.lastAccept = data
+	rs.lastMu.Unlock()
 	// A log that refuses the write leaves the outcome in memory, and
 	// AcceptAttempt set: the next engine settles it from the record.
 	w, werr := s.ensureWriter(rs)
@@ -195,15 +200,20 @@ func (s *Service) settleAcceptAttempt(rs *runState, attempt string, result *Acce
 // auto-accept and auto-triage — with the same record as every other accept:
 // one attempt, one accept_settled. They run on the run's own worker, which
 // owns the log, so they write it directly.
-func (s *Service) unattendedAccept(ctx context.Context, rs *runState, entry *registry.ProjectEntry, actor string) error {
-	attempt := s.beginAcceptAttempt(rs)
-	err := s.acceptRun(ctx, rs, entry, "", actor)
-	var result *AcceptResult
-	if err == nil {
-		run := rs.snapshotRun()
-		result = &AcceptResult{CommitSHA: run.CommitSHA, Warning: run.Warning, Info: publicationInfo(run)}
+//
+// They run as the run's accept job (review of #181), marked as its worker as
+// the tdd chain's is: one accept per run, visible as accept_in_progress, and
+// joined or refused by any other accept, abort or door while it runs. Run
+// beside the job before, a second accept replayed the gate against a
+// worktree the first had already removed.
+func (s *Service) unattendedAccept(ctx context.Context, rs *runState, _ *registry.ProjectEntry, actor string) error {
+	if actor == "" {
+		actor = "human"
+		if rs.snapshotRun().Autonomy == "yolo" {
+			actor = "auto:yolo"
+		}
 	}
-	s.settleAcceptAttempt(rs, attempt, result, err)
+	_, err := s.RunAcceptAsWithOptions(context.WithoutCancel(asWorker(ctx, rs)), rs.run.ID, "", actor, AcceptOptions{})
 	return err
 }
 
@@ -234,9 +244,24 @@ func (s *Service) settleInterruptedAccept(rs *runState) bool {
 	}
 	var result *AcceptResult
 	var err error
-	if run.Accepted && run.CommitSHA != "" {
+	landed := ""
+	if !run.Accepted && rs.projectPath != "" {
+		landed, _ = vcs.New(rs.projectPath).TrailerCommitOnDefault("Ducklab-Run", run.ID)
+	}
+	switch {
+	case run.Accepted && run.CommitSHA != "":
 		result = &AcceptResult{CommitSHA: run.CommitSHA, Warning: run.Warning, Info: publicationInfo(run)}
-	} else {
+	case landed != "" && run.WorktreePath != "":
+		// An isolated run fast-forwards the default branch only after its
+		// clean-checkout reproduction passed; the engine died before the
+		// record said so. The commit on main IS the accept (review of #181).
+		s.landRecoveredAccept(rs, landed)
+		result = &AcceptResult{CommitSHA: landed, Info: "the accept landed before the engine stopped; settled on recovery"}
+	case landed != "":
+		// A shared-checkout accept commits BEFORE its reproduction: the
+		// commit exists, but nothing says it reproduced.
+		err = fmt.Errorf("%w: the engine stopped while this accept was in flight; its commit %s is on the branch but its clean-checkout reproduction never finished, so nothing was accepted — accept again to reproduce it, or reject", ErrDecisionInterrupted, short(landed))
+	default:
 		err = fmt.Errorf("%w: the engine stopped while this accept was in flight; nothing was decided — the run keeps its gate, and accept may be retried", ErrDecisionInterrupted)
 	}
 	// The live path closes a recorded decision with decision_outcome; so
@@ -252,6 +277,31 @@ func (s *Service) settleInterruptedAccept(rs *runState) bool {
 	}
 	s.settleAcceptAttempt(rs, run.AcceptAttempt, result, err)
 	return true
+}
+
+// landRecoveredAccept records an accept whose commit reached the default
+// branch before the engine died: the run is accepted with that commit and
+// its isolated worktree released, as the live path ends it. Publication and
+// the autopilot are not replayed — they belong to a live accept.
+func (s *Service) landRecoveredAccept(rs *runState, sha string) {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	resolution := "accepted; its commit landed on the default branch before the engine stopped (settled on recovery)"
+	rs.wmu.Lock()
+	rs.run.Accepted, rs.run.CommitSHA = true, sha
+	setRunStatus(rs.run, "done", time.Now())
+	rs.run.Resolution = resolution
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
+	verdict, hasWorktree := rs.run.Verdict, rs.run.WorktreePath != ""
+	rs.wmu.Unlock()
+	_ = w.AppendEvent("run_end", map[string]interface{}{"verdict": verdict, "resolution": resolution, "commit_sha": sha})
+	_ = w.WriteState()
+	if hasWorktree {
+		s.cleanupRunWorktree(rs, rs.projectPath)
+	}
 }
 
 // attemptRecord reads what the log holds for one accept attempt: whether an
@@ -285,8 +335,8 @@ func attemptRecord(events []*runlog.Event, attempt string) (settled, decisionOpe
 
 // lastAcceptSettlement is the newest settlement this engine produced, or nil.
 func (rs *runState) lastAcceptSettlement() map[string]interface{} {
-	rs.acceptMu.Lock()
-	defer rs.acceptMu.Unlock()
+	rs.lastMu.Lock()
+	defer rs.lastMu.Unlock()
 	if rs.lastAccept == nil {
 		return nil
 	}
@@ -376,13 +426,69 @@ func (s *Service) interruptAccepts(ctx context.Context) {
 // it, so with accepting nil the lock's holder, if any, is a short door, and
 // waiting for it under acceptMu is brief.
 func lockDecisionUnlessAccepting(rs *runState, action string) (unlock func(), err error) {
-	rs.acceptMu.Lock()
-	defer rs.acceptMu.Unlock()
-	if rs.accepting != nil {
-		return nil, acceptInFlightError(rs, action)
+	for {
+		if rs.acceptInFlight() != nil {
+			return nil, acceptInFlightError(rs, action)
+		}
+		if rs.decisionMu.TryLock() {
+			// An accept installed before the lock was taken is waiting for
+			// it: refuse rather than decide over it. One installed after
+			// waits behind this door and finds the run decided.
+			if rs.acceptInFlight() != nil {
+				rs.decisionMu.Unlock()
+				return nil, acceptInFlightError(rs, action)
+			}
+			return rs.decisionMu.Unlock, nil
+		}
+		decisionWaiting(rs)
+		time.Sleep(decisionPoll)
 	}
-	rs.decisionMu.Lock()
-	return rs.decisionMu.Unlock, nil
+}
+
+// decisionWaiting observes a door waiting for the decision lock — holding
+// nothing. A no-op in the engine; tests use it to know a door is queued.
+var decisionWaiting = func(*runState) {}
+
+// decisionPoll is how often a waiting door or accept retries the decision
+// lock. Waiting by polling — holding nothing — is what keeps the lock order:
+// no goroutine ever blocks on decisionMu while it holds acceptMu, and a
+// waiting accept still notices its cancellation.
+const decisionPoll = 5 * time.Millisecond
+
+// lockDecisionForAccept takes the decision lock for an accept job, giving up
+// when the job is cancelled: an abort or a relaunch holding the decision
+// while it stops the run's worker cancels an accept that worker started,
+// which would otherwise wait for the decision forever (review of #181).
+func lockDecisionForAccept(ctx context.Context, rs *runState) error {
+	for {
+		if rs.decisionMu.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return interruptedError(ctx, "the accept, waiting for the run's decision,")
+		case <-time.After(decisionPoll):
+		}
+	}
+}
+
+// blockAccepts refuses new accepts with cause and cancels any waiting one,
+// for a door that holds the decision while it stops the run's worker. The
+// returned func lifts the block.
+func (s *Service) blockAccepts(rs *runState, cause error) (unblock func()) {
+	rs.acceptMu.Lock()
+	rs.acceptsBlocked = cause
+	job := rs.accepting
+	rs.acceptMu.Unlock()
+	if job != nil {
+		job.cancel(cause)
+		<-job.done
+	}
+	return func() {
+		rs.acceptMu.Lock()
+		rs.acceptsBlocked = nil
+		rs.acceptMu.Unlock()
+	}
 }
 
 // acceptInFlightError refuses another decision while an accept is in flight.

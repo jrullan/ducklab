@@ -25,17 +25,17 @@ const answering = (res: AcceptResult) =>
 // never a failure for an accept that is still running.
 describe("an accept that outlives its request", () => {
   it("waits through in_progress to the commit the stream confirms", async () => {
-    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true, info: "accept in progress" }), "r-1");
+    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true, attempt: "acc-1", info: "accept in progress" }), "r-1");
     await Promise.resolve();
     await Promise.resolve();
     const pending = useRuns.getState().acceptState["r-1"];
-    expect(pending).toEqual({ kind: "pending", verifying: true });
+    expect(pending).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" });
     expect(acceptingLabel(pending)).toBe(ACCEPT_VERIFYING_LABEL);
     expect(useRuns.getState().runs["r-1"]?.accepted).toBeUndefined();
 
     useRuns.getState().applyEvent({
       type: "accept_settled", run_id: "r-1", seq: 9,
-      data: { outcome: "accepted", commit_sha: "abc1234", info: "no remote configured" },
+      data: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc1234", info: "no remote configured" },
     });
     await expect(settled).resolves.toEqual({ commit_sha: "abc1234", warning: undefined, info: "no remote configured" });
     expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "committed", sha: "abc1234", info: "no remote configured" });
@@ -43,12 +43,12 @@ describe("an accept that outlives its request", () => {
   });
 
   it("reports an interrupted accept as interrupted, not failed", async () => {
-    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true }), "r-1");
+    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true, attempt: "acc-1" }), "r-1");
     await Promise.resolve();
     await Promise.resolve();
     useRuns.getState().applyEvent({
       type: "accept_settled", run_id: "r-1", seq: 9,
-      data: { outcome: "interrupted", error: "decision interrupted: the run was aborted" },
+      data: { attempt: "acc-1", outcome: "interrupted", error: "decision interrupted: the run was aborted" },
     });
     const err = await settled.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AcceptSettledError);
@@ -57,12 +57,12 @@ describe("an accept that outlives its request", () => {
   });
 
   it("shows a refusal with the engine's reason", async () => {
-    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true }), "r-1");
+    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true, attempt: "acc-1" }), "r-1");
     await Promise.resolve();
     await Promise.resolve();
     useRuns.getState().applyEvent({
       type: "accept_settled", run_id: "r-1", seq: 9,
-      data: { outcome: "refused", error: "rebased commit failed its gate" },
+      data: { attempt: "acc-1", outcome: "refused", error: "rebased commit failed its gate" },
     });
     await expect(settled).rejects.toThrow("rebased commit failed its gate");
     expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "error", message: "rebased commit failed its gate" });
@@ -80,10 +80,14 @@ describe("an accept that outlives its request", () => {
     expect(acceptingLabel(useRuns.getState().acceptState["r-1"])).toBe(ACCEPT_VERIFYING_LABEL);
   });
 
-  it("never reopens an accept the stream already settled", () => {
+  // The stream can deliver the settlement before the answer that names the
+  // attempt. It is held back until then (it could be an older attempt's),
+  // and adopted the moment the answer says it is this one's.
+  it("adopts its own settlement that arrived before the in_progress answer", () => {
     useRuns.getState().beginAccept("r-1");
-    useRuns.getState().applyEvent({ type: "accept_settled", run_id: "r-1", seq: 4, data: { outcome: "accepted", commit_sha: "abc" } });
-    useRuns.getState().acceptInProgress("r-1");
+    useRuns.getState().applyEvent({ type: "accept_settled", run_id: "r-1", seq: 4, data: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc" } });
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending" });
+    useRuns.getState().acceptInProgress("r-1", "acc-1");
     expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "committed", sha: "abc" });
   });
 });
@@ -97,7 +101,7 @@ describe("an accept that outlives its request", () => {
 // Every path must resolve the same AcceptResult.
 describe("every settlement path yields the same AcceptResult", () => {
   const settlement = {
-    outcome: "accepted", commit_sha: "abc1234",
+    attempt: "acc-1", outcome: "accepted", commit_sha: "abc1234",
     warning: "committed as abc1234; push failed: permission denied", info: "committed locally",
   };
   const want = { commit_sha: "abc1234", warning: settlement.warning, info: settlement.info };
@@ -110,11 +114,11 @@ describe("every settlement path yields the same AcceptResult", () => {
   for (const [name, settle] of paths) {
     it(name, async () => {
       const client = {
-        accept: async () => ({ commit_sha: "", in_progress: true }),
+        accept: async () => ({ commit_sha: "", in_progress: true, attempt: "acc-1" }),
         run: vi.fn(() => Promise.resolve({ run: { ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: settlement }, events: [] })),
       };
       const settled = acceptAndSettle(client as unknown as Pick<EngineClient, "accept" | "run">, "r-1");
-      await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true }));
+      await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" }));
       settle(client);
       await expect(settled).resolves.toEqual(want);
     });
@@ -122,11 +126,11 @@ describe("every settlement path yields the same AcceptResult", () => {
 
   it("a refusal recovered from a run read keeps its reason and flag", async () => {
     const client = {
-      accept: async () => ({ commit_sha: "", in_progress: true }),
-      run: vi.fn(() => Promise.resolve({ run: { ...paused, last_accept: { outcome: "interrupted", error: "the run was aborted" } }, events: [] })),
+      accept: async () => ({ commit_sha: "", in_progress: true, attempt: "acc-1" }),
+      run: vi.fn(() => Promise.resolve({ run: { ...paused, last_accept: { attempt: "acc-1", outcome: "interrupted", error: "the run was aborted" } }, events: [] })),
     };
     const settled = acceptAndSettle(client as unknown as Pick<EngineClient, "accept" | "run">, "r-1");
-    await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true }));
+    await waitFor(() => expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" }));
     useRuns.getState().setRuns([paused]);
     const err = await settled.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AcceptSettledError);
@@ -137,17 +141,17 @@ describe("every settlement path yields the same AcceptResult", () => {
 
 describe("an accept whose settlement was missed by the stream", () => {
   const verifying = async () => {
-    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true }), "r-1");
+    const settled = acceptAndSettle(answering({ commit_sha: "", in_progress: true, attempt: "acc-1" }), "r-1");
     await Promise.resolve();
     await Promise.resolve();
-    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true });
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" });
     return { settled };
   };
 
   it("settles accepted from the resynced run", async () => {
     const { settled } = await verifying();
     useRuns.getState().resyncRun(
-      { ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: { outcome: "accepted", commit_sha: "abc1234" } },
+      { ...paused, status: "done", accepted: true, commit_sha: "abc1234", last_accept: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc1234" } },
       [],
     );
     await expect(settled).resolves.toMatchObject({ commit_sha: "abc1234" });
@@ -156,14 +160,14 @@ describe("an accept whose settlement was missed by the stream", () => {
 
   it("settles refused from the resynced run", async () => {
     const { settled } = await verifying();
-    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "refused", error: "rebased commit failed its gate" } }, []);
+    useRuns.getState().resyncRun({ ...paused, last_accept: { attempt: "acc-1", outcome: "refused", error: "rebased commit failed its gate" } }, []);
     await expect(settled).rejects.toThrow("rebased commit failed its gate");
     expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "error", message: "rebased commit failed its gate" });
   });
 
   it("settles interrupted from the resynced run", async () => {
     const { settled } = await verifying();
-    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "interrupted", error: "the run was aborted" } }, []);
+    useRuns.getState().resyncRun({ ...paused, last_accept: { attempt: "acc-1", outcome: "interrupted", error: "the run was aborted" } }, []);
     const err = await settled.catch((e: unknown) => e);
     expect((err as AcceptSettledError).interrupted).toBe(true);
     expect(useRuns.getState().acceptState["r-1"]).toMatchObject({ kind: "error", interrupted: true });
@@ -171,13 +175,13 @@ describe("an accept whose settlement was missed by the stream", () => {
 
   it("keeps waiting while the engine says the accept is still running", async () => {
     void (await verifying()).settled.catch(() => {});
-    useRuns.getState().resyncRun({ ...paused, accept_in_progress: true, last_accept: { outcome: "refused", error: "an earlier attempt" } }, []);
-    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true });
+    useRuns.getState().resyncRun({ ...paused, accept_in_progress: true, last_accept: { attempt: "acc-0", outcome: "refused", error: "an earlier attempt" } }, []);
+    expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" });
   });
 
   it("does not settle an accept the engine has not confirmed from an older outcome", () => {
     useRuns.getState().beginAccept("r-1");
-    useRuns.getState().resyncRun({ ...paused, last_accept: { outcome: "refused", error: "an earlier attempt" } }, []);
+    useRuns.getState().resyncRun({ ...paused, last_accept: { attempt: "acc-1", outcome: "refused", error: "an earlier attempt" } }, []);
     expect(useRuns.getState().acceptState["r-1"]).toEqual({ kind: "pending" });
   });
 });
@@ -187,8 +191,8 @@ describe("the lane after an interrupted accept", () => {
     const turns = buildTurns([
       { type: "decision", run_id: "r-1", seq: 1, data: { action: "accept", actor: "mcp:opencode", reason: "suite passes" } },
       { type: "gate_started", run_id: "r-1", seq: 2, data: { phase: "accept", detail: "reproducing rebased abc from a clean checkout" } },
-      { type: "decision_outcome", run_id: "r-1", seq: 3, data: { action: "accept", outcome: "interrupted", error: "the run was aborted" } },
-      { type: "accept_settled", run_id: "r-1", seq: 4, data: { outcome: "interrupted", error: "the run was aborted" } },
+      { type: "decision_outcome", run_id: "r-1", seq: 3, data: { action: "accept", attempt: "acc-1", outcome: "interrupted", error: "the run was aborted" } },
+      { type: "accept_settled", run_id: "r-1", seq: 4, data: { attempt: "acc-1", outcome: "interrupted", error: "the run was aborted" } },
     ]);
     const gate = turns.find((t) => t.role === "gate");
     expect(gate).toMatchObject({ done: true, gate: "interrupted" });

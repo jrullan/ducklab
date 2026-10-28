@@ -958,7 +958,7 @@ func runCmd(verb string, args []string, repo string) int {
 		// B-529: a long gate replay answers before it settles. Printing
 		// "accepted: commit " with no commit would claim what has not happened.
 		if inProgress, _ := result["in_progress"].(bool); inProgress {
-			fmt.Printf("accepting: verifying from a clean checkout — the engine continues on its own; `ducklab run show %s` shows the outcome\n", args[0])
+			fmt.Printf("accepting (attempt %s): verifying from a clean checkout — the engine continues on its own; `ducklab run show %s` shows the outcome\n", str(result["attempt"]), args[0])
 			return 0
 		}
 		fmt.Printf("accepted: commit %s\n", result["commit_sha"])
@@ -1168,9 +1168,12 @@ func printRunSummary(w io.Writer, run map[string]interface{}) {
 	}
 	// B-529: an accept answered "in progress" settles here.
 	if inProgress, _ := run["accept_in_progress"].(bool); inProgress {
-		fmt.Fprintln(w, "  accept: in progress — verifying from a clean checkout")
+		fmt.Fprintf(w, "  accept: in progress (attempt %s) — verifying from a clean checkout\n", str(run["accept_attempt"]))
 	} else if last, ok := run["last_accept"].(map[string]interface{}); ok {
 		line := str(last["outcome"])
+		if attempt := str(last["attempt"]); attempt != "" {
+			line = "attempt " + attempt + ": " + line
+		}
 		if sha := str(last["commit_sha"]); sha != "" {
 			line += " " + sha
 		}

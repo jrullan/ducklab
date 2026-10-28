@@ -150,7 +150,7 @@ export function reconcileAccept(acceptState: Record<string, AcceptState>, run: R
   // An older attempt's (the engine died mid-accept, or a backlog replays an
   // earlier one) is not, and adopting it reported attempt one's refusal as
   // attempt two's.
-  const mine = last && (!st.attempt || last.attempt === st.attempt) ? settlementState(last) : null;
+  const mine = last && st.attempt && last.attempt === st.attempt ? settlementState(last) : null;
   if (mine) return { ...acceptState, [run.id]: mine };
   // The commit is a fact whoever's attempt made it.
   if (run.accepted && run.commit_sha) {
@@ -407,9 +407,11 @@ export const useRuns = create<RunsState>((set) => ({
         const pendingAttempt = (acceptState[runId] as { attempt?: string }).attempt;
         if (e.type === "gate_started" && e.data?.phase === "accept") {
           acceptState = { ...acceptState, [runId]: { ...acceptState[runId], kind: "pending", verifying: true } };
-        } else if (e.type === "accept_settled" && !(pendingAttempt && e.data?.attempt && e.data.attempt !== pendingAttempt)) {
-          // Another attempt's settlement (a replayed backlog) is not this
-          // accept's outcome (review of #181).
+        } else if (e.type === "accept_settled" && pendingAttempt && e.data?.attempt === pendingAttempt) {
+          // Only this accept's own attempt settles it (review of #181). Until
+          // the engine has named the attempt (its in_progress answer), no
+          // settlement is adopted: one arriving then may be an older
+          // attempt's, still in transit — this accept's HTTP answer decides.
           const settledState = settlementState(e.data);
           if (settledState) {
             acceptState = { ...acceptState, [runId]: settledState };
@@ -492,7 +494,14 @@ export const useRuns = create<RunsState>((set) => ({
       // The outcome may already have arrived on the stream before the HTTP
       // answer did; a settled accept is never reopened.
       if (state.acceptState[runId]?.kind !== "pending") return state;
-      const st: AcceptState = attempt ? { kind: "pending", verifying: true, attempt } : { kind: "pending", verifying: true };
+      // The stream may have delivered this attempt's settlement before the
+      // answer named the attempt; it was held back then (no attempt known)
+      // and is adopted now.
+      const already = attempt
+        ? [...(state.events[runId] ?? [])].reverse().find((e) => e.type === "accept_settled" && e.data?.attempt === attempt)
+        : undefined;
+      const settledNow = already ? settlementState(already.data) : null;
+      const st: AcceptState = settledNow ?? (attempt ? { kind: "pending", verifying: true, attempt } : { kind: "pending", verifying: true });
       return { ...state, acceptState: { ...state.acceptState, [runId]: st } };
     }),
 

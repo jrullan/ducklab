@@ -64,19 +64,19 @@ describe("RunView publication consequences", () => {
     let settledOnEngine = false;
     client.accept = vi.fn(() => {
       settledOnEngine = true;
-      return Promise.resolve({ commit_sha: "", in_progress: true, info: "accept in progress" });
+      return Promise.resolve({ commit_sha: "", in_progress: true, attempt: "acc-1", info: "accept in progress" });
     });
     client.run = vi.fn(() => Promise.resolve({
       run: settledOnEngine
         ? { ...paused, status: "done", accepted: true, commit_sha: "abc123456", next: [],
-          last_accept: { outcome: "accepted", commit_sha: "abc123456", warning: "committed as abc123456; push failed: permission denied" } }
+          last_accept: { attempt: "acc-1", outcome: "accepted", commit_sha: "abc123456", warning: "committed as abc123456; push failed: permission denied" } }
         : paused,
       events: [],
     }));
 
     render(<RunView runId="run-1" client={client as never} />);
     screen.getByTestId("cycle-accept").click();
-    await waitFor(() => expect(useRuns.getState().acceptState["run-1"]).toEqual({ kind: "pending", verifying: true }));
+    await waitFor(() => expect(useRuns.getState().acceptState["run-1"]).toEqual({ kind: "pending", verifying: true, attempt: "acc-1" }));
     // The reconnect's refresh: a list payload, no last_accept.
     useRuns.getState().setRuns([paused as never]);
     expect(await screen.findByTestId("publication-failure")).toHaveTextContent("committed locally as abc123456; push failed: permission denied");

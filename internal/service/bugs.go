@@ -556,6 +556,10 @@ func (s *Service) claimTriageRelaunch(ctx context.Context, originalID, replaceme
 	resolution := "relaunched as " + replacementID
 	live := before.Status == "running" || before.Status == "paused" || before.Status == "queued"
 	if live {
+		// As abort does: the worker this waits for must not be stuck in an
+		// accept waiting on the decision this claim holds (review of #181).
+		unblock := s.blockAccepts(prior, errors.New("the run is being relaunched"))
+		defer unblock()
 		// Stop the worker before writing over its record: a triage writes its
 		// gate when its loop ends, and would overwrite the claim.
 		prior.wmu.Lock()

@@ -104,6 +104,20 @@ type runState struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	wmu         sync.Mutex
+	// Lock order (review of #181 — a reproduced deadlock came from breaking
+	// it): decisionMu → acceptMu → wmu, and lastMu is a leaf.
+	//
+	//   - decisionMu may be held across slow work (an accept's gate replay,
+	//     settleWorker, waiting on the worker's done). Nothing ever BLOCKS on
+	//     it while holding another of these locks: doors take it with
+	//     lockDecisionUnlessAccepting and an accept with lockDecisionForAccept,
+	//     both of which poll TryLock holding nothing else.
+	//   - acceptMu guards accepting and acceptsBlocked only. It is held for a
+	//     few field reads and writes — never across I/O, a lock wait, or a
+	//     channel wait.
+	//   - wmu guards the run record and its writer; held for a state write.
+	//   - lastMu guards lastAccept; run_get reads it and nothing else.
+	//
 	// decisionMu makes accept, reject, and manual land a compare-and-set on one
 	// run. The writer mutex cannot serve this purpose: acceptance calls helpers
 	// that reopen and write the run log while the decision is active.
@@ -111,11 +125,16 @@ type runState struct {
 	// accepting is the accept in flight (accept_job.go), guarded by acceptMu.
 	// It is separate from decisionMu because a second accept, an abort and a
 	// shutdown must all see it WITHOUT waiting out a gate replay (B-529).
-	acceptMu  sync.Mutex
-	accepting *acceptJob
+	// acceptsBlocked, when set, refuses new accepts: an abort or a relaunch
+	// holds the decision while it stops the worker, and an accept the worker
+	// started then would wait on that same decision forever.
+	acceptMu       sync.Mutex
+	accepting      *acceptJob
+	acceptsBlocked error
 	// lastAccept is the newest accept's settlement in this engine, kept in
 	// memory as well as on the stream: run_get must show an outcome even
 	// when the run log refused its accept_settled write (review of #181).
+	lastMu     sync.Mutex
 	lastAccept map[string]interface{}
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
@@ -4586,6 +4605,12 @@ func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return err
 	}
+	// Holding the decision, abort stops the worker below. An accept the
+	// worker starts now (yolo, the tdd chain) would wait on this decision
+	// while abort waits on the worker: refused until abort is done, and any
+	// one already waiting is cancelled (review of #181).
+	unblock := s.blockAccepts(rs, errCauseAborted)
+	defer unblock()
 	current := rs.snapshotRun()
 	// The full decision check (review of #176, 4383362596): only accepted
 	// and relaunched were refused, so reject-then-abort both succeeded and
@@ -5005,7 +5030,9 @@ func (s *Service) runAcceptWithOptions(ctx context.Context, id string, msg strin
 }
 
 func (s *Service) decideAccept(ctx context.Context, rs *runState, id string, msg string, actor string, options AcceptOptions, held func()) (result *AcceptResult, err error) {
-	rs.decisionMu.Lock()
+	if err := lockDecisionForAccept(ctx, rs); err != nil {
+		return nil, err
+	}
 	defer rs.decisionMu.Unlock()
 	if err := s.settleWorker(ctx, rs); err != nil {
 		return nil, err
