@@ -81,6 +81,9 @@ type Service struct {
 	// afterRunDiff is a lifecycle observation seam used by tests that must
 	// inspect an isolated checkout before its normal cleanup.
 	afterRunDiff func(*runState)
+	// preRepro holds accept reproductions started while a run waits at its
+	// gate (B-545).
+	preRepro preReproductions
 }
 
 type projectState struct {
@@ -2653,6 +2656,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				TS:        time.Now(),
 				Data:      gateData,
 			})
+			// After the notice, so building the candidate does not delay it;
+			// before return, so an accept cannot slip in ahead of it.
+			if verdict == "PASSED" {
+				s.startPreReproduction(rs, entry)
+			}
 			return
 		}
 	}
@@ -2691,6 +2699,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				TS:   time.Now(),
 				Data: gateData,
 			})
+			s.startPreReproduction(rs, entry)
 			return
 		}
 		// An auto-accept that fails is a decision returned to the person, not
@@ -3742,7 +3751,13 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			return fmt.Errorf("read rebased worktree HEAD: %w", err)
 		}
 		rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
-		reproduction, verifyErr := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		// A reproduction of this exact tree may already have run while the
+		// gate waited (B-545); otherwise reproduce now, as always.
+		reproduction, reused := s.preReproduced(ctx, rs.run.ID, defaultGit, entry.Path, rebasedSHA)
+		var verifyErr error
+		if !reused {
+			reproduction, verifyErr = verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		}
 		if reproduction != nil {
 			rs.run.GateReproduced = reproduction
 			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
@@ -4192,6 +4207,9 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 // recorded as a "decision" event, never read by the run. An MCP operator's
 // required reason used to reach no record at all on resume (B-524).
 func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor string) (_ *runlog.Run, err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	note = strings.TrimSpace(note)
@@ -4603,6 +4621,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 // as a "decision" event; an MCP operator's required reason used to be
 // dropped here without a word (B-524).
 func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
@@ -5385,6 +5406,7 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 // the revision ran. The run's state is written before anything else depends
 // on it, and restored in memory when that write fails.
 func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) error {
+	s.dropPreReproduction(id) // leaving the gate (B-545)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5418,6 +5440,7 @@ func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) 
 // completed run. A landing is accepted work, so it replaces an earlier reject
 // verdict as well as recording the auditable landing resolution.
 func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) error {
+	s.dropPreReproduction(id) // leaving the gate (B-545)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5755,6 +5778,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 // (review of #177). The reason is recorded as a "decision" event before the
 // tree is restored; a log that refuses it refuses the reject.
 func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
