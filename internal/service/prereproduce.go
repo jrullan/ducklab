@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"time"
@@ -39,10 +40,11 @@ import (
 const preReproductionMaxAge = 30 * time.Minute
 
 type preReproduction struct {
-	tree   string
-	cfgKey string
-	done   chan struct{}
-	cancel context.CancelFunc
+	project string
+	tree    string
+	cfgKey  string
+	done    chan struct{}
+	cancel  context.CancelFunc
 	// Set before done closes.
 	repro *runlog.GateReproduction
 	err   error
@@ -76,6 +78,61 @@ func (p *preReproductions) take(runID string) *preReproduction {
 	return pre
 }
 
+// busy reports whether a pre-reproduction of the project is still running.
+func (p *preReproductions) busy(projectID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, pre := range p.runs {
+		if pre.project != projectID {
+			continue
+		}
+		select {
+		case <-pre.done:
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// interruptPreReproductions cancels every pre-reproduction and waits for
+// them to unwind, so engine shutdown leaves no gate process, temporary
+// checkout or registered worktree behind (review of B-545: they ran on a
+// context nothing cancelled).
+func (s *Service) interruptPreReproductions(ctx context.Context) {
+	s.preRepro.mu.Lock()
+	all := s.preRepro.runs
+	s.preRepro.runs = nil
+	s.preRepro.mu.Unlock()
+	for _, pre := range all {
+		pre.cancel()
+	}
+	for _, pre := range all {
+		select {
+		case <-pre.done:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// otherRunActive reports whether another run of the project is running or
+// queued: its own gate could fight a background clean-checkout gate for the
+// same ports and files (review of B-545).
+func (s *Service) otherRunActive(projectID, runID string) bool {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	for id, rs := range s.runs {
+		if id == runID || rs.run == nil || rs.run.ProjectID != projectID {
+			continue
+		}
+		if st := rs.snapshotRun().Status; st == "running" || st == "queued" {
+			return true
+		}
+	}
+	return false
+}
+
 // dropPreReproduction cancels a run's pre-reproduction: the run is leaving
 // its gate some way other than accept.
 func (s *Service) dropPreReproduction(runID string) {
@@ -97,10 +154,15 @@ func gateConfigKey(projectRoot string) string {
 // startPreReproduction starts the accept's reproduction for a build whose
 // gate passed and that just paused for a decision in an isolated worktree.
 // Best-effort: when anything is off, it does nothing and accept reproduces
-// as before.
+// as before. At most one runs per project, and none while another run of
+// the project is live: a background gate must not turn someone else's gate
+// red.
 func (s *Service) startPreReproduction(rs *runState, entry *registry.ProjectEntry) {
 	run := rs.snapshotRun()
-	if run.Stage != "build" || run.WorktreePath == "" {
+	if run.Stage != "build" || run.WorktreePath == "" || s.shuttingDown.Load() {
+		return
+	}
+	if s.preRepro.busy(run.ProjectID) || s.otherRunActive(run.ProjectID, run.ID) {
 		return
 	}
 	work := vcs.New(run.WorktreePath)
@@ -124,14 +186,24 @@ func (s *Service) startPreReproduction(rs *runState, entry *registry.ProjectEntr
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	pre := &preReproduction{tree: tree, cfgKey: cfgKey, done: make(chan struct{}), cancel: cancel}
+	pre := &preReproduction{project: run.ProjectID, tree: tree, cfgKey: cfgKey, done: make(chan struct{}), cancel: cancel}
 	s.preRepro.put(run.ID, pre)
 	go func() {
 		defer close(pre.done)
 		pre.repro, pre.err = verifyAcceptedCommit(ctx, defaultGit, entry.Path, sha, run.Stage,
 			verify.Identity{RunID: run.ID, ProjectID: run.ProjectID})
 		pre.at = time.Now()
+		// The config the reproduction read is the one at its start; if it
+		// changed while it ran, the result proves neither (review of B-545).
+		if pre.err == nil && gateConfigKey(entry.Path) != cfgKey {
+			pre.err = errors.New("the gate configuration changed while the reproduction ran")
+		}
 		if ctx.Err() != nil {
+			return
+		}
+		// Only a run still waiting at its gate gets the note: one already
+		// decided has closed its log (review of B-545).
+		if st := rs.snapshotRun(); st.Status != "paused" || st.PendingKind != "gate" {
 			return
 		}
 		if w, werr := s.ensureWriter(rs); werr == nil {

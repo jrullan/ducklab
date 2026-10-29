@@ -183,3 +183,83 @@ func TestNoPreReproductionWhenMainMoved(t *testing.T) {
 		t.Fatal("a pre-reproduction started although accept will rebase")
 	}
 }
+
+// The wiring, end to end through the real accept (review of B-545: the unit
+// tests above would pass with the accept never consulting the result). A
+// worktree build paused at its gate is pre-reproduced; RunAccept lands it
+// with that reproduction and does not run the gate again.
+func TestRunAcceptLandsWithThePreReproduction(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	counter := filepath.Join(t.TempDir(), "reproductions")
+	appendVerifyPreparation(t, dir, `mode = "custom"
+custom = "echo ran >> `+counter+`; test -f feature.txt"`)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-pre-wired")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "feature.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	s.startPreReproduction(rs, entry)
+	s.preRepro.mu.Lock()
+	pre := s.preRepro.runs[run.ID]
+	s.preRepro.mu.Unlock()
+	if pre == nil {
+		t.Fatal("no pre-reproduction started for a paused worktree build")
+	}
+	<-pre.done
+	ran := func() int { b, _ := os.ReadFile(counter); return strings.Count(string(b), "ran") }
+	if ran() != 1 {
+		t.Fatalf("pre-reproduction ran the gate %d times", ran())
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran() != 1 {
+		t.Errorf("accept reproduced again (%d gate runs)", ran())
+	}
+	if got := mustHead(t, git); got != result.CommitSHA {
+		t.Fatalf("default HEAD = %s, want the accepted %s", got, result.CommitSHA)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.GateReproduced == nil || !strings.Contains(detail.Run.GateReproduced.Output, "[reproduced from a clean checkout of this exact tree") {
+		t.Errorf("the recorded reproduction does not say it was run while the gate waited: %+v", detail.Run.GateReproduced)
+	}
+}
+
+// Engine shutdown cancels and waits for a pre-reproduction: no gate process
+// or temporary checkout outlives the engine (review of B-545).
+func TestShutdownInterruptsAPreReproduction(t *testing.T) {
+	f := newPreFixture(t, "sleep 30")
+	entry, _ := f.s.registry.Get(f.id)
+	f.s.startPreReproduction(f.rs, entry)
+	f.s.preRepro.mu.Lock()
+	pre := f.s.preRepro.runs[f.rs.run.ID]
+	f.s.preRepro.mu.Unlock()
+	if pre == nil {
+		t.Fatal("no pre-reproduction started")
+	}
+	start := time.Now()
+	if err := f.s.PauseAllRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pre.done:
+	default:
+		t.Fatal("shutdown returned with the pre-reproduction still running")
+	}
+	if time.Since(start) > 20*time.Second {
+		t.Errorf("shutdown waited out the gate instead of cancelling it (%s)", time.Since(start))
+	}
+}

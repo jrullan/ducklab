@@ -2641,9 +2641,6 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			// Acceptance later commits and proves this isolated checkout.
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
 			rs.writer.WriteState()
-			if verdict == "PASSED" {
-				s.startPreReproduction(rs, entry)
-			}
 			s.bus.Publish(bus.Event{
 				Type:      "human_needed",
 				RunID:     rs.run.ID,
@@ -2651,6 +2648,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				TS:        time.Now(),
 				Data:      gateData,
 			})
+			// After the notice, so building the candidate does not delay it;
+			// before return, so an accept cannot slip in ahead of it.
+			if verdict == "PASSED" {
+				s.startPreReproduction(rs, entry)
+			}
 			return
 		}
 	}
@@ -2684,12 +2686,12 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
-			s.startPreReproduction(rs, entry)
 			s.bus.Publish(bus.Event{
 				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
 				TS:   time.Now(),
 				Data: gateData,
 			})
+			s.startPreReproduction(rs, entry)
 			return
 		}
 		// An auto-accept that fails is a decision returned to the person, not
@@ -5396,6 +5398,7 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 // the revision ran. The run's state is written before anything else depends
 // on it, and restored in memory when that write fails.
 func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) error {
+	s.dropPreReproduction(id) // leaving the gate (B-545)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -5429,6 +5432,7 @@ func (s *Service) resolveSupersededRun(id, resolution, continuingIntent string) 
 // completed run. A landing is accepted work, so it replaces an earlier reject
 // verdict as well as recording the auditable landing resolution.
 func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) error {
+	s.dropPreReproduction(id) // leaving the gate (B-545)
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
