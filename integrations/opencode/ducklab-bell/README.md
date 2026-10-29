@@ -73,7 +73,11 @@ when `server.ts` changes; no restart is needed.
   since the last wake are announced, so a wake lost to a reload, a restart or a
   hold is not lost for good.
 - **One owner per session.** A lock file in the Ducklab state directory keeps
-  two OpenCode processes from waking the same session twice.
+  two OpenCode processes from waking the same session twice. Every instance,
+  owner or not, carries the policy and the refusals.
+- **Catch-up starts at install.** The first connect for a session records the
+  mark instead of announcing every gate the project ever left open; a failed
+  wake does not move the mark and is retried.
 
 Log: `bell.log` in the Ducklab state directory (`~/.local/state/ducklab/` on
 Linux).
@@ -81,7 +85,12 @@ Linux).
 ## Limits
 
 - The policy is the model's instructions, not a barrier; the engine's
-  credential rules are the barrier.
+  credential rules are the barrier. The refusal of waiting and of reads of
+  Ducklab's state is a guard rail against habit: it errs toward refusing
+  (a command that merely mentions `sleep` is refused too), and a determined
+  model can still find a way around it.
+- The policy and the refusals apply to the configured session only, not to
+  subagent sessions it spawns.
 - The plugin wakes the session only while the OpenCode server runs; OpenCode
   starts its server with the TUI. Without it, events wait in the catch-up.
 - Wakes caused by the coordinator's own decisions (the `run_end` after it

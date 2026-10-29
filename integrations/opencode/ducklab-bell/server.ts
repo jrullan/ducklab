@@ -17,13 +17,15 @@
 //  - Bursts are coalesced (5 s) and wakes are capped per hour; a hold is
 //    logged, never silent (a silent hold read as a broken bell).
 //  - engine.json is re-read on every reconnect, so engine restarts are
-//    followed. No Last-Event-ID: the engine turns "<run>:<seq>" into a one-run
-//    filter.
+//    followed; what a restart or a reload missed comes back through the
+//    catch-up below rather than through a stream cursor.
 //  - On every (re)connect the plugin catches up: runs still waiting for a
 //    decision since the last wake are announced, so a wake lost to a reload,
 //    a disconnect or a hold is not lost for good.
 //  - Policy alone did not stop a local model from `sleep 90`-polling the run
-//    files; in act mode those calls are refused with an instruction.
+//    files; in act mode those calls are refused with an instruction. The
+//    refusal is a guard rail against habit, not a barrier: the engine's
+//    credential rules are the barrier.
 //
 // Configuration: plugin options in the OpenCode config (see README.md), or a
 // bell.json next to this file. Options win.
@@ -54,6 +56,22 @@ const PREAMBLES: Record<string, string> = {
     "decision needs the user, start a line with 'NEEDS USER:'.",
 }
 
+// refusedCall reports why a tool call breaks the coordinator's waiting
+// rules, or "" when it does not. A guard rail against a model's habit, not a
+// barrier: it reads every argument a call can point somewhere with, and errs
+// toward refusing — a coordinator has no business waiting in a shell or
+// reading Ducklab's own state.
+const waits = /\b(sleep|watch)\b|\btail\s+-\w*[fF]|\bread\s+-\w*t/
+const ducklabState = /\.ducklab\b|state[\\/]+ducklab|engine\.json|human\.tok/
+function refusedCall(q: any): string {
+  const i = q.input ?? {}
+  const where = [i.path, i.filePath, i.workdir, i.cwd, i.pattern, i.include].filter((v) => typeof v === "string").join(" ")
+  const command = q.tool === "shell" && typeof i.command === "string" ? i.command : ""
+  if (command && waits.test(command)) return "waiting"
+  if (ducklabState.test(`${command} ${where}`)) return "ducklab state"
+  return ""
+}
+
 const REFUSAL =
   "Refused by the Ducklab coordinator policy: do not wait or poll, and do not read .ducklab/ files. " +
   "End your turn now; Ducklab wakes you with a [Ducklab] message when the run needs you or ends. " +
@@ -75,11 +93,20 @@ function stateDir(): string {
   return join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "ducklab")
 }
 
-function loadConfig(options: Record<string, unknown> | undefined): Config {
+function loadConfig(options: Record<string, unknown> | undefined, log: (...p: unknown[]) => void): Config {
   let file: Record<string, unknown> = {}
   const path = join(HERE, "bell.json")
-  if (existsSync(path)) file = JSON.parse(readFileSync(path, "utf8"))
-  const o = { ...file, ...(options ?? {}) }
+  if (existsSync(path)) {
+    try {
+      file = JSON.parse(readFileSync(path, "utf8"))
+    } catch (e: any) {
+      log(`bell.json unreadable, ignored: ${e?.message ?? e}`)
+    }
+  }
+  // A null option does not erase the file's value.
+  const given = Object.fromEntries(Object.entries(options ?? {}).filter(([, v]) => v !== null && v !== undefined))
+  const o: Record<string, unknown> = { ...file, ...given }
+  if (o.mode !== undefined && o.mode !== "ask" && o.mode !== "act") log(`mode ${JSON.stringify(o.mode)} is not ask or act; using ask`)
   return {
     session: String(o.session ?? ""),
     project: String(o.project ?? ""),
@@ -90,10 +117,14 @@ function loadConfig(options: Record<string, unknown> | undefined): Config {
   }
 }
 
+// sleep resolves after ms or on abort, and leaves no listener behind either
+// way: the waker sleeps every second for the plugin's life.
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms)
-    signal?.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true })
+    if (signal?.aborted) return resolve()
+    const onAbort = () => (clearTimeout(t), resolve())
+    const t = setTimeout(() => (signal?.removeEventListener("abort", onAbort), resolve()), ms)
+    signal?.addEventListener("abort", onAbort, { once: true })
   })
 
 function describe(ev: any) {
@@ -112,12 +143,20 @@ function describe(ev: any) {
 // can load a second instance before unloading the first, and a per-process
 // "owned" flag let both wake the session.
 type Owners = Map<string, symbol>
-function tryLock(path: string, owners: Owners): boolean {
+function tryLock(path: string, owners: Owners, log: (...p: unknown[]) => void): boolean {
   for (let i = 0; i < 2; i++) {
     try {
       writeFileSync(path, String(process.pid), { flag: "wx" })
-      return true
-    } catch {
+      // Two processes that both found a dead owner can both unlink and
+      // create; only the one whose pid the file still holds owns it.
+      const start = Date.now()
+      while (Date.now() - start < 50) {}
+      return readFileSync(path, "utf8").trim() === String(process.pid)
+    } catch (e: any) {
+      if (e?.code && e.code !== "EEXIST") {
+        log(`cannot take the lock ${path}: ${e.code}`)
+        return false
+      }
       let pid = 0
       try {
         pid = Number(readFileSync(path, "utf8").trim())
@@ -127,7 +166,9 @@ function tryLock(path: string, owners: Owners): boolean {
         try {
           process.kill(pid, 0)
           alive = true
-        } catch {}
+        } catch (e: any) {
+          alive = e?.code === "EPERM" // exists, owned by someone else
+        }
       }
       // Our own pid with no live instance holding it is a lock left by an
       // earlier load in this process.
@@ -150,7 +191,7 @@ export default {
         appendFileSync(logPath, `${new Date().toISOString()} [bell pid=${process.pid}] ${parts.map(String).join(" ")}\n`)
       } catch {}
     }
-    const cfg = loadConfig(ctx.options)
+    const cfg = loadConfig(ctx.options, log)
     if (!cfg.session || !cfg.project) {
       log("not configured: set the session and project options (README.md); idle")
       return
@@ -188,8 +229,11 @@ export default {
       const text = `${preamble}\n\n${lines}${more}`
       const t0 = Date.now()
       log(`waking ${sessionID} with ${batch.length} event(s)`)
-      await ctx.storage.set(lastWakeKey, new Date().toISOString()).catch(() => {})
+      const sentAt = new Date().toISOString()
       await ctx.session.prompt({ sessionID, text })
+      // Only a delivered wake moves the catch-up mark: one that failed must
+      // still be found on the next connect.
+      await ctx.storage.set(lastWakeKey, sentAt).catch(() => {})
       await Promise.race([ctx.session.wait({ sessionID }), sleep(TURN_TIMEOUT_MS, signal)])
       log(`wake done in ${Math.round((Date.now() - t0) / 1000)}s`)
     }
@@ -213,8 +257,11 @@ export default {
         waking = true
         try {
           await wake(batch)
-        } catch (e) {
-          log("wake failed:", e)
+        } catch (e: any) {
+          // Not dropped: the batch goes back first in line for the next try.
+          log("wake failed, will retry:", e?.message ?? e)
+          pending = [...batch, ...pending]
+          firstPendingAt ||= Date.now()
         } finally {
           waking = false
         }
@@ -225,22 +272,24 @@ export default {
     // only, this session only), and the calls it forbids are refused. The
     // context hook is how OpenCode's own plugins add system text; its entries
     // are LLM.SystemPart objects — a bare string fails schema validation.
+    // Every instance installs it, owner of the bell or not: a turn the person
+    // types in a process that does not ring is still the coordinator's turn.
+    // Compaction gets it too, so a summary is written under the same rules.
     async function installPolicy() {
       if (cfg.mode !== "act") return
       try {
         const path = cfg.policy ? (isAbsolute(cfg.policy) ? cfg.policy : join(HERE, cfg.policy)) : join(HERE, "policy.md")
         const policy = readFileSync(path, "utf8")
-        await ctx.session.hook("context", (r: any) => {
+        const carry = (r: any) => {
           if (r.sessionID === sessionID) r.system.push({ type: "text", text: policy })
-        })
+        }
+        await ctx.session.hook("context", carry)
+        await ctx.session.hook("compaction", carry)
         await ctx.tool.hook("execute.before", (q: any) => {
           if (q.sessionID !== sessionID) return
-          const text =
-            q.tool === "shell" ? String(q.input?.command ?? "")
-            : q.tool === "read" ? String(q.input?.path ?? q.input?.filePath ?? "")
-            : ""
-          if (/(^|[\s;&|(])sleep\s/.test(text) || /\.ducklab\//.test(text)) {
-            log(`refused ${q.tool}: ${text.slice(0, 80)}`)
+          const why = refusedCall(q)
+          if (why) {
+            log(`refused ${q.tool} (${why}): ${JSON.stringify(q.input ?? {}).slice(0, 100)}`)
             throw new Error(REFUSAL)
           }
         })
@@ -261,11 +310,19 @@ export default {
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const body: any = await res.json()
-        const since = await lastWake()
+        let since = await lastWake()
+        if (!since) {
+          // First load for this session: start the mark now rather than
+          // announce every gate the project ever left open.
+          since = new Date().toISOString()
+          await ctx.storage.set(lastWakeKey, since).catch(() => {})
+          log("first connect for this session: catch-up starts now")
+        }
         const queued = new Set(pending.map((e) => e.run_id))
         // An empty list answers {"items": null}.
         for (const r of body?.items ?? []) {
-          if (!r?.pending_kind || queued.has(r.id)) continue
+          // A consultant chat waiting on the person is a conversation, not a decision.
+          if (!r?.pending_kind || r.pending_kind === "chat" || queued.has(r.id)) continue
           if (since && r.pending_since && r.pending_since <= since) continue
           add({
             type: "human_needed", run_id: r.id, project_id: cfg.project,
@@ -282,10 +339,9 @@ export default {
       let backoff = 1_000
       while (!signal.aborted) {
         if (!owns()) {
-          if (tryLock(lockPath, owners)) {
+          if (tryLock(lockPath, owners, log)) {
             owners.set(lockPath, me)
             log("owns", sessionID)
-            await installPolicy()
           } else {
             await sleep(30_000, signal)
             continue
@@ -347,6 +403,7 @@ export default {
       }
     }
 
+    void installPolicy()
     void waker()
     void listen()
 
