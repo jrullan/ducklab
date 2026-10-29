@@ -104,6 +104,8 @@ project and exits 0. If the repo has no `.git`, it asks before `git init`;
 ```
 ducklab provider list                      # id, kind, base url, reachable, auth
 ducklab provider check [<id>]              # exit 8 if unreachable
+ducklab provider set <id> --kind codex     # a ChatGPT/Codex subscription
+ducklab provider login|logout <id>         # its device-code sign-in (person only)
 
 ducklab duckling list
 ducklab duckling add <id> --provider <p> --model <m> [--role r]... [--temp f]

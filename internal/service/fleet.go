@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
+	"github.com/jrullan/ducklab/internal/xplat"
 )
 
 // This file is the fleet: which models exist and how to reach them.
@@ -43,6 +45,19 @@ type ProviderView struct {
 	KeyPresent bool `json:"key_present"`
 	// InUse lists the ducklings that would break if this provider went away.
 	InUse []string `json:"in_use,omitempty"`
+	// SignIn is a subscription provider's sign-in, the counterpart of
+	// KeyPresent for a provider that has no key. Nil for keyed providers.
+	SignIn *SignInView `json:"sign_in,omitempty"`
+}
+
+// SignInView says whether a subscription provider is signed in, and as whom.
+// Never a token.
+type SignInView struct {
+	SignedIn bool   `json:"signed_in"`
+	Plan     string `json:"plan,omitempty"`
+	Email    string `json:"email,omitempty"`
+	// Problem is why the stored sign-in cannot be read, when it cannot.
+	Problem string `json:"problem,omitempty"`
 }
 
 // DucklingView is a duckling as a client sees it, for editing.
@@ -120,12 +135,16 @@ func (s *Service) ProviderList() []ProviderView {
 	for id, p := range s.cfg.Providers {
 		names := used[id]
 		sort.Strings(names)
-		out = append(out, ProviderView{
+		view := ProviderView{
 			ID: string(id), Kind: string(p.Kind), BaseURL: p.BaseURL,
 			MaxConcurrent: p.MaxConcurrent, Headers: p.Headers, APIKeyEnv: p.APIKeyEnv,
 			KeyPresent: p.APIKeyEnv == "" || os.Getenv(p.APIKeyEnv) != "",
 			InUse:      names,
-		})
+		}
+		if p.Kind == config.ProviderKindCodex {
+			view.SignIn = codexSignIn(id)
+		}
+		out = append(out, view)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -160,12 +179,20 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 	if err := validID(id); err != nil {
 		return err
 	}
+	if view.BaseURL == "" && config.ProviderKind(view.Kind) == config.ProviderKindCodex {
+		// A subscription has one address; asking for it is a form field
+		// nobody can fill in wrong.
+		view.BaseURL = provider.CodexDefaultURL
+	}
 	if view.BaseURL == "" {
 		return fmt.Errorf("provider %q needs a base_url", id)
 	}
 	kind := config.ProviderKind(view.Kind)
 	if kind == "" {
 		kind = config.ProviderKindOpenAI
+	}
+	if err := config.ValidateProviderKind(kind); err != nil {
+		return err
 	}
 
 	s.cfgMu.Lock()
@@ -513,6 +540,7 @@ func ProviderKinds() []string {
 	return []string{
 		string(config.ProviderKindOpenAI),
 		string(config.ProviderKindAnthropic),
+		string(config.ProviderKindCodex),
 	}
 }
 
@@ -621,6 +649,39 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	if needsVision && info.Vision != nil {
 		vision := *info.Vision
 		view.Caps.Vision = &vision
+	}
+	return view
+}
+
+// codexCredentials is provider id's sign-in store under the config directory,
+// the same path `ducklab provider login` writes.
+func codexCredentials(id config.ProviderID) (*provider.CodexCredentials, error) {
+	dir, err := xplat.ConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("codex credentials: %w", err)
+	}
+	return provider.NewCodexCredentials(provider.CodexCredentialsPath(dir, string(id))), nil
+}
+
+func codexSignIn(id config.ProviderID) *SignInView {
+	creds, err := codexCredentials(id)
+	if err != nil {
+		return &SignInView{Problem: err.Error()}
+	}
+	t, err := creds.Load()
+	if errors.Is(err, provider.ErrCodexNotLoggedIn) {
+		view := &SignInView{}
+		if err != provider.ErrCodexNotLoggedIn {
+			view.Problem = err.Error() // a sign-in that stopped working
+		}
+		return view
+	}
+	if err != nil {
+		return &SignInView{Problem: err.Error()}
+	}
+	view := &SignInView{SignedIn: true}
+	if acct, err := t.Account(); err == nil {
+		view.Plan, view.Email = acct.Plan, acct.Email
 	}
 	return view
 }

@@ -268,6 +268,36 @@ ducklab duckling test pato-sonnet --prompt "say OK"
 `--key-env` is the **name** of an environment variable, never a key. No key
 is written to config, sent over the API, or kept in shell history.
 
+### A ChatGPT / Codex subscription
+
+A ChatGPT plan's Codex allowance can seat ducklings too: an opt-in provider
+beside the keyed ones, never a default.
+
+```bash
+ducklab provider set chatgpt --kind codex      # no URL, no key
+ducklab provider login chatgpt                 # open the page, type the code
+ducklab duckling set sol --provider chatgpt --model gpt-6.1-sol:high \
+                         --roles architect,advisor,consultant
+```
+
+- **Sign-in:** the engine runs OpenAI's device-code sign-in and keeps the
+  tokens in its own file (`~/.config/ducklab/codex/<id>.json`, owner-only),
+  refreshing them as they expire. It never reads or writes the Codex CLI's
+  `~/.codex/auth.json`: a refresh token rotates on use, so sharing one would
+  sign the other program out. The desktop's Providers panel has the same
+  **Sign in** button; signing in or out is the person's alone.
+- **Models:** whatever the plan includes; the provider's live model list
+  (the desktop's model picker) shows them. A `:effort` suffix on the model id
+  (`low` … `max`) sets the reasoning effort; without one the model's default
+  applies.
+- **Cost:** no dollars per token, so leave the costs at zero. That makes
+  these ducklings rank as the cheapest in automatic stand-in choices, and USD
+  budgets never cap them — token caps do. When a usage window runs out, the
+  run pauses as provider weather with the reset time in the reason; resume it
+  after the reset.
+- **Not sent:** the subscription takes no temperature, top-p, output cap or
+  stop sequences, so a duckling's settings for those have no effect there.
+
 <p align="center">
   <img src="docs/screenshots/roster.png" alt="The roster board: flock with scorecards, seats per mode, engine suggestions" width="900">
   <br><em>Seat suggestions come with their evidence: pass rates from your own runs, cost per run, coding index. You decide.</em>
