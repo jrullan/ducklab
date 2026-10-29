@@ -476,9 +476,14 @@ func TestFSPatchDistressRingsOnceAtTheBrakeWithTheReason(t *testing.T) {
 	if len(rung) != 1 {
 		t.Fatalf("distress rang %d times; want once, at the brake", len(rung))
 	}
-	reason, _ := rung[0]["reason"].(string)
+	reason, _ := rung[0]["last_failure"].(string)
 	detail, _ := rung[0]["detail"].(string)
 	if !strings.Contains(reason, "matched 0 times") || !strings.Contains(detail, "target.go") {
 		t.Errorf("distress does not say what failed: %+v", rung[0])
+	}
+	// The service merges this data over {"reason": <kind>}; a "reason" key
+	// here would erase which brake rang (review of B-546).
+	if _, clobbers := rung[0]["reason"]; clobbers {
+		t.Errorf("distress data carries a reason key that overwrites the kind: %+v", rung[0])
 	}
 }

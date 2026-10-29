@@ -2367,9 +2367,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
 	}
-	// Cancelled mid-gate by an abort: its exit -1 is not this run's verdict,
-	// and nothing after it (render, visual check, the gate pause) should run
-	// or speak (B-547).
+	// Cancelled mid-gate by an abort: its exit -1 is not this run's verdict.
+	// An abort landing after this point is caught before the verdict below
+	// (B-547).
 	if rs.aborting.Load() {
 		return
 	}
@@ -2972,6 +2972,14 @@ func (s *Service) failRun(rs *runState, err error) {
 	rs.wmu.Lock()
 	settleActiveWallclock(rs.run, time.Now())
 	rs.wmu.Unlock()
+	// An abort cancelled this worker: whatever failed is the abort's doing,
+	// and the abort writes the record (B-547). Checked before every pause
+	// branch below: each of them pages a person and writes state, and their
+	// old "Verdict != ABORTED" guard never fires — the abort sets the verdict
+	// only after this worker is done.
+	if rs.aborting.Load() {
+		return
+	}
 	// A budget running out is a decision point, not a defect. The run did
 	// nothing wrong — the person's own ceiling stopped it — and failing it
 	// RESTORED THE TREE, so two million tokens of work were rolled back when
@@ -3100,12 +3108,6 @@ func (s *Service) failRun(rs *runState, err error) {
 				Data: map[string]interface{}{"kind": "error", "detail": err.Error()},
 			})
 		}
-		return
-	}
-	// An abort cancelled this worker: whatever failed is the abort's doing,
-	// and the abort writes the record (B-547). A run_end FAILED and a tree
-	// restore here were followed by the abort's own.
-	if rs.aborting.Load() {
 		return
 	}
 	// A cancellation during shutdown or an attributed restart is a pause, not

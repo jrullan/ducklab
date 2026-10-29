@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
@@ -67,5 +68,40 @@ func TestAnAbortIsRecordedAsTheAbort(t *testing.T) {
 	}
 	if ends != 1 {
 		t.Errorf("%d run_end events, want exactly the abort's", ends)
+	}
+}
+
+// Review of B-547: failRun's pause branches (budget, truncation, provider,
+// unsaved work) run before its old abort check and each pages a person and
+// writes state; their "Verdict != ABORTED" guard never fires, because the
+// abort sets the verdict only after the worker is done. Whatever the error,
+// a worker an abort cancelled records nothing.
+func TestAnAbortingWorkerRecordsNothingWhateverItsError(t *testing.T) {
+	s := newTestService(t)
+	for _, failure := range []error{
+		fmt.Errorf("agent: %w: token budget exceeded", agent.ErrBudgetExceeded),
+		fmt.Errorf("provider chat: %w: unexpected EOF", provider.ErrProviderUnavailable),
+		errors.New("tool killed by signal"),
+	} {
+		dir := t.TempDir()
+		run := &runlog.Run{ID: "r-quiet", ProjectID: "p", Stage: "build", Status: "running",
+			StartedAt: time.Now().UTC().Format(time.RFC3339)}
+		w, err := runlog.NewWriter(dir, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+		rs.aborting.Store(true)
+		s.failRun(rs, failure)
+		events, _ := runlog.ReadEvents(rs.runDir)
+		for _, e := range events {
+			if e.Type != "run_start" {
+				t.Errorf("%v: the aborting worker recorded %s %v", failure, e.Type, e.Data)
+			}
+		}
+		if run.Status != "running" || run.PendingKind != "" {
+			t.Errorf("%v: the aborting worker set %s/%s", failure, run.Status, run.PendingKind)
+		}
+		w.Close()
 	}
 }

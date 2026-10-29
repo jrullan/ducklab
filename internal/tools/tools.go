@@ -825,7 +825,9 @@ func trackFSPatchFailure(ectx *ExecContext, args json.RawMessage, res *Result) {
 				reason = reason[:200] + "…"
 			}
 			ectx.OnDistress("fs_patch_failure_streak", map[string]interface{}{
-				"tool": "fs_patch", "path": path, "count": n, "reason": reason,
+				// Not "reason": the distress payload's own reason key names
+				// the brake (fs_patch_failure_streak) and must survive.
+				"tool": "fs_patch", "path": path, "count": n, "last_failure": reason,
 				"detail": fmt.Sprintf("%d consecutive failed patches on %s; the last: %s", n, path, reason),
 			})
 		}
