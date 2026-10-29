@@ -1121,6 +1121,14 @@ export interface ServiceProjectStartResult {
   run_id?: string;
 }
 
+export interface ServiceProviderLoginView {
+  error?: string;
+  sign_in?: ServiceSignInView;
+  status?: string;
+  user_code?: string;
+  verification_url?: string;
+}
+
 export interface ServiceProviderView {
   api_key_env?: string;
   base_url?: string;
@@ -1130,6 +1138,7 @@ export interface ServiceProviderView {
   key_present?: boolean;
   kind?: string;
   max_concurrent?: number;
+  sign_in?: ServiceSignInView;
 }
 
 export interface ServiceReferenceImageInfo {
@@ -1227,6 +1236,13 @@ export interface ServiceScorecard {
   notes?: string;
   provider?: string;
   roles?: string[];
+}
+
+export interface ServiceSignInView {
+  email?: string;
+  plan?: string;
+  problem?: string;
+  signed_in?: boolean;
 }
 
 export interface ServiceSkillSummary {
@@ -1477,6 +1493,9 @@ export const OPERATIONS = [
   { id: "ProviderList", method: "GET", path: "/v1/providers" },
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
   { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
+  { id: "ProviderLogout", method: "DELETE", path: "/v1/providers/{id}/login" },
+  { id: "ProviderLoginStatus", method: "GET", path: "/v1/providers/{id}/login" },
+  { id: "ProviderLoginStart", method: "POST", path: "/v1/providers/{id}/login" },
   { id: "ProviderModelEndpoints", method: "GET", path: "/v1/providers/{id}/model-endpoints" },
   { id: "ProviderModels", method: "GET", path: "/v1/providers/{id}/models" },
   { id: "Restart", method: "POST", path: "/v1/restart" },

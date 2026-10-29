@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Duckling, EngineClient, ModelEndpoint, ProviderView } from "../api/client";
+import type { Duckling, EngineClient, ModelEndpoint, ProviderLogin, ProviderView } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
@@ -393,8 +393,15 @@ function DucklingCard({
           <StatusChip role="critical" label={`${provider.api_key_env} not set`} />
         </div>
       )}
+      {provider?.sign_in && !provider.sign_in.signed_in && (
+        <div className="mt-2">
+          <StatusChip role="critical" label={`${provider.id} not signed in`} />
+        </div>
+      )}
       {(d.cost?.output_per_mtok ?? 0) === 0 && (
-        <div className="mt-2"><StatusChip role="good" label="local — no USD cost" /></div>
+        <div className="mt-2">
+          <StatusChip role="good" label={provider?.kind === "codex" ? "subscription — no per-token cost" : "local — no USD cost"} />
+        </div>
       )}
       {result && (
         <p className="mt-2 break-words text-xs text-ink-secondary" data-testid={`duckling-result-${d.id}`}>
@@ -419,9 +426,12 @@ function ProviderSection({
   const [url, setUrl] = useState("");
   const [keyEnv, setKeyEnv] = useState("");
   const [maxConcurrent, setMaxConcurrent] = useState("");
+  const [kind, setKind] = useState("openai");
+  const subscription = kind === "codex";
 
   const edit = (provider: ProviderView) => {
     setId(provider.id);
+    setKind(provider.kind || "openai");
     setUrl(provider.base_url);
     setKeyEnv(provider.api_key_env ?? "");
     setMaxConcurrent(provider.max_concurrent ? String(provider.max_concurrent) : "");
@@ -435,9 +445,10 @@ function ProviderSection({
     void client
       .providerSet(id.trim(), {
         ...existingWithoutMax,
-        base_url: url.trim(),
-        api_key_env: keyEnv.trim(),
-        kind: existing?.kind ?? "openai",
+        // A subscription has one address and no key; the engine fills it.
+        base_url: subscription ? (existing?.base_url ?? "") : url.trim(),
+        api_key_env: subscription ? "" : keyEnv.trim(),
+        kind: existing?.kind ?? kind,
         ...(existing || max > 0 ? { max_concurrent: max } : {}),
       })
       .then(() => {
@@ -446,6 +457,7 @@ function ProviderSection({
         setUrl("");
         setKeyEnv("");
         setMaxConcurrent("");
+        setKind("openai");
         onDone();
       })
       .catch(onDone);
@@ -476,6 +488,26 @@ function ProviderSection({
             onChange={(e) => setId(e.target.value)}
             className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
+          <select
+            aria-label="provider kind"
+            data-testid="provider-kind"
+            value={kind}
+            disabled={providers.some((p) => p.id === id.trim())}
+            onChange={(e) => setKind(e.target.value)}
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          >
+            <option value="openai">OpenAI-compatible endpoint (API key)</option>
+            <option value="anthropic">Anthropic (API key)</option>
+            <option value="codex">ChatGPT / Codex subscription (sign-in)</option>
+          </select>
+          {subscription ? (
+            <p className="text-xs text-ink-muted" data-testid="provider-codex-note">
+              Uses your ChatGPT plan's Codex allowance instead of a key. After saving, sign in from a
+              terminal: <code className="font-mono">ducklab provider login {id.trim() || "<id>"}</code>.
+              Runs on it cost no dollars but spend the plan's usage windows; when one runs out the run
+              pauses, and the reason says when the window resets — resume it after that.
+            </p>
+          ) : (<>
           <input
             aria-label="base url"
             data-testid="provider-url"
@@ -492,6 +524,7 @@ function ProviderSection({
             onChange={(e) => setKeyEnv(e.target.value)}
             className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
+          </>)}
           <label className="flex flex-col gap-1 text-xs text-ink-muted">
             concurrent runs this endpoint will seat at once (blank = 1 local / 8 remote)
             <input
@@ -508,7 +541,7 @@ function ProviderSection({
           <button
             type="button"
             onClick={save}
-            disabled={!id.trim() || !url.trim()}
+            disabled={!id.trim() || (!subscription && !url.trim())}
             data-testid="provider-save"
             className="self-end rounded bg-ink px-3 py-1.5 text-sm text-page disabled:opacity-40"
           >
@@ -538,7 +571,18 @@ function ProviderSection({
             >
               <span className="text-ink">{p.id}</span>
               <span className="font-mono text-xs text-ink-muted">{p.base_url}</span>
-              {p.api_key_env ? (
+              {p.sign_in ? (
+                <StatusChip
+                  role={p.sign_in.signed_in ? "good" : "critical"}
+                  label={
+                    p.sign_in.signed_in
+                      ? `signed in${p.sign_in.plan ? ` · ${p.sign_in.plan}` : ""}`
+                      : p.sign_in.problem
+                        ? "sign-in stopped working — sign in again"
+                        : `not signed in — ducklab provider login ${p.id}`
+                  }
+                />
+              ) : p.api_key_env ? (
                 <StatusChip
                   role={p.key_present ? "good" : "critical"}
                   label={p.key_present ? `${p.api_key_env} set` : `${p.api_key_env} not set`}
@@ -556,6 +600,7 @@ function ProviderSection({
                 })()}
               </span>
               {backendHint(p) && <span className="text-xs text-ink-muted">{backendHint(p)}</span>}
+              {p.sign_in && <SubscriptionSignIn client={client} provider={p} onDone={onDone} />}
               <button
                 type="button"
                 data-testid={`provider-edit-${p.id}`}
@@ -577,6 +622,82 @@ function ProviderSection({
         </ul>
       )}
     </section>
+  );
+}
+
+// SubscriptionSignIn runs a codex provider's sign-in from the desktop: the
+// engine hands out a page and a one-time code, the person approves it in a
+// browser, and this polls until the engine has the tokens.
+function SubscriptionSignIn({
+  client,
+  provider,
+  onDone,
+}: {
+  client: EngineClient;
+  provider: ProviderView;
+  onDone: (err?: unknown) => void;
+}) {
+  const [login, setLogin] = useState<ProviderLogin | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pending = login?.status === "pending";
+
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setInterval(() => {
+      void client
+        .providerLoginStatus(provider.id)
+        .then((next) => {
+          if (next.status === "pending") return;
+          setLogin(null);
+          if (next.status === "failed") setError(next.error ?? "sign-in failed");
+          onDone();
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [pending, client, provider.id, onDone]);
+
+  const start = () => {
+    setError(null);
+    void client
+      .providerLoginStart(provider.id)
+      .then(setLogin)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+
+  return (
+    <span className="flex flex-wrap items-center gap-2" data-testid={`provider-signin-${provider.id}`}>
+      {provider.sign_in?.signed_in ? (
+        <button
+          type="button"
+          data-testid={`provider-logout-${provider.id}`}
+          onClick={() => void client.providerLogout(provider.id).then(() => onDone()).catch(onDone)}
+          className="rounded border border-hairline px-2 py-0.5 text-xs"
+        >
+          Sign out
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-testid={`provider-login-${provider.id}`}
+          onClick={start}
+          disabled={pending}
+          className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
+        >
+          Sign in
+        </button>
+      )}
+      {pending && login && (
+        <span className="text-xs text-ink-secondary" data-testid={`provider-login-code-${provider.id}`}>
+          Open{" "}
+          <a href={login.verification_url} target="_blank" rel="noreferrer" className="underline">
+            {login.verification_url}
+          </a>{" "}
+          and enter <code className="font-mono text-ink">{login.user_code}</code> — waiting for approval…
+        </span>
+      )}
+      {error && <span className="text-xs text-critical">{error}</span>}
+    </span>
   );
 }
 

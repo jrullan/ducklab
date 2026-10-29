@@ -50,6 +50,8 @@ type Service struct {
 	// cfgMu guards cfg and the registries it feeds, which a config edit
 	// rebuilds while runs may be reading them.
 	cfgMu sync.RWMutex
+	// codexLogins are subscription sign-ins waiting for the person's approval.
+	codexLogins codexLogins
 	// presetPortMu serialises choosing a preset port and saving it, so two
 	// starts at once cannot claim the same one (review of #122).
 	presetPortMu sync.Mutex
@@ -507,6 +509,12 @@ func createProvider(id config.ProviderID, cfg config.Provider, requestTimeout ti
 			provider.WithRequestTimeout(requestTimeout)), nil
 	case config.ProviderKindAnthropic:
 		return provider.NewAnthropic(string(id), cfg.BaseURL, apiKey), nil
+	case config.ProviderKindCodex:
+		creds, err := codexCredentials(id)
+		if err != nil {
+			return nil, err
+		}
+		return provider.NewCodex(string(id), cfg.BaseURL, creds, provider.WithCodexHeaders(cfg.Headers)), nil
 	default:
 		return nil, fmt.Errorf("unknown provider kind %q", cfg.Kind)
 	}

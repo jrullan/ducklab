@@ -158,6 +158,18 @@ func (f *fakeEngine) routes() {
 		}})
 	}))
 	f.mux.HandleFunc("GET /v1/providers/{id}/model-endpoints", f.auth(f.providerModelEndpoints))
+	// A subscription sign-in that is always waiting: the demo has no account.
+	f.mux.HandleFunc("GET /v1/providers/{id}/login", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"status": "none", "sign_in": map[string]interface{}{"signed_in": false}})
+	}))
+	f.mux.HandleFunc("POST /v1/providers/{id}/login", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{
+			"status": "pending", "verification_url": "https://auth.openai.com/codex/device", "user_code": "DEMO-0000",
+		})
+	}))
+	f.mux.HandleFunc("DELETE /v1/providers/{id}/login", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"ok": true})
+	}))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/diagnostics", f.auth(f.diagnosticDefaults))
