@@ -16,6 +16,11 @@ function clientWith(ducklings: Duckling[], providers: ProviderView[]) {
     providers: vi.fn(() => Promise.resolve(providers)),
     providerSet: vi.fn(() => Promise.resolve({})),
     providerRemove: vi.fn(() => Promise.resolve({})),
+    providerLoginStart: vi.fn(() =>
+      Promise.resolve({ status: "pending", verification_url: "https://auth.openai.com/codex/device", user_code: "ABCD-1234" }),
+    ),
+    providerLoginStatus: vi.fn(() => Promise.resolve({ status: "pending" })),
+    providerLogout: vi.fn(() => Promise.resolve({})),
     providerModelEndpoints: vi.fn(() => Promise.resolve([])),
     ducklingSet: vi.fn(() => Promise.resolve({})),
     ducklingRemove: vi.fn(() => Promise.resolve({})),
@@ -87,6 +92,50 @@ describe("Ducklings", () => {
         kind: "openai",
       }),
     );
+  });
+
+  // A subscription has no address and no key to fill in: the form says how
+  // to sign in instead, and the engine supplies the endpoint.
+  it("adds a Codex subscription provider without a URL or key", async () => {
+    const client = clientWith([], []);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("provider-add"));
+    fireEvent.change(screen.getByTestId("provider-id"), { target: { value: "chatgpt" } });
+    fireEvent.change(screen.getByTestId("provider-kind"), { target: { value: "codex" } });
+    expect(screen.queryByTestId("provider-url")).toBeNull();
+    expect(screen.queryByTestId("provider-key-env")).toBeNull();
+    expect(screen.getByTestId("provider-codex-note").textContent).toContain("ducklab provider login chatgpt");
+    fireEvent.click(screen.getByTestId("provider-save"));
+    await waitFor(() =>
+      expect(client.providerSet).toHaveBeenCalledWith("chatgpt", { base_url: "", api_key_env: "", kind: "codex" }),
+    );
+  });
+
+  it("shows a subscription's sign-in where a key would be", async () => {
+    const client = clientWith([duckling({ id: "sol", provider: "chatgpt", model: "gpt-6.1-sol" })], [
+      provider({ id: "chatgpt", kind: "codex", sign_in: { signed_in: false } }),
+      provider({ id: "work", kind: "codex", sign_in: { signed_in: true, plan: "pro" } }),
+    ]);
+    render(<Ducklings client={client} projectId="" />);
+    expect((await screen.findByTestId("provider-row-chatgpt")).textContent).toContain("not signed in — ducklab provider login chatgpt");
+    expect(screen.getByTestId("provider-row-work").textContent).toContain("signed in · pro");
+    expect(await screen.findByText("chatgpt not signed in")).toBeTruthy();
+    expect(screen.getByText("subscription — no per-token cost")).toBeTruthy();
+  });
+
+  it("signs a subscription in from the desktop, showing the one-time code", async () => {
+    const client = clientWith([], [
+      provider({ id: "chatgpt", kind: "codex", sign_in: { signed_in: false } }),
+      provider({ id: "work", kind: "codex", sign_in: { signed_in: true } }),
+    ]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("provider-login-chatgpt"));
+    const code = await screen.findByTestId("provider-login-code-chatgpt");
+    expect(code.textContent).toContain("ABCD-1234");
+    expect(code.textContent).toContain("https://auth.openai.com/codex/device");
+    expect(client.providerLoginStart).toHaveBeenCalledWith("chatgpt");
+    fireEvent.click(screen.getByTestId("provider-logout-work"));
+    await waitFor(() => expect(client.providerLogout).toHaveBeenCalledWith("work"));
   });
 
   it("shows effective local, remote, and configured provider caps", async () => {

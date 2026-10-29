@@ -215,6 +215,9 @@ type ProviderKind string
 const (
 	ProviderKindOpenAI    ProviderKind = "openai"
 	ProviderKindAnthropic ProviderKind = "anthropic"
+	// ProviderKindCodex is a ChatGPT/Codex subscription, signed in with
+	// `ducklab provider login` instead of an API key.
+	ProviderKindCodex ProviderKind = "codex"
 )
 
 // Provider is a configured endpoint.
@@ -753,7 +756,7 @@ func OnAcceptPolicy(global, project string) string {
 
 // ValidateProviderKind validates a provider kind.
 func ValidateProviderKind(k ProviderKind) error {
-	if k != ProviderKindOpenAI && k != ProviderKindAnthropic {
+	if k != ProviderKindOpenAI && k != ProviderKindAnthropic && k != ProviderKindCodex {
 		return fmt.Errorf("invalid provider kind %q", k)
 	}
 	return nil

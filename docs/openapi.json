@@ -3837,6 +3837,29 @@
         ],
         "type": "object"
       },
+      "ServiceProviderLoginView": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "sign_in": {
+            "$ref": "#/components/schemas/ServiceSignInView"
+          },
+          "status": {
+            "type": "string"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "verification_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
       "ServiceProviderView": {
         "properties": {
           "api_key_env": {
@@ -3868,6 +3891,9 @@
           },
           "max_concurrent": {
             "type": "integer"
+          },
+          "sign_in": {
+            "$ref": "#/components/schemas/ServiceSignInView"
           }
         },
         "required": [
@@ -4206,6 +4232,26 @@
           "locality",
           "model",
           "provider"
+        ],
+        "type": "object"
+      },
+      "ServiceSignInView": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "signed_in": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "signed_in"
         ],
         "type": "object"
       },
@@ -8791,6 +8837,103 @@
           }
         ],
         "summary": "Add or replace a provider"
+      }
+    },
+    "/v1/providers/{id}/login": {
+      "delete": {
+        "operationId": "ProviderLogout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Forget a subscription sign-in. Person only."
+      },
+      "get": {
+        "operationId": "ProviderLoginStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProviderLoginView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The sign-in waiting for approval, or the stored one"
+      },
+      "post": {
+        "operationId": "ProviderLoginStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProviderLoginView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a subscription sign-in (codex providers): returns the page and the one-time code the person approves; the engine collects the tokens, which never leave it. Person only."
       }
     },
     "/v1/providers/{id}/model-endpoints": {

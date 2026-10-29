@@ -734,6 +734,18 @@ export type ProviderView = {
   max_concurrent?: number;
   /** Ducklings that would break if this provider went away. */
   in_use?: string[];
+  /** A subscription provider's sign-in (kind codex), where a keyed provider
+   *  has key_present. Never a token. */
+  sign_in?: { signed_in: boolean; plan?: string; email?: string; problem?: string };
+};
+
+/** A subscription sign-in. Mirrors service.ProviderLoginView. */
+export type ProviderLogin = {
+  status: "pending" | "signed_in" | "failed" | "none";
+  verification_url?: string;
+  user_code?: string;
+  error?: string;
+  sign_in?: ProviderView["sign_in"];
 };
 
 /** One past bench run. Mirrors service.BenchSummary. */
@@ -1495,6 +1507,17 @@ export class EngineClient {
   }
   providerRemove(id: string) {
     return this.request<unknown>("DELETE", `/v1/providers/${id}`);
+  }
+  /** Starts a subscription sign-in (codex providers). The engine keeps the
+   *  tokens; this returns only the page and the one-time code. */
+  providerLoginStart(id: string) {
+    return this.request<ProviderLogin>("POST", `/v1/providers/${encodeURIComponent(id)}/login`, {});
+  }
+  providerLoginStatus(id: string) {
+    return this.request<ProviderLogin>("GET", `/v1/providers/${encodeURIComponent(id)}/login`);
+  }
+  providerLogout(id: string) {
+    return this.request<unknown>("DELETE", `/v1/providers/${encodeURIComponent(id)}/login`);
   }
   providerModelEndpoints(id: string, model: string) {
     return this.request<{ items: ModelEndpoint[] | null }>(
