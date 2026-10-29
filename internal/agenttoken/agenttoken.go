@@ -101,6 +101,7 @@ type Identity struct {
 	// Actor is what the engine records: "agent:<slug of name>".
 	Actor  string
 	grants map[string]Level
+	hash   string
 }
 
 // Level is the identity's access to project, if any.
@@ -421,11 +422,60 @@ func (s *Store) Lookup(secret string) (*Identity, bool) {
 		// Best effort: a lost last-used stamp is not worth failing a request.
 		_ = s.saveLocked()
 	}
+	return identityOf(t, h), true
+}
+
+func identityOf(t *Token, hash string) *Identity {
 	grants := make(map[string]Level, len(t.Grants))
 	for _, g := range t.Grants {
 		grants[g.Project] = g.Level
 	}
-	return &Identity{ID: t.ID, Name: t.Name, Actor: actorOf(t.Name), grants: grants}, true
+	return &Identity{ID: t.ID, Name: t.Name, Actor: actorOf(t.Name), grants: grants, hash: hash}
+}
+
+// Current is who as the store holds it now: its grants as they stand, or
+// nothing once it is revoked. A request lives for a moment, but an event
+// stream lives for hours; it asks again so a revoke or a narrowed grant
+// reaches it.
+func (s *Store) Current(who *Identity) (*Identity, bool) {
+	if who == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.ephemeral[who.hash]; ok {
+		return id, true
+	}
+	i, ok := s.byHash[who.hash]
+	if !ok || s.data.Tokens[i].RevokedAt != nil {
+		return nil, false
+	}
+	return identityOf(&s.data.Tokens[i], who.hash), true
+}
+
+// DropProject removes every grant to project. Project ids are reused once a
+// project is unregistered; a grant must not pass to the next project that
+// happens to take the name.
+func (s *Store) DropProject(project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for i := range s.data.Tokens {
+		kept := s.data.Tokens[i].Grants[:0:0]
+		for _, g := range s.data.Tokens[i].Grants {
+			if g.Project != project {
+				kept = append(kept, g)
+			}
+		}
+		if len(kept) != len(s.data.Tokens[i].Grants) {
+			s.data.Tokens[i].Grants = kept
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveLocked()
 }
 
 // Issue mints an in-memory token for the engine's own helpers — a renderer
@@ -447,7 +497,7 @@ func (s *Store) Issue(name string, grants []Grant) (string, func(), error) {
 	}
 	h := hashOf(secret)
 	s.mu.Lock()
-	s.ephemeral[h] = &Identity{ID: "ephemeral", Name: name, Actor: actorOf(name), grants: m}
+	s.ephemeral[h] = &Identity{ID: "ephemeral", Name: name, Actor: actorOf(name), grants: m, hash: h}
 	s.mu.Unlock()
 	return secret, func() {
 		s.mu.Lock()

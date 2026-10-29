@@ -218,3 +218,37 @@ func TestUnknownSecretsResolveToNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestCurrentFollowsRevokesAndRegrants(t *testing.T) {
+	s, _ := openTemp(t)
+	view, secret, _ := s.Create("a", []Grant{{Project: "p", Level: LevelFull}})
+	who, _ := s.Lookup(secret)
+	s.Update(view.ID, nil, []Grant{{Project: "q", Level: LevelRead}})
+	now, ok := s.Current(who)
+	if !ok {
+		t.Fatal("live token not current")
+	}
+	if _, ok := now.Level("p"); ok {
+		t.Error("Current kept a removed grant")
+	}
+	s.Revoke(view.ID)
+	if _, ok := s.Current(who); ok {
+		t.Error("a revoked token is still current")
+	}
+}
+
+func TestDropProjectRemovesItsGrantsOnly(t *testing.T) {
+	s, path := openTemp(t)
+	_, secret, _ := s.Create("a", []Grant{{Project: "p", Level: LevelFull}, {Project: "q", Level: LevelRead}})
+	if err := s.DropProject("p"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(path)
+	who, _ := reopened.Lookup(secret)
+	if _, ok := who.Level("p"); ok {
+		t.Error("the dropped project's grant survived a reopen")
+	}
+	if _, ok := who.Level("q"); !ok {
+		t.Error("another project's grant was dropped")
+	}
+}

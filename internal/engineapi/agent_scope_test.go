@@ -3,8 +3,10 @@ package engineapi
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,14 +15,32 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/service"
 )
 
-// scopedServer is an engine with a token store and one project ("landed",
+type scopedFixture struct {
+	server  *httptest.Server
+	store   *agenttoken.Store
+	project string
+	path    string
+	bus     *bus.Bus
+}
+
+// scopedEngine is an engine with a token store and one project ("landed",
 // with run r-lane).
-func scopedServer(t *testing.T) (*httptest.Server, *agenttoken.Store, string) {
+func scopedEngine(t *testing.T) scopedFixture {
 	t.Helper()
 	s, projectID, project := landedResolutionService(t)
+	return scopedEngineOn(t, s, projectID, project, true)
+}
+
+func scopedEngineOn(t *testing.T, s *service.Service, projectID, project string, withRun bool) scopedFixture {
+	t.Helper()
+	if !withRun {
+		return serveScoped(t, s, projectID, project)
+	}
 	w, err := runlog.NewWriter(project, &runlog.Run{
 		ID: "r-lane", ProjectID: projectID, TaskID: "T-004", Stage: "test", Mode: "solo",
 		Status: "paused", PendingKind: "gate",
@@ -33,16 +53,28 @@ func scopedServer(t *testing.T) (*httptest.Server, *agenttoken.Store, string) {
 	if err := s.RecoverRuns(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	return serveScoped(t, s, projectID, project)
+}
+
+func serveScoped(t *testing.T, s *service.Service, projectID, project string) scopedFixture {
+	t.Helper()
 	store, err := agenttoken.Open(filepath.Join(t.TempDir(), "agent-tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := New(s, bus.New(16), humanTok, "test", "")
+	b := bus.New(16)
+	api := New(s, b, humanTok, "test", "")
 	api.SetAgentToken(agentTok)
 	api.SetAgentTokens(store)
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
-	return server, store, projectID
+	return scopedFixture{server: server, store: store, project: projectID, path: project, bus: b}
+}
+
+func scopedServer(t *testing.T) (*httptest.Server, *agenttoken.Store, string) {
+	t.Helper()
+	f := scopedEngine(t)
+	return f.server, f.store, f.project
 }
 
 func issue(t *testing.T, store *agenttoken.Store, name string, grants ...agenttoken.Grant) string {
@@ -263,7 +295,7 @@ func TestTheRoutesOutsideProjectsAnAgentMayReachArePinned(t *testing.T) {
 		switch agentRuleFor(rt).kind {
 		case scopeGlobalRead, scopeNarrowed:
 			reach = append(reach, rt.Method+" "+rt.Path)
-		case scopeProject, scopeRun:
+		case scopeProject, scopeRun, scopeRules:
 		default:
 			if strings.HasPrefix(rt.Path, "/v1/projects/{id}") || strings.HasPrefix(rt.Path, "/v1/runs/{id}") {
 				t.Errorf("%s %s is a project route ruled outside", rt.Method, rt.Path)
@@ -297,5 +329,157 @@ func TestTheRoutesOutsideProjectsAnAgentMayReachArePinned(t *testing.T) {
 	}
 	if strings.Join(reach, "\n") != strings.Join(want, "\n") {
 		t.Errorf("routes a per-agent token reaches outside projects changed:\n got %q\nwant %q", reach, want)
+	}
+}
+
+// Review of B-550: a full grant could set the commands the engine runs, so
+// it would have been host access. A full grant does the work; the person
+// sets the rules.
+func TestAFullGrantDoesNotChangeAProjectsRules(t *testing.T) {
+	server, store, project := scopedServer(t)
+	tok := issue(t, store, "Agent", agenttoken.Grant{Project: project, Level: agenttoken.LevelFull})
+	for _, c := range []struct{ method, path, body string }{
+		{"PATCH", "/v1/projects/" + project, `{"render.command":"cat ~/.local/state/ducklab/human.token"}`},
+		{"DELETE", "/v1/projects/" + project, ""},
+		{"PUT", "/v1/projects/" + project + "/autonomy", `{"autonomy":"yolo"}`},
+		{"POST", "/v1/projects/" + project + "/gate", `{}`},
+		{"PUT", "/v1/projects/" + project + "/visual-check", `{}`},
+		{"POST", "/v1/projects/" + project + "/skills", `{"name":"x"}`},
+		{"POST", "/v1/projects/" + project + "/recover/restore", `{}`},
+	} {
+		status, out := call(t, server, tok, c.method, c.path, c.body)
+		wantScopeRefusal(t, status, out, c.method+" "+c.path)
+		if !strings.Contains(out, "rules") {
+			t.Errorf("%s %s refusal does not say why: %s", c.method, c.path, out)
+		}
+	}
+}
+
+// Review of B-550: {"from": "~/.local/state/ducklab/human.token"} read the
+// person's credential into a brief the agent could fetch.
+func TestAPerAgentTokenNamesFilesOnlyInsideItsProject(t *testing.T) {
+	f := scopedEngine(t)
+	tok := issue(t, f.store, "Agent", agenttoken.Grant{Project: f.project, Level: agenttoken.LevelFull})
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.path, "innocent.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	stage := "/v1/projects/" + f.project + "/stages/intake"
+	for name, body := range map[string]string{
+		"from outside":       `{"from":"` + outside + `"}`,
+		"ref outside":        `{"from":"build a thing","refs":[{"path":"` + filepath.Dir(outside) + `"}]}`,
+		"ref by home":        `{"from":"build a thing","refs":[{"path":"~/.local/state/ducklab/human.token"}]}`,
+		"ref through a link": `{"from":"build a thing","refs":[{"path":"innocent.md"}]}`,
+		"ref climbing out":   `{"from":"build a thing","refs":[{"path":"../../etc/passwd"}]}`,
+	} {
+		status, out := call(t, f.server, tok, "POST", stage, body)
+		wantScopeRefusal(t, status, out, name)
+	}
+	status, out := call(t, f.server, tok, "POST", "/v1/projects/"+f.project+"/reference-images", `{"path":"`+outside+`"}`)
+	wantScopeRefusal(t, status, out, "reference import from outside")
+
+	// Inside the project, and a brief that is text, pass the scope check.
+	inside := filepath.Join(f.path, "brief.md")
+	os.WriteFile(inside, []byte("# brief"), 0o644)
+	for name, body := range map[string]string{
+		"from inside": `{"from":"` + inside + `","refs":[{"path":"brief.md"}]}`,
+		"from text":   `{"from":"build a calculator"}`,
+	} {
+		if _, out := call(t, f.server, tok, "POST", stage, body); strings.Contains(out, "agent_scope") {
+			t.Errorf("%s refused by scope: %s", name, out)
+		}
+	}
+}
+
+func TestForgettingAProjectDropsItsGrants(t *testing.T) {
+	svc, projectID, path := landedResolutionService(t)
+	f := scopedEngineOn(t, svc, projectID, path, false)
+	server, store, project := f.server, f.store, f.project
+	_, secret, _ := store.Create("Agent", []agenttoken.Grant{{Project: project, Level: agenttoken.LevelFull}})
+	if status, out := call(t, server, humanTok, "DELETE", "/v1/projects/"+project, ""); status != http.StatusNoContent {
+		t.Fatalf("forget = %d %s", status, out)
+	}
+	who, ok := store.Lookup(secret)
+	if !ok {
+		t.Fatal("token lost")
+	}
+	if _, granted := who.Level(project); granted {
+		t.Error("a forgotten project's grant survived, ready for the next project with that id")
+	}
+}
+
+func TestAPerAgentTokenSeesWhichProviderHeadersAreSetNotTheirValues(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		t.Setenv(name, filepath.Join(root, name))
+	}
+	cfg := config.DefaultGlobal()
+	if cfg.Providers == nil {
+		cfg.Providers = map[config.ProviderID]config.Provider{}
+	}
+	cfg.Providers["hdr"] = config.Provider{Kind: "openai", BaseURL: "http://127.0.0.1:9/v1",
+		Headers: map[string]string{"Authorization": "Bearer static-secret"}}
+	svc, err := service.New(cfg, service.Options{Bus: bus.New(16)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := serveScoped(t, svc, "", "")
+	server := f.server
+	tok := issue(t, f.store, "Agent")
+	_, out := call(t, server, tok, "GET", "/v1/providers", "")
+	if strings.Contains(out, "static-secret") || !strings.Contains(out, "Authorization") {
+		t.Errorf("agent provider list = %s, want the header named and its value masked", out)
+	}
+	if _, out := call(t, server, humanTok, "GET", "/v1/providers", ""); !strings.Contains(out, "static-secret") {
+		t.Errorf("the person's provider list lost the header: %s", out)
+	}
+}
+
+func TestARevokeEndsAnOpenEventStream(t *testing.T) {
+	f := scopedEngine(t)
+	view, secret, _ := f.store.Create("Agent", []agenttoken.Grant{{Project: f.project, Level: agenttoken.LevelRead}})
+	req, _ := http.NewRequest("GET", f.server.URL+"/v1/events?project="+f.project, nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream = %d", resp.StatusCode)
+	}
+	ended := make(chan struct{})
+	go func() {
+		io.Copy(io.Discard, resp.Body)
+		close(ended)
+	}()
+	f.bus.Publish(bus.Event{Type: "run_started", ProjectID: f.project})
+	if _, err := f.store.Revoke(view.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.bus.Publish(bus.Event{Type: "run_started", ProjectID: f.project})
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stream kept going after its token was revoked")
+	}
+}
+
+func TestAConfigReceiptNamesTheAgentNotThePerson(t *testing.T) {
+	f := scopedEngine(t)
+	status, out := call(t, f.server, agentTok, "PATCH", "/v1/projects/"+f.project, `{"name":"renamed","_source":"test"}`)
+	if status != http.StatusOK {
+		t.Fatalf("shared-token update = %d %s", status, out)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.path, ".ducklab", "config-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"actor":"agent"`) || strings.Contains(string(raw), `"actor":"human"`) {
+		t.Errorf("config receipt = %s, want the agent", raw)
 	}
 }

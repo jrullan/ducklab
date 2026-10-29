@@ -373,7 +373,24 @@ func (s *Server) handleBenchGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviderList(w http.ResponseWriter, r *http.Request) {
-	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
+	items := s.svc.ProviderList()
+	// Provider headers can carry a static credential. A per-agent token
+	// reads which headers are set, never their values (B-550).
+	// A fresh map: the view shares the engine's own, and masking that in
+	// place blanked the real header for every later call.
+	if requestIdentity(r) != nil {
+		for i := range items {
+			if len(items[i].Headers) == 0 {
+				continue
+			}
+			masked := make(map[string]string, len(items[i].Headers))
+			for k := range items[i].Headers {
+				masked[k] = "(set)"
+			}
+			items[i].Headers = masked
+		}
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
 func (s *Server) handleEngineDefaults(w http.ResponseWriter, r *http.Request) {
@@ -1370,7 +1387,9 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	source := keys["_source"]
 	delete(keys, "_source")
-	project, err := s.svc.ProjectUpdate(r.Context(), r.PathValue("id"), keys, source)
+	// The receipt names who changed the config: the credential's actor, not
+	// the person whenever a source is named.
+	project, err := s.svc.ProjectUpdateBy(r.Context(), r.PathValue("id"), keys, source, s.actor(r, ""))
 	if err != nil {
 		// An unknown or mistyped key is the caller's mistake, not a server
 		// fault, and it must say which key.
@@ -1686,6 +1705,14 @@ func (s *Server) handleProjectForget(w http.ResponseWriter, r *http.Request) {
 	if err := s.svc.ProjectForget(r.Context(), r.PathValue("id")); err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
+	}
+	// The id is free for the next project with that name; no token may
+	// carry access over to it (B-550).
+	if s.agentTokens != nil {
+		if err := s.agentTokens.DropProject(r.PathValue("id")); err != nil {
+			s.error(w, http.StatusInternalServerError, "internal", "project forgotten, but its agent grants were not removed: "+err.Error())
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2142,6 +2169,32 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// A stream outlives the request that opened it. A per-agent token's
+	// access is asked again before every write, so a revoke or a narrowed
+	// grant ends the stream instead of leaving it open for hours (B-550).
+	runOwner := ""
+	if runID != "" && requestIdentity(r) != nil {
+		runOwner = s.projectIDFn(runID)
+	}
+	stillAllowed := func() bool {
+		who := requestIdentity(r)
+		if who == nil || s.agentTokens == nil {
+			return true
+		}
+		now, ok := s.agentTokens.Current(who)
+		if !ok {
+			return false
+		}
+		for _, p := range []string{projectID, runOwner} {
+			if p == "" {
+				continue
+			}
+			if _, ok := now.Level(p); !ok {
+				return false
+			}
+		}
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -2151,6 +2204,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				// The bus dropped us for overflow. Ending the response is what
 				// makes the client reconnect with Last-Event-ID; ranging over a
 				// closed channel would spin instead.
+				return
+			}
+			if !stillAllowed() {
 				return
 			}
 			// Drop anything the backlog replay already delivered. Persisted
@@ -2170,6 +2226,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		case <-heartbeat.C:
+			if !stillAllowed() {
+				return
+			}
 			fmt.Fprintf(w, "event: heartbeat\n")
 			fmt.Fprintf(w, "data: {\"ts\":%q}\n\n", time.Now().UTC().Format(time.RFC3339))
 			flusher.Flush()
@@ -2213,6 +2272,24 @@ func (s *Server) handleStageStart(w http.ResponseWriter, r *http.Request) {
 	req.Stage = r.PathValue("stage")
 	if s.refuseAgentCaps(w, r, nil, req.AgentTurns) {
 		return
+	}
+	if requestIdentity(r) != nil {
+		var paths []string
+		// --from is read as a file when one is there, else taken as text.
+		// The service reads it relative to the engine's directory, not the
+		// project's, so it is checked as the absolute path that read opens.
+		if req.From != "" {
+			if _, err := os.Stat(req.From); err == nil {
+				abs, _ := filepath.Abs(req.From)
+				paths = append(paths, abs)
+			}
+		}
+		for _, ref := range req.Refs {
+			paths = append(paths, ref.Path)
+		}
+		if !s.agentPathsInside(w, r, r.PathValue("id"), paths) {
+			return
+		}
 	}
 	run, err := s.svc.StageStart(r.Context(), r.PathValue("id"), req)
 	if err != nil {
@@ -2382,6 +2459,14 @@ func (s *Server) handleReferenceImport(w http.ResponseWriter, r *http.Request) {
 	var req service.ReferenceImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	// Read relative to the engine's directory, like --from.
+	importPath := strings.TrimSpace(req.Path)
+	if importPath != "" && importPath != "~" && !strings.HasPrefix(importPath, "~/") {
+		importPath, _ = filepath.Abs(importPath)
+	}
+	if !s.agentPathsInside(w, r, r.PathValue("id"), []string{importPath}) {
 		return
 	}
 	info, err := s.svc.ReferenceImport(r.Context(), r.PathValue("id"), req)

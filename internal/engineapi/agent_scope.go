@@ -3,6 +3,8 @@ package engineapi
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agenttoken"
@@ -36,6 +38,9 @@ const (
 	// scopeNarrowed is a listing the handler itself narrows to the granted
 	// projects: project and run lists, the event stream.
 	scopeNarrowed
+	// scopeRules is a project route that changes the project's rules rather
+	// than doing its work. Not even a full grant reaches it.
+	scopeRules
 )
 
 type agentRule struct {
@@ -67,6 +72,25 @@ var agentNarrowed = map[string]bool{
 	"GET /v1/events":   true,
 }
 
+// agentProjectRules are the routes that change what a project lets work do:
+// its config (which names the commands the engine runs — the render
+// command, the gate, the install chain), its autonomy, its gate and visual
+// gate, its skills, and whether it is registered at all. Review of B-550: a
+// full grant that could set render.command could run anything as the person
+// and read human.token — every grant would be host access. A full grant does
+// the work; the person sets the rules.
+var agentProjectRules = map[string]bool{
+	"PATCH /v1/projects/{id}":                 true,
+	"DELETE /v1/projects/{id}":                true,
+	"PUT /v1/projects/{id}/autonomy":          true,
+	"POST /v1/projects/{id}/gate":             true,
+	"PUT /v1/projects/{id}/visual-check":      true,
+	"POST /v1/projects/{id}/skills":           true,
+	"PUT /v1/projects/{id}/skills/{name}":     true,
+	"DELETE /v1/projects/{id}/skills/{name}":  true,
+	"POST /v1/projects/{id}/recover/{action}": true,
+}
+
 // agentReadPosts are POSTs that only compute an answer, so read-only access
 // covers them.
 var agentReadPosts = map[string]bool{
@@ -80,6 +104,8 @@ func agentRuleFor(rt Route) agentRule {
 		need = agenttoken.LevelRead
 	}
 	switch {
+	case agentProjectRules[key]:
+		return agentRule{kind: scopeRules, need: agenttoken.LevelFull}
 	case agentNarrowed[key]:
 		return agentRule{kind: scopeNarrowed, need: agenttoken.LevelRead}
 	case agentGlobalReads[key],
@@ -119,6 +145,11 @@ func (s *Server) agentScope(rt Route, next http.HandlerFunc) http.HandlerFunc {
 			if !s.agentMay(w, who, project, rule.need) {
 				return
 			}
+		case scopeRules:
+			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+				"agent token %q may work in a project but not change its rules: %s %s is the person's "+
+					"(the desktop, or ask with an approval request)", who.Name, rt.Method, rt.Path))
+			return
 		default:
 			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
 				"agent token %q reaches only the projects it is granted, and %s %s is outside any project; "+
@@ -190,4 +221,65 @@ func visibleRuns(r *http.Request, runs []*runlog.Run) []*runlog.Run {
 		}
 	}
 	return out
+}
+
+// agentPathsInside refuses a per-agent token any file path outside its
+// project. Review of B-550: a stage's --from and refs, and a reference
+// import, name files the engine reads with the person's rights; with a full
+// grant on one project, {"from": "~/.local/state/ducklab/human.token"} read
+// the person's credential into a brief the agent could then fetch. Paths are
+// resolved the way the service resolves them — relative to the project, ~
+// to home — and through symlinks.
+func (s *Server) agentPathsInside(w http.ResponseWriter, r *http.Request, projectID string, paths []string) bool {
+	who := requestIdentity(r)
+	if who == nil || len(paths) == 0 {
+		return true
+	}
+	project, err := s.svc.ProjectGet(r.Context(), projectID)
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return false
+	}
+	root := resolvedPath(project.Path)
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == "~" || strings.HasPrefix(p, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+			}
+		} else if !filepath.IsAbs(p) {
+			p = filepath.Join(project.Path, p)
+		}
+		rel, err := filepath.Rel(root, resolvedPath(p))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+				"agent token %q may name files only inside project %q; %s is outside it. "+
+					"A reference from elsewhere is the person's to give", who.Name, projectID, p))
+			return false
+		}
+	}
+	return true
+}
+
+// resolvedPath is p made absolute with every symlink followed, as far as the
+// path exists; the missing tail is kept as written, so a link cannot lead
+// out through a parent and a not-yet-existing file still resolves.
+func resolvedPath(p string) string {
+	p, _ = filepath.Abs(p)
+	p = filepath.Clean(p)
+	tail := ""
+	for cur := p; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, tail)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		tail = filepath.Join(filepath.Base(cur), tail)
+		cur = parent
+	}
 }

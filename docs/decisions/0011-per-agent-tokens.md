@@ -33,9 +33,23 @@ land tasks and open PRs in any other.
   else `full`. Outside projects a token reads configuration only, from a
   pinned list; a new route outside projects is refused until someone adds it
   there (`TestTheRoutesOutsideProjectsAnAgentMayReachArePinned`).
+- **Full does the work; the person sets the rules.** Review found that a
+  full grant reaching `PATCH /v1/projects/{id}` could set `render.command`,
+  which the engine runs as the person — so every grant would have been host
+  access, `human.token` included. A project's config, autonomy, gate,
+  visual gate, skills, registration and orphan recovery are refused to every
+  per-agent token. Likewise, files a token names (`from`, `refs`, a
+  reference import) must resolve inside the project: `{"from":
+  "~/.local/state/ducklab/human.token"}` otherwise read the person's
+  credential into a brief the agent could fetch.
+- A grant ends when it should: an event stream re-checks the token before
+  each write, and forgetting a project drops its grants, since project ids
+  are reused.
 - Clients present `DUCKLAB_TOKEN` when it is set — the MCP server and the CLI
   alike, and the CLI even at an interactive terminal — and a reconnect keeps
-  it rather than falling back to `engine.json`.
+  it rather than falling back to `engine.json`. The engine never inherits
+  it: an agent's CLI that auto-starts the engine would otherwise make every
+  child the engine spawns act as that agent.
 
 **Transition.** The shared token keeps working, at full access everywhere,
 until the person turns it off. Turning it on by default keeps every existing

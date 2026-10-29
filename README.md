@@ -431,7 +431,9 @@ ducklab token create "OpenCode ti36" --grant ti36xpro-opencode=full --grant duck
 The secret is printed once; put it in that agent's MCP server environment as
 `DUCKLAB_TOKEN`. The agent then reaches only the projects you granted —
 `read-only` reads, `full` acts — and everything it does is recorded under its
-own name (`agent:opencode-ti36`). Change grants or revoke at any time. Once
+own name (`agent:opencode-ti36`). Even `full` cannot change a project's
+rules (its config, autonomy, gates, skills) or name files outside it. Change
+grants or revoke at any time. Once
 every agent has its own token, turn the shared one off
 (`ducklab token legacy off`).
 

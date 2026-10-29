@@ -19,6 +19,10 @@ func tokenCmd(verb string, args []string) int {
 		return 9
 	}
 	client := cliClient(info)
+	if os.Getenv(engineclt.AgentTokenEnv) != "" && verb != "whoami" {
+		fmt.Fprintf(os.Stderr, "note: %s is set in this shell, so this runs as that agent and the engine will refuse it; "+
+			"managing tokens needs your own credential — unset it first\n", engineclt.AgentTokenEnv)
+	}
 
 	switch verb {
 	case "", "list":

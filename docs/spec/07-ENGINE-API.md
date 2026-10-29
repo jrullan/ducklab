@@ -49,8 +49,15 @@ app are clients. This document is the contract between them.
   only granted projects; `/v1/events` must name a granted `project` or `run`.
   Outside projects a token reads configuration only (engine, ducklings,
   providers, defaults, bench, presets, `GET /v1/agent-tokens/self`); every
-  other route there is refused. Refusals are `403 agent_scope` and name the
-  way out. The shared `engine.json` token stays valid until the person turns
+  other route there is refused. Even `full` does not reach a project's
+  rules — `PATCH`/`DELETE /v1/projects/{id}`, autonomy, gate adoption,
+  visual-check config, skill writes, orphan recovery — since its config names
+  the commands the engine runs. File paths a token names (a stage's `from`
+  and `refs`, a reference import) must resolve, through symlinks, inside the
+  project. Provider header values are masked. An open event stream re-checks
+  the token before every write and ends on revoke or a narrowed grant;
+  forgetting a project drops every grant to it. Refusals are `403
+  agent_scope` and name the way out. The shared `engine.json` token stays valid until the person turns
   it off (`PUT /v1/agent-tokens/legacy`); then it is `401
   shared_agent_token_off`, and the renderer gets an in-memory read-only token
   for its project, revoked when the render ends.

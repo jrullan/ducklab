@@ -32,6 +32,13 @@ func main() {
 		return
 	}
 
+	// An engine auto-started by an agent's CLI inherits that agent's
+	// environment. Its per-agent token must not become the engine's: every
+	// child — render commands, gates, ducklings, a ducklab CLI inside a run —
+	// would act as that agent, and a render of another project would carry
+	// the wrong grant (review of B-550).
+	os.Unsetenv("DUCKLAB_TOKEN")
+
 	// One engine per state directory, for the whole life of the process
 	// (B-530 review): two simultaneous starts each published their own
 	// human.token and then raced to engine.json, leaving a credential pair

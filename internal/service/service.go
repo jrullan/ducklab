@@ -925,6 +925,17 @@ func (s *Service) configDoctorAt(projectPath string) ([]config.Finding, error) {
 // Keys are applied to a copy and written only if every one of them is valid,
 // so a typo in the second key cannot leave the first half-applied.
 func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]string, sources ...string) (*Project, error) {
+	source := ""
+	if len(sources) > 0 {
+		source = sources[0]
+	}
+	return s.ProjectUpdateBy(ctx, id, keys, source, "human")
+}
+
+// ProjectUpdateBy is ProjectUpdate with the actor its config receipt names:
+// the API passes the credential's, so an agent's edit is never filed as the
+// person's.
+func (s *Service) ProjectUpdateBy(ctx context.Context, id string, keys map[string]string, source, actor string) (*Project, error) {
 	entry, err := s.registry.Get(id)
 	if err != nil {
 		return nil, err
@@ -943,9 +954,9 @@ func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]
 	if err := config.SaveProject(path, &updated); err != nil {
 		return nil, err
 	}
-	if len(sources) > 0 && sources[0] != "" {
+	if source != "" {
 		if receipt, receiptErr := os.OpenFile(filepath.Join(entry.Path, ".ducklab", "config-audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); receiptErr == nil {
-			_ = json.NewEncoder(receipt).Encode(map[string]interface{}{"actor": "human", "source": sources[0], "keys": sortedKeys(keys), "ts": time.Now().UTC().Format(time.RFC3339)})
+			_ = json.NewEncoder(receipt).Encode(map[string]interface{}{"actor": actor, "source": source, "keys": sortedKeys(keys), "ts": time.Now().UTC().Format(time.RFC3339)})
 			_ = receipt.Close()
 		}
 	}
