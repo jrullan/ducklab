@@ -382,6 +382,12 @@ answers questions, files bugs, amends plans and starts work. The engine's
 `next` lists are the law: an operator cannot take an action a person could
 not.
 
+An operator does not have to poll. For OpenCode, the
+[`ducklab-bell`](integrations/opencode/ducklab-bell/README.md) plugin wakes a
+chosen session whenever a run needs a decision, and in `act` mode carries a
+coordinator policy so that session runs errands end to end ("fix the bugs")
+and escalates what is the person's.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, how the tests guard
