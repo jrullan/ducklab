@@ -60,6 +60,14 @@ Stop the errand and ask, in 2-3 lines with the concrete action you propose, when
   explicit confirmation for that bug. `fixed` is where your work ends; an
   accepted task already moves its bug there. A request to fix, build or test
   is not a confirmation that anything was verified.
+- Abort or reject a run, or discard its work, without the user's explicit
+  confirmation for that run. A run that is still working is not stuck because
+  a tool call failed: models recover from failed patches and red gates all the
+  time, and an abort throws away work that may be one step from green.
+- Treat a `distress` event as a diagnosis. It says a tool call failed; read the
+  run with `run_get` and look at what actually failed before concluding
+  anything about the environment. If the run looks truly stuck, tell the user
+  what you saw and propose the abort; let them decide.
 - Work around an engine refusal. A refusal is an answer: report it.
 - Start work outside the errand you were given.
 

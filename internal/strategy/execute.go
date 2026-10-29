@@ -1614,6 +1614,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// read as a hang — the person could not see the harness working.
 			emit(params, "gate_started", map[string]interface{}{"round": round})
 			gate, log, err := params.Gate(ctx)
+			if err == nil && ctx.Err() != nil {
+				// Cancelled mid-gate (an abort, a shutdown): a gate that could
+				// not run is not "no gate configured" (B-547).
+				err = ctx.Err()
+			}
 			if err != nil {
 				result.Error = err
 				return result, err
