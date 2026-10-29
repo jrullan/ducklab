@@ -131,6 +131,14 @@ ducklab spec   [--mode council]
 ducklab plan   [--mode council]
 ```
 
+A bare `intake` (no `--from`, `--ref-scope` or `--adopt`) is the interview:
+at a terminal it says so and asks before starting; over a pipe, or with
+`--yes` (which skips the interview), it refuses with the usage and starts
+nothing. The engine itself refuses an intake under `auto` or `yolo` autonomy
+with no brief, scope reference, adoption or revision note, for any API caller
+(B-548); a guarded briefless intake — MCP `stage_start`, `project_start` with
+no brief — is still the interview and pauses for its questions.
+
 `intent` prints `.ducklab/docs/intent.md`: every brief an intake run received,
 verbatim, with its run, outcome and the requirements it introduced or changed
 (`05 §1`). `spec` and `plan` refuse to start without their prerequisite and
