@@ -160,7 +160,7 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 	}
 
 	identity := verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID}
-	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify, identity)
+	res, err := RunVerify(ctx, ectx, ectx.ProjectRoot, ectx.Verify, identity)
 	if err != nil {
 		return "none", "", err
 	}
@@ -241,7 +241,7 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	if missing := missingProducedFiles(ectx.ProjectRoot, ectx.TaskProducedFiles); len(missing) > 0 {
 		return "red", "task artifact contract:\ngate: red\nmissing declared Produces files: " + strings.Join(missing, ", "), nil
 	}
-	res, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+	res, err := RunVerify(ctx, ectx, ectx.ProjectRoot, config.Verify{
 		Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
 	}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
 	if err != nil {
@@ -262,7 +262,7 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		return "none", "", fmt.Errorf("resolve harness capabilities: %w", err)
 	}
 	for _, check := range checks {
-		strictRes, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+		strictRes, err := RunVerify(ctx, ectx, ectx.ProjectRoot, config.Verify{
 			Mode: "custom", Custom: check.Command, TimeoutS: ectx.Verify.TimeoutS,
 		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
 		if err != nil {
@@ -311,7 +311,7 @@ func RunAcceptanceProbeGate(ctx context.Context, ectx *ExecContext) (string, str
 	}
 	var log string
 	for index, command := range ectx.TaskAcceptanceProbes {
-		probe, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+		probe, err := RunVerify(ctx, ectx, ectx.ProjectRoot, config.Verify{
 			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
 		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
 		if err != nil {

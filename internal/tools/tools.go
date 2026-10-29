@@ -117,6 +117,9 @@ type ExecContext struct {
 	// ConsecGateFails counts verify_run reds with no green between them,
 	// across the whole run — the loop's own I3, at gate level.
 	ConsecGateFails int
+	// GateMemo lets verify_run and the final gate reuse a green verification
+	// of the exact same tree in this run (B-545). Nil runs every gate.
+	GateMemo *GateMemo
 	// OnDistress reports operator-relevant brakes without coupling tools to the bus.
 	OnDistress func(reason string, data map[string]interface{})
 	// OnAskAdvisor answers an implementer's mid-turn consult (ask_advisor)
