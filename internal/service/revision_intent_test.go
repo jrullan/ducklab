@@ -352,3 +352,21 @@ func TestRevisionRecordIsEngineOwned(t *testing.T) {
 		t.Fatalf("empty revision fields leak into old-shape requests: %s", data)
 	}
 }
+
+// B-548: the unattended-intake refusal runs after the revision is prepared, so
+// a revision under "auto" that names no brief of its own still starts — it
+// continues the parent's brief.
+func TestUnattendedIntakeRevisionInheritsTheBrief(t *testing.T) {
+	s, projectID, root, guide := revisionChainProject(t)
+	first := startAndSettle(t, s, projectID, StageRequest{
+		Stage: "intake", Mode: "solo", Refs: backgroundRefs(guide),
+		From: "Fill the gap between the implemented and the intended calculator.",
+	})
+	rev := startAndSettle(t, s, projectID, StageRequest{
+		Stage: "intake", RevisesRun: first.ID, Autonomy: "auto",
+		ReviseFindings: "- [major] REQ-001 invents an error.",
+	})
+	if req := persistedStageRequest(t, root, rev.ID); !strings.Contains(req.From, "Fill the gap") {
+		t.Fatalf("revision brief = %q, want the parent's", req.From)
+	}
+}
