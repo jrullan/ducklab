@@ -766,7 +766,9 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		TurnCapSources: turnCaps.Sources,
 		Gate: func(ctx context.Context) (string, string, error) {
 			mc.rs.recordGateRoot(root)
-			gate, log, err := tools.RunVerificationGate(ctx, mc.ectx)
+			// The round gate decides (I2): it never reuses, and what it finds
+			// is what verify_run and the final gate may reuse (B-545).
+			gate, log, err := tools.RunVerificationGate(tools.FreshGate(ctx), mc.ectx)
 			if err != nil {
 				// A build-system marker without its tool is not a gate error:
 				// it is a toolchain the person has not installed, named on the

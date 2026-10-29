@@ -126,6 +126,9 @@ type ToolCallRecord struct {
 	Args   json.RawMessage
 	Result *tools.Result
 	Digest string
+	// Ms is how long the call took. The desktop shows it, and without it a
+	// gate's cost was invisible in the record (B-545).
+	Ms int64
 }
 
 // ErrTruncated is returned when a response is truncated.
@@ -903,7 +906,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				// computed before execution: a delete removes the file that lets
 				// "/obsolete.txt" be read as a project path.
 				nativeArgs := tools.CanonicalToolArgs(ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+				started := time.Now()
 				result, terr := executeToolCall(ctx, loop, ectx, tc, turn)
+				elapsed := time.Since(started).Milliseconds()
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
 					return outcome, terr
@@ -918,6 +923,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					Args:   nativeArgs,
 					Result: result,
 					Digest: tools.Digest(nativeArgs),
+					Ms:     elapsed,
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {
@@ -934,7 +940,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			toolCall, remainingText := parseTextToolCall(text)
 			if toolCall != nil {
 				textArgs := tools.CanonicalToolArgs(ectx, toolCall.Name, toolCall.Args)
+				started := time.Now()
 				result, terr := executeTextToolCall(ctx, loop, ectx, toolCall, turn)
+				elapsed := time.Since(started).Milliseconds()
 				if errors.Is(terr, tools.ErrHumanNeeded) {
 					outcome.Pending = ectx.Pending
 					return outcome, terr
@@ -952,6 +960,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					Args:   textArgs,
 					Result: result,
 					Digest: tools.Digest(textArgs),
+					Ms:     elapsed,
 				}
 				outcome.ToolCalls = append(outcome.ToolCalls, rec)
 				if loop.OnToolCall != nil {

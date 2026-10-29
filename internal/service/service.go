@@ -2164,6 +2164,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		RunID:                runAtLaunch.ID,
 		ProjectID:            runAtLaunch.ProjectID,
 		Autonomy:             config.Autonomy(runAtLaunch.Autonomy),
+		GateMemo:             tools.NewGateMemo(),
 		UnsafeWrites:         runAtLaunch.UnsafeWrites,
 		ShellPolicy:          projCfg.Shell,
 		Verify:               projCfg.Verify,
@@ -2343,7 +2344,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.failRun(rs, fmt.Errorf("verify task: %w", err))
 		return
 	}
-	gateResult, err := verify.Run(ctx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	gateResult, err := tools.RunVerify(ctx, ectx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -6185,6 +6186,9 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			"role": string(t.Role), "duckling": duckling,
 			"tool": rec.Name,
 			"args": string(rec.Args),
+		}
+		if rec.Ms > 0 {
+			data["ms"] = rec.Ms
 		}
 		if rec.Result != nil {
 			data["ok"] = !rec.Result.IsError

@@ -2222,6 +2222,9 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 			"tool": tc.Name,
 			"args": string(tc.Args),
 		}
+		if tc.Ms > 0 {
+			data["ms"] = tc.Ms
+		}
 		if tc.Result != nil {
 			data["ok"] = !tc.Result.IsError
 			// The result is summarised, not stored whole: a single fs_read can
