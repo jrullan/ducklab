@@ -2339,12 +2339,21 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	})
 	gateRoot := ectx.ProjectRoot
 	rs.recordGateRoot(gateRoot)
-	taskGate, taskGateLog, err := tools.RunTaskVerificationGate(ctx, ectx)
+	// The final gate reuses the round gate's green on an unchanged tree
+	// (B-545) — unless a product smoke or render follows: those run against
+	// the build output the project gate leaves behind, which is ignored and
+	// outside the tree identity, so the gate rebuilds it first (review of
+	// B-545).
+	finalCtx := ctx
+	if smoke, _, _, _ := productSmokeConfig(projCfg.Run); smoke != "" || (projCfg.RenderConfigured && effectiveRenderContract(projCfg).Command != "") {
+		finalCtx = tools.FreshGate(ctx)
+	}
+	taskGate, taskGateLog, err := tools.RunTaskVerificationGate(finalCtx, ectx)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify task: %w", err))
 		return
 	}
-	gateResult, err := tools.RunVerify(ctx, ectx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	gateResult, err := tools.RunVerify(finalCtx, ectx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -2355,7 +2364,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	probeGate, probeLog := "none", ""
 	if taskGate != "red" && verify.IsGreen(gateResult) {
-		probeGate, probeLog, err = tools.RunAcceptanceProbeGate(ctx, ectx)
+		probeGate, probeLog, err = tools.RunAcceptanceProbeGate(finalCtx, ectx)
 		if err != nil {
 			s.failRun(rs, fmt.Errorf("verify acceptance probes: %w", err))
 			return

@@ -130,3 +130,40 @@ func TestVerifyRunReusesTheImplementersGreen(t *testing.T) {
 		t.Errorf("a run without a memo reused a result (%d runs)", count())
 	}
 }
+
+// Review of B-545: an implementer's green on tree T outlived the round
+// gate's red on the same T (something outside the tree identity changed, or
+// a flaky test), and the final gate reused the stale green. Only the latest
+// run of a key speaks for it.
+func TestARedRunErasesAnEarlierGreen(t *testing.T) {
+	// The gate reads a marker outside the tree identity, as an ignored build
+	// output or a flaky dependency would.
+	marker := filepath.Join(t.TempDir(), "broken")
+	ectx, count, _ := memoFixture(t, "[ ! -e "+marker+" ]")
+	ctx := context.Background()
+	runIt(t, ctx, ectx) // the implementer's green on T, recorded
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := runIt(t, FreshGate(ctx), ectx); verify.IsGreen(res) {
+		t.Fatal("the deciding run did not go red")
+	}
+	before := count()
+	res := runIt(t, ctx, ectx)
+	if verify.IsGreen(res) || strings.Contains(res.Output, "[reused") {
+		t.Fatalf("a green that the latest run contradicted was reused: %q", res.Output)
+	}
+	if count() != before+1 {
+		t.Errorf("the call after a red did not run the gate")
+	}
+}
+
+// A reused result did not run: it carries no duration of its own.
+func TestAReusedResultHasNoDuration(t *testing.T) {
+	ectx, _, _ := memoFixture(t, "sleep 0.05")
+	ctx := context.Background()
+	runIt(t, ctx, ectx)
+	if res := runIt(t, ctx, ectx); res.Duration != 0 {
+		t.Errorf("a reused result reports %vs of a run that did not happen", res.Duration)
+	}
+}

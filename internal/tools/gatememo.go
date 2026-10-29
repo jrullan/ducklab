@@ -89,12 +89,22 @@ func RunVerify(ctx context.Context, ectx *ExecContext, root string, cfg config.V
 		memo.mu.Unlock()
 		if ok {
 			reused := hit.res
+			// Nothing ran: the record must not show the earlier run's time
+			// as this one's (review of B-545).
+			reused.Duration = 0
 			reused.Output = fmt.Sprintf("[reused: this exact tree (%s) passed this command at %s in this run; not re-run]\n",
 				shortTree(hit.tree), hit.at.Local().Format("15:04:05")) + reused.Output
 			return &reused, nil
 		}
 	}
 	res, err := verify.Run(ctx, root, cfg, id)
+	// Only the latest run of a key speaks for it. A run that is not green —
+	// red, an error, a gate that changed the tree — removes what an earlier
+	// green said (review of B-545: an implementer's green on tree T outlived
+	// the round gate's red on the same T, and the final gate reused it).
+	memo.mu.Lock()
+	delete(memo.entries, key)
+	memo.mu.Unlock()
 	if err != nil || res == nil || !verify.IsGreen(res) {
 		return res, err
 	}
