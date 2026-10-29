@@ -462,6 +462,13 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// A briefless intake interviews the person. "auto" skips the interview and
+	// "yolo" has the advisor answer it — either way nobody says what to build
+	// and the architect drafts from nothing, billed (B-548). Refused before
+	// the run exists.
+	if req.Stage == "intake" && (req.Autonomy == "auto" || req.Autonomy == "yolo") && !intakeHasBrief(req) {
+		return nil, fmt.Errorf("an unattended intake needs a brief: without one, intake interviews the person, and %s autonomy leaves nobody to answer — give the brief (from), a scope reference, or adopt to survey the codebase", req.Autonomy)
+	}
 	// Intake retries keep the delivery constraints chosen at project creation,
 	// and relative references are project-relative rather than dependent on the
 	// engine daemon's working directory (B-474).
@@ -3503,4 +3510,19 @@ func (s *Service) contextFitNotes(promptChars int, seats []config.DucklingID) (w
 		}
 	}
 	return
+}
+
+// intakeHasBrief reports whether an intake says what to build without asking:
+// a brief, a revision note, a scope reference, or a survey of the tree.
+func intakeHasBrief(req StageRequest) bool {
+	if req.Adopt || strings.TrimSpace(req.From) != "" ||
+		strings.TrimSpace(req.Revise) != "" || strings.TrimSpace(req.ReviseFindings) != "" {
+		return true
+	}
+	for _, ref := range req.Refs {
+		if ref.IsScope() {
+			return true
+		}
+	}
+	return false
 }

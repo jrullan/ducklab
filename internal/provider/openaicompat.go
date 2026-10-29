@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -414,57 +413,9 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		return ChatResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// The stall watchdog. An upstream that accepts the request and then sends
-	// NOTHING held a run for the full 300s client timeout — and the retry
-	// chain behind it re-ran the same wait three more times, so one stalled
-	// provider cost twenty silent minutes (T-075, twice, two models). A
-	// healthy stream delivers its first byte in seconds and never goes quiet
-	// for two minutes between chunks; one that does is weather, and weather
-	// is retried — fast.
-	stall := p.stallTimeout
-	if stall <= 0 {
-		stall = defaultStallTimeout
-	}
-	ctx, cancelStall := context.WithCancel(ctx)
+	// The stall watchdog (see stallWatch).
+	ctx, watch, cancelStall := watchStall(ctx, p.stallTimeout)
 	defer cancelStall()
-	activity := make(chan struct{}, 1)
-	var stalled atomic.Bool
-	go func() {
-		t := time.NewTimer(stall)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-activity:
-				if !t.Stop() {
-					select {
-					case <-t.C:
-					default:
-					}
-				}
-				t.Reset(stall)
-			case <-t.C:
-				stalled.Store(true)
-				cancelStall()
-				return
-			}
-		}
-	}()
-	touch := func() {
-		select {
-		case activity <- struct{}{}:
-		default:
-		}
-	}
-	// stallErr dresses a watchdog trip as what it is: the provider's
-	// silence, transient, retryable — not a mysterious context error.
-	stallErr := func(err error) error {
-		if stalled.Load() {
-			return fmt.Errorf("%w: provider sent nothing for %s (stalled stream)", ErrProviderUnavailable, stall)
-		}
-		return err
-	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", strings.NewReader(string(body)))
 	if err != nil {
@@ -474,13 +425,13 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	httpReq.Header.Set("Accept", "text/event-stream")
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if stalled.Load() {
-			return ChatResponse{}, stallErr(err)
+		if watch.tripped() {
+			return ChatResponse{}, watch.err(err)
 		}
 		return ChatResponse{}, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 	defer resp.Body.Close()
-	touch()
+	watch.touch()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return ChatResponse{}, classifiedChatError("chat stream", resp.Status, resp.StatusCode, body)
@@ -516,7 +467,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 
 	scanner := newSSEScanner(resp.Body)
 	for scanner.scan() {
-		touch()
+		watch.touch()
 		event := scanner.event()
 		if event == "done" || event == "[DONE]" {
 			break
@@ -595,8 +546,8 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		if stalled.Load() {
-			return ChatResponse{}, stallErr(err)
+		if watch.tripped() {
+			return ChatResponse{}, watch.err(err)
 		}
 		// The server went away mid-stream — a connection reset from a proxy on
 		// a long stream is the most ordinary transient there is, and classed

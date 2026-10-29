@@ -2348,3 +2348,37 @@ func (s *Server) handleReferenceImage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
+
+// Signing a subscription in or out decides whose plan the ducklings spend, so
+// it is the person's call, like the budget defaults.
+func (s *Server) handleProviderLoginStart(w http.ResponseWriter, r *http.Request) {
+	if !s.requireHuman(w, r, "signing a provider in") {
+		return
+	}
+	view, err := s.svc.ProviderLoginStart(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleProviderLoginStatus(w http.ResponseWriter, r *http.Request) {
+	view, err := s.svc.ProviderLoginStatus(r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleProviderLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.requireHuman(w, r, "signing a provider out") {
+		return
+	}
+	if err := s.svc.ProviderLogout(r.PathValue("id")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"ok": true})
+}

@@ -283,3 +283,18 @@ func TestAnAgentCannotSetItsOwnCaps(t *testing.T) {
 		}
 	}
 }
+
+// Signing a subscription in or out decides whose plan the ducklings spend:
+// the person's call. Refused before the provider is even looked up.
+func TestAnAgentCannotSignAProviderInOrOut(t *testing.T) {
+	_, server, _ := laneWideningServer(t)
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/v1/providers/chatgpt/login"},
+		{"DELETE", "/v1/providers/chatgpt/login"},
+	} {
+		status, out := call(t, server, agentTok, c.method, c.path, `{}`)
+		if status != http.StatusForbidden || !strings.Contains(out, "human_credential_required") {
+			t.Errorf("agent %s %s = %d %s, want refused", c.method, c.path, status, out)
+		}
+	}
+}

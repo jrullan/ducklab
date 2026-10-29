@@ -1406,6 +1406,75 @@ func (g *Git) SnapshotTree() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// CandidateCommit builds the commit that staging everything but excluded
+// (as AddAllExcluding does) and committing would produce now — without
+// touching the real index, the working tree or any ref. It returns the
+// commit and its tree. The commit is dangling: nothing points at it, and it
+// exists so a clean checkout of it can be verified ahead of the real commit
+// (B-545).
+func (g *Git) CandidateCommit(message string, excluded ...string) (string, string, error) {
+	real, err := g.run("rev-parse", "--git-path", "index")
+	if err != nil {
+		return "", "", err
+	}
+	realIndex := strings.TrimSpace(real)
+	if !filepath.IsAbs(realIndex) {
+		realIndex = filepath.Join(g.Root, realIndex)
+	}
+	idx, err := os.CreateTemp("", "ducklab-candidate-index-*")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.Remove(idx.Name())
+	// Seeded from the real index, so what the person already staged is
+	// staged here too, as it will be when the real commit is made.
+	data, readErr := os.ReadFile(realIndex)
+	if readErr == nil {
+		_, err = idx.Write(data)
+	}
+	idx.Close()
+	if err != nil {
+		return "", "", err
+	}
+	if readErr != nil {
+		os.Remove(idx.Name()) // git refuses a zero-byte index; let it create one
+		if _, err := g.runWithIndex(idx.Name(), "read-tree", "HEAD"); err != nil {
+			return "", "", err
+		}
+	}
+	if _, err := g.runWithIndex(idx.Name(), "add", "-A"); err != nil {
+		return "", "", err
+	}
+	if paths := uniquePaths(append(excluded, ".ducklab-render-captures")); len(paths) > 0 {
+		if _, err := g.runWithIndex(idx.Name(), append([]string{"rm", "-r", "--cached", "--ignore-unmatch", "--"}, paths...)...); err != nil {
+			return "", "", err
+		}
+	}
+	out, err := g.runWithIndex(idx.Name(), "write-tree")
+	if err != nil {
+		return "", "", err
+	}
+	tree := strings.TrimSpace(out)
+	head, err := g.HeadSHA()
+	if err != nil {
+		return "", "", err
+	}
+	out, err = g.run("commit-tree", tree, "-p", head, "-m", message)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(out), tree, nil
+}
+
+// TreeOf returns the tree object a revision points at.
+func (g *Git) TreeOf(rev string) (string, error) {
+	out, err := g.run("rev-parse", rev+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // RestoreTree puts the working tree back to a snapshot. New callers should
 // prefer RestoreTreeAtHead so cleanup cannot overwrite commits made after the
 // snapshot.

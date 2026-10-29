@@ -399,6 +399,25 @@ func (c *Client) ProviderRemove(id string) error {
 	return c.delete("/v1/providers/" + id)
 }
 
+// ProviderLoginStart begins a subscription sign-in and returns the code.
+func (c *Client) ProviderLoginStart(id string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/providers/"+id+"/login", map[string]interface{}{}, &out)
+	return out, err
+}
+
+// ProviderLoginStatus reports a sign-in waiting for approval, or the stored one.
+func (c *Client) ProviderLoginStatus(id string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.get("/v1/providers/"+id+"/login", &out)
+	return out, err
+}
+
+// ProviderLogout forgets a subscription sign-in.
+func (c *Client) ProviderLogout(id string) error {
+	return c.delete("/v1/providers/" + id + "/login")
+}
+
 // DucklingSet adds or partially updates a duckling.
 func (c *Client) DucklingSet(id string, body map[string]interface{}) error {
 	return c.put("/v1/ducklings/"+id, body, nil)

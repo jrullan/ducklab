@@ -133,7 +133,7 @@ internal/
   desktop/    Wails bindings; a thin adapter over engineclt + bus
 
   config/     Global + project config: load, merge, validate, defaults
-  provider/   Provider interface, openaicompat, anthropic, fake
+  provider/   Provider interface, openaicompat, anthropic, codex (subscription), fake
   duckling/   Registry, health probe, capability detection, cost table
   budget/     Budget accounting and enforcement
 

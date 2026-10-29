@@ -692,6 +692,49 @@ func TestStageStartRejectsPlanBeforeSpecificationWithoutCreatingRun(t *testing.T
 	}
 }
 
+// B-548: a briefless intake interviews the person; under "auto" nobody is
+// asked, so nothing says what to build. Refused before a run record exists.
+func TestStageStartRefusesUnattendedBriefLessIntake(t *testing.T) {
+	for _, autonomy := range []string{"auto", "yolo"} {
+		t.Run(autonomy, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			id, _ := projectWithDocs(t, s, nil)
+			if _, err := s.StageStart(context.Background(), id, StageRequest{Stage: "intake", Autonomy: autonomy}); err == nil || !strings.Contains(err.Error(), "needs a brief") {
+				t.Fatalf("error = %v, want the unattended-intake refusal", err)
+			}
+			runs, err := s.RunList(context.Background(), RunFilter{ProjectID: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(runs) != 0 {
+				t.Fatalf("refused launch created %d run record(s)", len(runs))
+			}
+		})
+	}
+}
+
+func TestIntakeHasBrief(t *testing.T) {
+	cases := []struct {
+		name string
+		req  StageRequest
+		want bool
+	}{
+		{"nothing", StageRequest{Stage: "intake"}, false},
+		{"blank brief", StageRequest{Stage: "intake", From: "  "}, false},
+		{"background ref only", StageRequest{Stage: "intake", Refs: []StageRef{{Path: "notes.md"}}}, false},
+		{"brief", StageRequest{Stage: "intake", From: "build a timer"}, true},
+		{"scope ref", StageRequest{Stage: "intake", Refs: []StageRef{{Path: "guide.md", Role: RefRoleScope}}}, true},
+		{"adopt", StageRequest{Stage: "intake", Adopt: true}, true},
+		{"revision", StageRequest{Stage: "intake", Revise: "shorter"}, true},
+		{"forwarded findings", StageRequest{Stage: "intake", ReviseFindings: "- [major] REQ-001"}, true},
+	}
+	for _, c := range cases {
+		if got := intakeHasBrief(c.req); got != c.want {
+			t.Errorf("%s: intakeHasBrief = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestAcceptedPlanSeedPreservesSpecOrderAndScope(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{

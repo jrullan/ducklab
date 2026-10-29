@@ -745,6 +745,7 @@ func (s *Service) PauseAllRuns(ctx context.Context) error {
 	// stop from any surface is worse than a stopped app.
 	s.stopAllApps()
 	s.interruptAccepts(ctx)
+	s.interruptPreReproductions(ctx)
 
 	s.runsMu.RLock()
 	var active []*runState

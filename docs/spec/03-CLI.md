@@ -104,6 +104,8 @@ project and exits 0. If the repo has no `.git`, it asks before `git init`;
 ```
 ducklab provider list                      # id, kind, base url, reachable, auth
 ducklab provider check [<id>]              # exit 8 if unreachable
+ducklab provider set <id> --kind codex     # a ChatGPT/Codex subscription
+ducklab provider login|logout <id>         # its device-code sign-in (person only)
 
 ducklab duckling list
 ducklab duckling add <id> --provider <p> --model <m> [--role r]... [--temp f]
@@ -128,6 +130,14 @@ ducklab intake [--mode council] [--from <file>]
 ducklab spec   [--mode council]
 ducklab plan   [--mode council]
 ```
+
+A bare `intake` (no `--from`, `--ref-scope` or `--adopt`) is the interview:
+at a terminal it says so and asks before starting; over a pipe, or with
+`--yes` (which skips the interview), it refuses with the usage and starts
+nothing. The engine itself refuses an intake under `auto` or `yolo` autonomy
+with no brief, scope reference, adoption or revision note, for any API caller
+(B-548); a guarded briefless intake — MCP `stage_start`, `project_start` with
+no brief — is still the interview and pauses for its questions.
 
 `intent` prints `.ducklab/docs/intent.md`: every brief an intake run received,
 verbatim, with its run, outcome and the requirements it introduced or changed

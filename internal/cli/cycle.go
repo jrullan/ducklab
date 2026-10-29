@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -116,10 +118,17 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--ref-scope FILE|DIR]... [--adopt] [--mode council|solo] [--support-profile auto|small|standard] [--rounds N] [--yes]\n"+
-				"       ducklab %s accept|reject|diff\n"+
-				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
+			stageUsage(os.Stderr, stage)
 			return 2
+		}
+	}
+
+	// A bare intake is an interview, a billed run that waits on a person. It
+	// used to start unannounced, even from an agent probing for the usage
+	// over a pipe (B-548).
+	if stage == "intake" && sub == "" && from == "" && !adopt && len(scopeRefs) == 0 {
+		if code, ok := briefLessIntakeGo(yes, interactiveTerminal(), os.Stdin, os.Stdout, os.Stderr); !ok {
+			return code
 		}
 	}
 
@@ -183,6 +192,38 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 	fmt.Printf("\naccept with:  ducklab %s accept\nrevise with:  ducklab %s revise \"what to change\"\nreject with:  ducklab %s reject\n", stage, stage, stage)
 	return code
+}
+
+func stageUsage(w io.Writer, stage string) {
+	fmt.Fprintf(w, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--ref-scope FILE|DIR]... [--adopt] [--mode council|solo] [--support-profile auto|small|standard] [--rounds N] [--yes]\n"+
+		"       ducklab %s accept|reject|diff\n"+
+		"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
+}
+
+// briefLessIntakeGo decides whether an intake with no brief may start. Without
+// a brief the architect interviews the person, so it needs someone to answer:
+// --yes skips the interview and leaves nothing to draft from, and a caller
+// over a pipe cannot answer. A person at a terminal confirms the launch.
+// ok=false means do not start, exiting with code.
+func briefLessIntakeGo(yes, interactive bool, in io.Reader, out, errw io.Writer) (code int, ok bool) {
+	if yes {
+		fmt.Fprintln(errw, "error: --yes skips the interview, so intake needs a brief — give it with --from FILE (or --ref-scope, or --adopt to survey this codebase)")
+		stageUsage(errw, "intake")
+		return 2, false
+	}
+	if !interactive {
+		fmt.Fprintln(errw, "error: no brief — without --from, intake interviews you, and that needs a person at a terminal")
+		stageUsage(errw, "intake")
+		return 2, false
+	}
+	fmt.Fprint(out, "No brief given: this starts an intake run whose architect interviews you (up to 5 questions) before drafting the requirements.\nStart it? [y/N] ")
+	line, _ := bufio.NewReader(in).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return 0, true
+	}
+	fmt.Fprintln(out, "not started — give the brief with: ducklab intake --from FILE")
+	return 0, false
 }
 
 func proposalBelongsToRun(proposal map[string]interface{}, runID string) bool {

@@ -38,7 +38,9 @@ func providerCmd(verb string, args []string) int {
 		fmt.Printf("%-16s %-10s %-40s %s\n", "ID", "KIND", "BASE URL", "KEY")
 		for _, p := range items {
 			key := "none needed"
-			if env := str(p["api_key_env"]); env != "" {
+			if signIn, ok := p["sign_in"].(map[string]interface{}); ok {
+				key = signInLabel(signIn, str(p["id"]))
+			} else if env := str(p["api_key_env"]); env != "" {
 				key = env
 				if present, _ := p["key_present"].(bool); !present {
 					// The commonest reason a hosted duckling fails, and
@@ -55,7 +57,7 @@ func providerCmd(verb string, args []string) int {
 
 	case "set":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab provider set <id> --url URL [--kind openai|anthropic] [--key-env VAR]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab provider set <id> --url URL [--kind openai|anthropic] [--key-env VAR]\n       ducklab provider set <id> --kind codex      (a ChatGPT/Codex subscription; then: ducklab provider login <id>)")
 			return 2
 		}
 		id := args[0]
@@ -87,6 +89,9 @@ func providerCmd(verb string, args []string) int {
 			return 1
 		}
 		fmt.Printf("provider %s saved\n", id)
+		if str(body["kind"]) == "codex" {
+			fmt.Printf("next: ducklab provider login %s   (signs in to the subscription)\n", id)
+		}
 		if env := str(body["api_key_env"]); env != "" && os.Getenv(env) == "" {
 			// Said now rather than at the first run, when it would look like
 			// the model is broken.
@@ -106,9 +111,28 @@ func providerCmd(verb string, args []string) int {
 		fmt.Printf("provider %s removed\n", args[0])
 		return 0
 
+	case "login":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab provider login <id>")
+			return 2
+		}
+		return codexLogin(client, args[0], os.Stdout)
+
+	case "logout":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab provider logout <id>")
+			return 2
+		}
+		if err := client.ProviderLogout(args[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("provider %s signed out\n", args[0])
+		return 0
+
 	default:
 		fmt.Fprintf(os.Stderr, "unknown provider command: %s\n", verb)
-		fmt.Fprintln(os.Stderr, "usage: ducklab provider list|set|remove")
+		fmt.Fprintln(os.Stderr, "usage: ducklab provider list|set|remove|login|logout")
 		return 2
 	}
 }

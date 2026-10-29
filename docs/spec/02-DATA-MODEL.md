@@ -136,7 +136,7 @@ harness_project_id = "ducklab"
 # ---------- providers ----------
 
 [provider.beelink]
-kind     = "openai"                    # openai | anthropic
+kind     = "openai"                    # openai | anthropic | codex
 base_url = "http://localhost:8081/v1"
 api_key_env = "DUCKLAB_BEELINK_API_KEY" # optional; omit for keyless local
 headers  = { }                          # optional extra headers
@@ -155,6 +155,10 @@ headers     = { "HTTP-Referer" = "https://github.com/jrullan/ducklab", "X-Title"
 kind        = "anthropic"
 base_url    = "https://api.anthropic.com"
 api_key_env = "ANTHROPIC_API_KEY"
+
+[provider.chatgpt]                     # a ChatGPT/Codex subscription: no key;
+kind        = "codex"                  # `ducklab provider login chatgpt` signs in
+base_url    = "https://chatgpt.com/backend-api/codex"
 
 # ---------- ducklings ----------
 
@@ -231,7 +235,7 @@ On load, `internal/config` must reject with exit code 3 and a one-line message:
 - `schema` ≠ 1
 - a `duckling.*` referencing a `provider` that is not defined
 - an id not matching `[a-z0-9][a-z0-9-]{0,31}`
-- `kind` not in {`openai`, `anthropic`}
+- `kind` not in {`openai`, `anthropic`, `codex`}
 - `base_url` that does not parse as an absolute URL
 - `autonomy` not in {manual, guarded, auto, yolo}
 - negative or zero budget values
