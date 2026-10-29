@@ -6188,7 +6188,7 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 		}
 		if rec.Result != nil {
 			data["ok"] = !rec.Result.IsError
-			data["result"] = strategy.SummariseToolResult(rec.Result.Content)
+			data["result"] = strategy.SummariseToolResult(rec.Result.Content, rec.Result.IsError)
 		}
 		if rec.Digest != "" {
 			data["digest"] = rec.Digest

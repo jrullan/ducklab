@@ -2227,7 +2227,7 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 			// The result is summarised, not stored whole: a single fs_read can
 			// return an entire file, and forty of them would make the run log
 			// larger than the repository it describes.
-			data["result"] = SummariseToolResult(tc.Result.Content)
+			data["result"] = SummariseToolResult(tc.Result.Content, tc.Result.IsError)
 		}
 		if tc.Digest != "" {
 			data["digest"] = tc.Digest
@@ -2265,7 +2265,12 @@ func partialTurnNotes(outcome *agent.Outcome) string {
 			pc.Args = string(call.Args)
 		}
 		if call.Result != nil {
-			pc.Result = SummariseToolResult(call.Result.Content)
+			// A resume note holds many calls in 16 KB; an error keeps its
+			// tail there, at the old size (review of B-544).
+			pc.Result = SummariseToolResult(call.Result.Content, false)
+			if call.Result.IsError {
+				pc.Result = tailOf(strings.TrimSpace(call.Result.Content), maxToolResultBytes)
+			}
 		}
 		checkpoint.ToolCalls = append(checkpoint.ToolCalls, pc)
 	}
@@ -2287,7 +2292,7 @@ func partialTurnNotes(outcome *agent.Outcome) string {
 		checkpoint.Reasoning = truncateCheckpointText(checkpoint.Reasoning, 4096)
 		for i := range checkpoint.ToolCalls {
 			checkpoint.ToolCalls[i].Args = truncateCheckpointText(checkpoint.ToolCalls[i].Args, 512)
-			checkpoint.ToolCalls[i].Result = truncateCheckpointText(checkpoint.ToolCalls[i].Result, 512)
+			checkpoint.ToolCalls[i].Result = tailOf(checkpoint.ToolCalls[i].Result, 512)
 		}
 		data = marshal()
 	}
@@ -2299,17 +2304,6 @@ func truncateCheckpointText(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-// maxToolResultBytes bounds what a tool result contributes to the log (I3).
-const maxToolResultBytes = 512
-
-func SummariseToolResult(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= maxToolResultBytes {
-		return s
-	}
-	return s[:maxToolResultBytes] + fmt.Sprintf("\n… %d bytes truncated", len(s)-maxToolResultBytes)
 }
 
 const maxResumeNoteRunes = 12000
