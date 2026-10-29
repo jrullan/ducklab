@@ -438,3 +438,52 @@ func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 		t.Fatalf("a different file inherited the target.go brake: %#v", other)
 	}
 }
+
+// B-546: distress rang on every failed patch, from the first, with no reason.
+// A coordinator read a model's ordinary slips as a broken environment and
+// aborted two progressing runs. It rings once, at the brake, saying what
+// failed.
+func TestFSPatchDistressRingsOnceAtTheBrakeWithTheReason(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target.go"), []byte("package target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rung []map[string]interface{}
+	ectx := &ExecContext{ProjectRoot: root, OnDistress: func(kind string, data map[string]interface{}) {
+		if kind == "fs_patch_failure_streak" {
+			rung = append(rung, data)
+		}
+	}}
+	registry := NewRegistry()
+	patch := func(search string) {
+		t.Helper()
+		args, _ := json.Marshal(map[string]interface{}{
+			"path":  "target.go",
+			"edits": []map[string]string{{"search": search, "replace": "replacement"}},
+		})
+		if _, err := registry.Execute(context.Background(), ectx, "fs_patch", args); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i < FSPatchFailLimit; i++ {
+		patch("missing-" + strconv.Itoa(i))
+	}
+	if len(rung) != 0 {
+		t.Fatalf("distress rang %d times before the brake: %+v", len(rung), rung)
+	}
+	patch("missing-at-the-brake")
+	patch("missing-after")
+	if len(rung) != 1 {
+		t.Fatalf("distress rang %d times; want once, at the brake", len(rung))
+	}
+	reason, _ := rung[0]["last_failure"].(string)
+	detail, _ := rung[0]["detail"].(string)
+	if !strings.Contains(reason, "matched 0 times") || !strings.Contains(detail, "target.go") {
+		t.Errorf("distress does not say what failed: %+v", rung[0])
+	}
+	// The service merges this data over {"reason": <kind>}; a "reason" key
+	// here would erase which brake rang (review of B-546).
+	if _, clobbers := rung[0]["reason"]; clobbers {
+		t.Errorf("distress data carries a reason key that overwrites the kind: %+v", rung[0])
+	}
+}
