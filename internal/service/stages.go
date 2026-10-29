@@ -1748,6 +1748,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			"verdict": finalReviewVerdict, "findings": finalReviewFindings, "detail": detail,
 		})
 	}
+	// An abort decided while this stage was finishing writes the record; a
+	// verdict and a gate here would land after its run_end (B-547).
+	if rs.aborting.Load() {
+		rs.wmu.Unlock()
+		return
+	}
 	if identityMismatch || finalReviewBlocked || compositionReviewBlocked || len(proposalBlockers) > 0 {
 		rs.run.Verdict = "FAILED"
 	} else {

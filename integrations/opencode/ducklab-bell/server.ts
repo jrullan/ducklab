@@ -63,14 +63,29 @@ const PREAMBLES: Record<string, string> = {
 // reading Ducklab's own state.
 const waits = /\b(sleep|watch)\b|\btail\s+-\w*[fF]|\bread\s+-\w*t/
 const ducklabState = /\.ducklab\b|state[\\/]+ducklab|engine\.json|human\.tok/
+// discards matches a ducklab decide that throws a run's work away. The
+// policy said "never abort or reject without the user"; a local coordinator
+// quoted the rule in its reasoning and aborted anyway, twice (2026-10-29,
+// T-030). Code Mode calls arrive as the `execute` tool with the call in its
+// code, so the whole input is searched.
+const discards = /\bdecide\b[\s\S]*\baction\b[\\"']*\s*:\s*[\\"']*(abort|reject)\b/
+
 function refusedCall(q: any): string {
   const i = q.input ?? {}
+  if (discards.test(JSON.stringify(i))) return "discard"
+  // A direct MCP call (no Code Mode): the tool is ducklab's decide.
+  if (/decide$/.test(String(q.tool ?? "")) && /^(abort|reject)$/.test(String(i.action ?? ""))) return "discard"
   const where = [i.path, i.filePath, i.workdir, i.cwd, i.pattern, i.include].filter((v) => typeof v === "string").join(" ")
   const command = q.tool === "shell" && typeof i.command === "string" ? i.command : ""
   if (command && waits.test(command)) return "waiting"
   if (ducklabState.test(`${command} ${where}`)) return "ducklab state"
   return ""
 }
+
+const DISCARD_REFUSAL =
+  "Refused by the Ducklab coordinator policy: aborting or rejecting a run throws its work away, and that is " +
+  "the user's decision. Do not retry it. Tell the user in 2-3 lines what you saw (from run_get, not only the " +
+  "distress event) and propose the abort; they decide, in the desktop or by telling you."
 
 const REFUSAL =
   "Refused by the Ducklab coordinator policy: do not wait or poll, and do not read .ducklab/ files. " +
@@ -290,7 +305,7 @@ export default {
           const why = refusedCall(q)
           if (why) {
             log(`refused ${q.tool} (${why}): ${JSON.stringify(q.input ?? {}).slice(0, 100)}`)
-            throw new Error(REFUSAL)
+            throw new Error(why === "discard" ? DISCARD_REFUSAL : REFUSAL)
           }
         })
         log("policy installed")

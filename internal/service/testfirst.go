@@ -445,6 +445,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		s.failRun(rs, fmt.Errorf("gate before: %w", err))
 		return
 	}
+	// A baseline cancelled by an abort ran nothing (B-547).
+	if rs.aborting.Load() {
+		return
+	}
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
 	if req.Duckling != "" {
@@ -608,6 +612,12 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	after, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate after: %w", err))
+		return
+	}
+	// Cancelled by an abort, the suite ran nothing: judging its exit -1
+	// wrote a verdict and a gate (under yolo, a FAILED run the autopilot
+	// retried) before the abort's record (review of B-547).
+	if rs.aborting.Load() {
 		return
 	}
 	rs.writer.AppendEvent("gate", map[string]interface{}{

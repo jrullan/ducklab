@@ -814,9 +814,21 @@ func trackFSPatchFailure(ectx *ExecContext, args json.RawMessage, res *Result) {
 	}
 	if res != nil && res.IsError {
 		ectx.fsPatchFailStreak[path]++
-		if ectx.OnDistress != nil {
+		// Distress is a doorbell, rung once when the streak reaches the brake
+		// and carrying what failed (B-546). It rang on every failed patch from
+		// the first, with no reason: a model's ordinary slips (identical
+		// search and replace, a stale anchor) read as a broken environment,
+		// and a coordinator aborted two progressing runs on it.
+		if n := ectx.fsPatchFailStreak[path]; n == FSPatchFailLimit && ectx.OnDistress != nil {
+			reason := strings.TrimSpace(strings.SplitN(res.Content, "\n", 2)[0])
+			if len(reason) > 200 {
+				reason = reason[:200] + "…"
+			}
 			ectx.OnDistress("fs_patch_failure_streak", map[string]interface{}{
-				"tool": "fs_patch", "path": path, "count": ectx.fsPatchFailStreak[path],
+				// Not "reason": the distress payload's own reason key names
+				// the brake (fs_patch_failure_streak) and must survive.
+				"tool": "fs_patch", "path": path, "count": n, "last_failure": reason,
+				"detail": fmt.Sprintf("%d consecutive failed patches on %s; the last: %s", n, path, reason),
 			})
 		}
 	} else {
