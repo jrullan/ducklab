@@ -372,7 +372,9 @@ rubber-duck premise — the user is one of the ducks.
 For `intake` specifically, the architect's first turn is an **interview**: it is
 given `ask_human` and instructed to ask at most 5 questions, one message at a
 time, before drafting. Under `--yes` or a non-TTY, it skips straight to drafting
-from the seed document and marks every gap with `**Assumption:**`.
+from the seed document and marks every gap with `**Assumption:**` — which needs
+a seed: with no brief, scope reference or `--adopt`, such a launch is refused
+before the run exists (B-548).
 
 **Adoption** (`intake --adopt`) is the intake variant for a codebase that
 already exists: instead of interviewing, the architect surveys the tree and
