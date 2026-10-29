@@ -350,3 +350,34 @@ func TestAFailingProductSmokeFailsTheBuildVerdict(t *testing.T) {
 		t.Fatalf("verdict = %s, failure = %q", detail.Run.Verdict, detail.Run.Failure)
 	}
 }
+
+// B-550: with the shared agent token off, a render command gets a token of
+// its own for its project, and the token ends with the render.
+func TestARenderPresentsAnIssuedTokenThatEndsWithIt(t *testing.T) {
+	t.Setenv("DUCKLAB_TOKEN", "")
+	root := t.TempDir()
+	writer, err := runlog.NewWriter(root, &runlog.Run{ID: "render-run", ProjectID: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	var issuedFor string
+	revoked := false
+	s := &Service{renderTokens: func(projectID string) (string, func(), error) {
+		issuedFor = projectID
+		return "dlk_minted", func() { revoked = true }, nil
+	}}
+	seen := filepath.Join(t.TempDir(), "token")
+	_, err = captureRender(s.renderContext(context.Background()), root, config.RenderContract{
+		Command: "printf %s \"$DUCKLAB_RENDER_TOKEN\" > " + seen, TimeoutS: 5,
+	}, writer, "render-run", "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(seen); string(got) != "dlk_minted" || issuedFor != "demo" {
+		t.Errorf("render saw token %q issued for %q, want dlk_minted for demo", got, issuedFor)
+	}
+	if !revoked {
+		t.Error("the render's token outlived the render")
+	}
+}

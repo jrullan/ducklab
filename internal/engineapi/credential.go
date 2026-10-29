@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/budget"
 )
 
@@ -38,6 +39,19 @@ type credentialKey struct{}
 // person's token authenticates — the shape every test server had before the
 // split, and still correct for them.
 func (s *Server) SetAgentToken(token string) { s.agentToken = token }
+
+// SetAgentTokens installs the person's per-agent tokens (B-550). A request
+// presenting one is an agent's, limited to the projects the token is granted.
+func (s *Server) SetAgentTokens(store *agenttoken.Store) { s.agentTokens = store }
+
+type identityKey struct{}
+
+// requestIdentity is the per-agent token a request presented, or nil for the
+// person and for the shared agent token.
+func requestIdentity(r *http.Request) *agenttoken.Identity {
+	who, _ := r.Context().Value(identityKey{}).(*agenttoken.Identity)
+	return who
+}
 
 // credentialFor names which credential a bearer token is. Both comparisons
 // always run, over fixed-size digests, so neither the match nor its length
@@ -97,8 +111,13 @@ func actorFor(cred credential, declared string) string {
 	return "agent"
 }
 
-// actor is actorFor applied to the request's own credential.
+// actor is actorFor applied to the request's own credential. A per-agent
+// token (B-550) is its own name: the person named it when issuing it, so
+// nothing the body declares changes who is recorded.
 func (s *Server) actor(r *http.Request, declared string) string {
+	if who := requestIdentity(r); who != nil {
+		return who.Actor
+	}
 	return actorFor(requestCredential(r), declared)
 }
 

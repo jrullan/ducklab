@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/bench"
 	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/bus"
@@ -36,8 +37,11 @@ type Server struct {
 	bus *bus.Bus
 	// token is the person's credential; agentToken the agents' (B-530).
 	// Which one a request presents decides every actor it records.
-	token       string
-	agentToken  string
+	token      string
+	agentToken string
+	// agentTokens are the person's per-agent credentials (B-550). Nil
+	// means the engine knows only the two shared ones.
+	agentTokens *agenttoken.Store
 	version     string
 	provenance  string
 	allowOrigin string
@@ -126,7 +130,7 @@ func (s *Server) routes() {
 	for _, r := range routeTable() {
 		h := r.handler(s)
 		if r.Auth {
-			h = s.auth(h)
+			h = s.auth(s.agentScope(r, h))
 		}
 		s.mux.HandleFunc(r.Method+" "+r.Path, h)
 	}
@@ -142,8 +146,8 @@ func (s *Server) routes() {
 	// The one time a goroutine dump was needed — an exec that survived its
 	// abort — the engine's stderr pointed at /dev/null and the diagnosis ran
 	// blind. Loopback-only plus auth: same trust boundary as everything else.
-	s.mux.HandleFunc("GET /debug/pprof/", s.auth(netpprof.Index))
-	s.mux.HandleFunc("GET /debug/pprof/profile", s.auth(netpprof.Profile))
+	s.mux.HandleFunc("GET /debug/pprof/", s.auth(s.unscopedOnly(netpprof.Index)))
+	s.mux.HandleFunc("GET /debug/pprof/profile", s.auth(s.unscopedOnly(netpprof.Profile)))
 }
 
 // allowedOrigins are the only origins permitted to call the engine.
@@ -369,7 +373,24 @@ func (s *Server) handleBenchGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviderList(w http.ResponseWriter, r *http.Request) {
-	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
+	items := s.svc.ProviderList()
+	// Provider headers can carry a static credential. A per-agent token
+	// reads which headers are set, never their values (B-550).
+	// A fresh map: the view shares the engine's own, and masking that in
+	// place blanked the real header for every later call.
+	if requestIdentity(r) != nil {
+		for i := range items {
+			if len(items[i].Headers) == 0 {
+				continue
+			}
+			masked := make(map[string]string, len(items[i].Headers))
+			for k := range items[i].Headers {
+				masked[k] = "(set)"
+			}
+			items[i].Headers = masked
+		}
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
 func (s *Server) handleEngineDefaults(w http.ResponseWriter, r *http.Request) {
@@ -1029,6 +1050,15 @@ func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Harness diagnostics read, and file bugs into, a second project the
+	// token was never granted (review of B-550).
+	if who := requestIdentity(r); who != nil &&
+		(strings.Contains(req.DiagnosticScope, "harness") || req.BugTarget == "harness") {
+		s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+			"agent token %q reaches only project %q; a chat that reads or files into the harness project is the person's to open",
+			who.Name, r.PathValue("id")))
+		return
+	}
 	run, err := s.svc.ChatStart(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -1120,11 +1150,27 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		cred, ok := s.credentialFor(token)
+		var who *agenttoken.Identity
+		if !ok && s.agentTokens != nil {
+			who, ok = s.agentTokens.Lookup(token)
+			cred = credAgent
+		}
 		if !ok {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), credentialKey{}, cred))
+		if cred == credAgent && who == nil && s.agentTokens != nil && !s.agentTokens.LegacyEnabled() {
+			s.error(w, http.StatusUnauthorized, "shared_agent_token_off",
+				"the shared agent token (engine.json) is turned off; this agent needs its own token. "+
+					"The person issues one in Settings → Agent access (or `ducklab token create`) and the agent "+
+					"presents it through DUCKLAB_TOKEN")
+			return
+		}
+		ctx := context.WithValue(r.Context(), credentialKey{}, cred)
+		if who != nil {
+			ctx = context.WithValue(ctx, identityKey{}, who)
+		}
+		r = r.WithContext(ctx)
 		// Check version
 		clientVersion := r.Header.Get("X-Ducklab-Client")
 		if clientVersion != "" {
@@ -1232,6 +1278,7 @@ func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	projects = visibleProjects(r, projects)
 	s.json(w, http.StatusOK, map[string]interface{}{"items": projects, "total": len(projects)})
 }
 
@@ -1349,7 +1396,9 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	source := keys["_source"]
 	delete(keys, "_source")
-	project, err := s.svc.ProjectUpdate(r.Context(), r.PathValue("id"), keys, source)
+	// The receipt names who changed the config: the credential's actor, not
+	// the person whenever a source is named.
+	project, err := s.svc.ProjectUpdateBy(r.Context(), r.PathValue("id"), keys, source, s.actor(r, ""))
 	if err != nil {
 		// An unknown or mistyped key is the caller's mistake, not a server
 		// fault, and it must say which key.
@@ -1365,6 +1414,10 @@ func (s *Server) handleBugAdd(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Who filed it is the credential's to say, like every other actor
+	// (B-530): an agent's declared reporter may narrow, never claim the
+	// person, and a per-agent token is recorded under its own name (B-550).
+	req.Reporter = s.actor(r, req.Reporter)
 	b, err := s.svc.BugAdd(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -1662,6 +1715,14 @@ func (s *Server) handleProjectForget(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	// The id is free for the next project with that name; no token may
+	// carry access over to it (B-550).
+	if s.agentTokens != nil {
+		if err := s.agentTokens.DropProject(r.PathValue("id")); err != nil {
+			s.error(w, http.StatusInternalServerError, "internal", "project forgotten, but its agent grants were not removed: "+err.Error())
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1789,6 +1850,11 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	projectID := query.Get("project")
 	status := query.Get("status")
+	if who := requestIdentity(r); who != nil && projectID != "" {
+		if !s.agentMay(w, who, projectID, agenttoken.LevelRead) {
+			return
+		}
+	}
 	runs, err := s.svc.RunList(r.Context(), service.RunFilter{
 		ProjectID: projectID,
 		Status:    status,
@@ -1797,6 +1863,7 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	runs = visibleRuns(r, runs)
 	total := len(runs)
 	// Pagination is applied after filtering so total remains honest for the
 	// question asked. Invalid values are rejected rather than silently changing
@@ -2023,6 +2090,29 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := r.URL.Query().Get("project")
 	runID := r.URL.Query().Get("run")
+	// A per-agent token hears only its projects (B-550). The all-projects
+	// stream would need filtering per event; naming the project or run is
+	// what every agent client already does.
+	if who := requestIdentity(r); who != nil {
+		if projectID == "" && runID == "" {
+			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+				"agent token %q must name the project (?project=) or run (?run=) it listens to", who.Name))
+			return
+		}
+		if projectID != "" && !s.agentMay(w, who, projectID, agenttoken.LevelRead) {
+			return
+		}
+		if runID != "" {
+			owner := s.projectIDFn(runID)
+			if owner == "" {
+				s.error(w, http.StatusNotFound, "not_found", fmt.Sprintf("run %s not found", runID))
+				return
+			}
+			if !s.agentMay(w, who, owner, agenttoken.LevelRead) {
+				return
+			}
+		}
+	}
 	fromSeq := 0
 	if seq := r.URL.Query().Get("from_seq"); seq != "" {
 		fmt.Sscanf(seq, "%d", &fromSeq)
@@ -2088,6 +2178,36 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// A stream outlives the request that opened it. A per-agent token's
+	// access is asked again before every write, so a revoke or a narrowed
+	// grant ends the stream instead of leaving it open for hours (B-550).
+	runOwner := ""
+	if runID != "" && requestIdentity(r) != nil {
+		runOwner = s.projectIDFn(runID)
+	}
+	stillAllowed := func() bool {
+		who := requestIdentity(r)
+		if s.agentTokens == nil {
+			return true
+		}
+		if who == nil {
+			// The shared token's streams end when the person turns it off.
+			return requestCredential(r) == credHuman || s.agentTokens.LegacyEnabled()
+		}
+		now, ok := s.agentTokens.Current(who)
+		if !ok {
+			return false
+		}
+		for _, p := range []string{projectID, runOwner} {
+			if p == "" {
+				continue
+			}
+			if _, ok := now.Level(p); !ok {
+				return false
+			}
+		}
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -2097,6 +2217,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				// The bus dropped us for overflow. Ending the response is what
 				// makes the client reconnect with Last-Event-ID; ranging over a
 				// closed channel would spin instead.
+				return
+			}
+			if !stillAllowed() {
 				return
 			}
 			// Drop anything the backlog replay already delivered. Persisted
@@ -2116,6 +2239,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		case <-heartbeat.C:
+			if !stillAllowed() {
+				return
+			}
 			fmt.Fprintf(w, "event: heartbeat\n")
 			fmt.Fprintf(w, "data: {\"ts\":%q}\n\n", time.Now().UTC().Format(time.RFC3339))
 			flusher.Flush()
@@ -2160,7 +2286,13 @@ func (s *Server) handleStageStart(w http.ResponseWriter, r *http.Request) {
 	if s.refuseAgentCaps(w, r, nil, req.AgentTurns) {
 		return
 	}
+	req.PathGuard = s.agentPathGuard(r, r.PathValue("id"))
 	run, err := s.svc.StageStart(r.Context(), r.PathValue("id"), req)
+	var scope *agentPathError
+	if errors.As(err, &scope) {
+		s.agentPathRefusal(w, err)
+		return
+	}
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -2328,6 +2460,14 @@ func (s *Server) handleReferenceImport(w http.ResponseWriter, r *http.Request) {
 	var req service.ReferenceImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	// Read relative to the engine's directory, like --from.
+	importPath := strings.TrimSpace(req.Path)
+	if importPath != "" && importPath != "~" && !strings.HasPrefix(importPath, "~/") {
+		importPath, _ = filepath.Abs(importPath)
+	}
+	if !s.agentPathsInside(w, r, r.PathValue("id"), []string{importPath}) {
 		return
 	}
 	info, err := s.svc.ReferenceImport(r.Context(), r.PathValue("id"), req)

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
@@ -30,6 +31,13 @@ func main() {
 		fmt.Printf("ducklab-engine %s (%s)\n", build.Semver(), build.Provenance())
 		return
 	}
+
+	// An engine auto-started by an agent's CLI inherits that agent's
+	// environment. Its per-agent token must not become the engine's: every
+	// child — render commands, gates, ducklings, a ducklab CLI inside a run —
+	// would act as that agent, and a render of another project would carry
+	// the wrong grant (review of B-550).
+	os.Unsetenv("DUCKLAB_TOKEN")
 
 	// One engine per state directory, for the whole life of the process
 	// (B-530 review): two simultaneous starts each published their own
@@ -137,6 +145,23 @@ func main() {
 	// Create server
 	server := engineapi.New(svc, b, humanToken, build.Semver(), build.Provenance(), *allowOrigin)
 	server.SetAgentToken(agentToken)
+	// Per-agent tokens (B-550): the person issues each agent its own and
+	// grants it projects. They live beside the global config and survive
+	// restarts; the shared agent token above stays on until the person turns
+	// it off.
+	tokens, err := agenttoken.Open(filepath.Join(filepath.Dir(configPath), "agent-tokens.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	defer tokens.Flush()
+	server.SetAgentTokens(tokens)
+	svc.SetRenderTokenIssuer(func(projectID string) (string, func(), error) {
+		if tokens.LegacyEnabled() {
+			return "", nil, nil
+		}
+		return tokens.Issue("renderer", []agenttoken.Grant{{Project: projectID, Level: agenttoken.LevelRead}})
+	})
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,

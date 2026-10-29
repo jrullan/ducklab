@@ -1,6 +1,64 @@
 {
   "components": {
     "schemas": {
+      "AgenttokenGrant": {
+        "properties": {
+          "level": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "project"
+        ],
+        "type": "object"
+      },
+      "AgenttokenView": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/AgenttokenGrant"
+            },
+            "type": "array"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "created_at",
+          "grants",
+          "hint",
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
       "ArtifactNode": {
         "properties": {
           "down": {
@@ -953,6 +1011,124 @@
         "required": [
           "message"
         ],
+        "type": "object"
+      },
+      "EngineapiagentTokenCreateRequest": {
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/AgenttokenGrant"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grants",
+          "name"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenCreated": {
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/AgenttokenView"
+          }
+        },
+        "required": [
+          "secret",
+          "token"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenLegacyRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenLegacyResponse": {
+        "properties": {
+          "legacy_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "legacy_enabled"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgenttokenView"
+            },
+            "type": "array"
+          },
+          "legacy_enabled": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "legacy_enabled",
+          "total"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenSelf": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/AgenttokenGrant"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "EngineapiagentTokenUpdateRequest": {
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/AgenttokenGrant"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "EngineapianswerRequest": {
@@ -4776,6 +4952,208 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/agent-tokens": {
+      "get": {
+        "operationId": "AgentTokenList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiagentTokenList"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The person's per-agent tokens and whether the shared agent token is on. Person only."
+      },
+      "post": {
+        "operationId": "AgentTokenCreate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiagentTokenCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiagentTokenCreated"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Issue a token for one agent with its project grants; the secret is in this answer only. Person only."
+      }
+    },
+    "/v1/agent-tokens/legacy": {
+      "put": {
+        "operationId": "AgentTokenLegacySet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiagentTokenLegacyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiagentTokenLegacyResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Turn the shared engine.json agent token on or off. Person only."
+      }
+    },
+    "/v1/agent-tokens/self": {
+      "get": {
+        "operationId": "AgentTokenSelf",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiagentTokenSelf"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Which credential this request carries and, for an agent token, the projects it may reach"
+      }
+    },
+    "/v1/agent-tokens/{tok}": {
+      "delete": {
+        "operationId": "AgentTokenRevoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tok",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgenttokenView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a token for good. Person only."
+      },
+      "patch": {
+        "operationId": "AgentTokenUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tok",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiagentTokenUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgenttokenView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rename a token or replace its project grants. Person only."
+      }
+    },
     "/v1/bench": {
       "get": {
         "operationId": "BenchList",

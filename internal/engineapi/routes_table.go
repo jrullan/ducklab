@@ -3,6 +3,7 @@ package engineapi
 import (
 	"net/http"
 
+	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
@@ -413,6 +414,34 @@ func routeTable() []Route {
 		{Method: "DELETE", Path: "/v1/providers/{id}/login", Auth: true,
 			Summary: "Forget a subscription sign-in. Person only.", ClientMethod: "ProviderLogout",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProviderLogout }},
+		// Per-agent tokens (B-550)
+		{Method: "GET", Path: "/v1/agent-tokens", Auth: true,
+			Response: agentTokenList{}, Summary: "The person's per-agent tokens and whether the shared agent token is on. Person only.",
+			ClientMethod: "AgentTokenList",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenList }},
+		{Method: "POST", Path: "/v1/agent-tokens", Auth: true,
+			Request: agentTokenCreateRequest{}, Response: agentTokenCreated{},
+			Summary:      "Issue a token for one agent with its project grants; the secret is in this answer only. Person only.",
+			ClientMethod: "AgentTokenCreate",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenCreate }},
+		{Method: "GET", Path: "/v1/agent-tokens/self", Auth: true,
+			Response: agentTokenSelf{}, Summary: "Which credential this request carries and, for an agent token, the projects it may reach",
+			ClientMethod: "AgentTokenSelf",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenSelf }},
+		{Method: "PUT", Path: "/v1/agent-tokens/legacy", Auth: true,
+			Request: agentTokenLegacyRequest{}, Response: agentTokenLegacyResponse{},
+			Summary:      "Turn the shared engine.json agent token on or off. Person only.",
+			ClientMethod: "AgentTokenLegacySet",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenLegacy }},
+		{Method: "PATCH", Path: "/v1/agent-tokens/{tok}", Auth: true,
+			Request: agentTokenUpdateRequest{}, Response: agenttoken.View{},
+			Summary:      "Rename a token or replace its project grants. Person only.",
+			ClientMethod: "AgentTokenUpdate",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenUpdate }},
+		{Method: "DELETE", Path: "/v1/agent-tokens/{tok}", Auth: true,
+			Response: agenttoken.View{}, Summary: "Revoke a token for good. Person only.",
+			ClientMethod: "AgentTokenRevoke",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleAgentTokenRevoke }},
 		{Method: "POST", Path: "/v1/ducklings/{id}/test", Auth: true,
 			Request: ducklingTestRequest{}, Response: ducklingTestResponse{},
 			Summary: "One round-trip against a duckling", ClientMethod: "DucklingTest",

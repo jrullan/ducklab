@@ -57,6 +57,10 @@ verification, an oracle dispute) is asked for with `approval_request`; the
 person confirms it in the desktop. Do not use the person's credential
 (`human.token`) — see `docs/decisions/0010-actor-from-credential.md`.
 
+If the person gave you your own token, it is in `DUCKLAB_TOKEN`; the MCP
+server and the CLI present it, and you reach only the projects it grants
+(`ducklab token whoami`). See `docs/decisions/0011-per-agent-tokens.md`.
+
 Found a defect while working here? File it on the bug board rather than
 fixing it silently — triage → promote → task → build → accept is the paper
 trail this project runs on, and your report's quality is the next run's

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 // B-530: the CLI presents the person's credential only at an interactive
@@ -59,5 +61,20 @@ func TestTheCLIPicksItsCredentialByWhoIsAtIt(t *testing.T) {
 	}
 	if client.Token != "agent-token" || client.Human {
 		t.Fatalf("mcp serve from a terminal presents %q (human=%v), want the agent credential", client.Token, client.Human)
+	}
+
+	// B-550: an agent's own token outranks a terminal that looks like the
+	// person's, for the CLI and for mcp serve alike.
+	t.Setenv("DUCKLAB_TOKEN", "dlk_own")
+	for name, discover := range map[string]func(bool) (*engineclt.Client, error){
+		"cli": discoverEngine, "mcp serve": discoverAgentEngine,
+	} {
+		client, err := discover(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if client.Token != "dlk_own" || client.Human {
+			t.Fatalf("%s with DUCKLAB_TOKEN presents %q (human=%v), want the agent's own token", name, client.Token, client.Human)
+		}
 	}
 }

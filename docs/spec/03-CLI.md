@@ -255,6 +255,26 @@ ducklab mcp tools <server>
 ducklab mcp call <server> <tool> --arg k=v
 ```
 
+`ducklab mcp serve` presents `DUCKLAB_TOKEN` when it is set (a per-agent
+token, §3.11), else the shared agent token in `engine.json`.
+
+### 3.11 `token` — per-agent access (B-550)
+
+```
+ducklab token list
+ducklab token create <name> [--grant <project>=read-only|full]...
+ducklab token grant <token-id|name> <project> read-only|full|none
+ducklab token revoke <token-id|name>
+ducklab token legacy [on|off]
+ducklab token whoami
+```
+
+Every verb but `whoami` is the person's: run from their own terminal (or use
+Settings → Agent access); the engine refuses them to an agent's credential.
+`create` prints the secret once. `legacy` shows or switches the shared agent
+token in `engine.json`. Any CLI with `DUCKLAB_TOKEN` set presents that token,
+interactive terminal or not.
+
 ### 3.10 Reporting
 
 ```

@@ -297,6 +297,9 @@ func StartEngine(path string) error {
 func StartEnginePID(path string) (int, error) {
 	cmd := exec.Command(path)
 	prepareDetachedCommand(cmd)
+	// The engine is the person's whoever starts it: an agent's own token
+	// stays with the agent (B-550).
+	cmd.Env = withoutEnv(os.Environ(), "DUCKLAB_TOKEN")
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("start engine: %w", err)
 	}
@@ -354,4 +357,15 @@ func WaitGone(wait time.Duration) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("engine still running after %s", wait)
+}
+
+// withoutEnv is env with every assignment of name removed.
+func withoutEnv(env []string, name string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, name+"=") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

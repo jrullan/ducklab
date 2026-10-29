@@ -845,7 +845,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 &&
 			s.taskOwnsVisualCheck(ctx, mc.rs.run.ProjectID, mc.req.TaskID, contract) {
 			vision = vision.withFeedback(mc.rs.runDir, base.Diff, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
-				rendered, err := captureRender(ctx, root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
+				rendered, err := captureRender(s.renderContext(ctx), root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
 				if len(rendered.Captures) == 0 {
 					if err == nil {
 						err = fmt.Errorf("the render produced no captures")

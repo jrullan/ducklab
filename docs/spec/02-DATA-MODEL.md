@@ -880,6 +880,13 @@ Its token is the agents' credential. The person's credential lives beside it
 in `human.token` (mode `0600`, same lifecycle), read by the desktop and an
 interactive CLI only (B-530, `07-ENGINE-API.md §1`).
 
+Per-agent tokens (B-550) are config, not state: they survive restarts in
+`<config-dir>/agent-tokens.json` (mode `0600`) — `{legacy_disabled,
+tokens: [{id, name, hint, hash, created_at, last_used_at, revoked_at,
+grants: [{project, level}]}]}`. `hash` is the SHA-256 of the secret; the
+secret itself is never stored. `last_used_at` is written at most once a
+minute.
+
 A stale `engine.json` whose pid is dead is deleted by the next client that
 notices, which then proceeds with auto-start.
 

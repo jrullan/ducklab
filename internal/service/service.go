@@ -47,6 +47,8 @@ type Service struct {
 	// configPath is where cfg came from. Writing ducklings and providers back
 	// is the only reason the service needs to know.
 	configPath string
+	// renderTokens mints a render command's engine credential (B-550).
+	renderTokens RenderTokenIssuer
 	// cfgMu guards cfg and the registries it feeds, which a config edit
 	// rebuilds while runs may be reading them.
 	cfgMu sync.RWMutex
@@ -931,6 +933,17 @@ func (s *Service) configDoctorAt(projectPath string) ([]config.Finding, error) {
 // Keys are applied to a copy and written only if every one of them is valid,
 // so a typo in the second key cannot leave the first half-applied.
 func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]string, sources ...string) (*Project, error) {
+	source := ""
+	if len(sources) > 0 {
+		source = sources[0]
+	}
+	return s.ProjectUpdateBy(ctx, id, keys, source, "human")
+}
+
+// ProjectUpdateBy is ProjectUpdate with the actor its config receipt names:
+// the API passes the credential's, so an agent's edit is never filed as the
+// person's.
+func (s *Service) ProjectUpdateBy(ctx context.Context, id string, keys map[string]string, source, actor string) (*Project, error) {
 	entry, err := s.registry.Get(id)
 	if err != nil {
 		return nil, err
@@ -949,9 +962,9 @@ func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]
 	if err := config.SaveProject(path, &updated); err != nil {
 		return nil, err
 	}
-	if len(sources) > 0 && sources[0] != "" {
+	if source != "" {
 		if receipt, receiptErr := os.OpenFile(filepath.Join(entry.Path, ".ducklab", "config-audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); receiptErr == nil {
-			_ = json.NewEncoder(receipt).Encode(map[string]interface{}{"actor": "human", "source": sources[0], "keys": sortedKeys(keys), "ts": time.Now().UTC().Format(time.RFC3339)})
+			_ = json.NewEncoder(receipt).Encode(map[string]interface{}{"actor": actor, "source": source, "keys": sortedKeys(keys), "ts": time.Now().UTC().Format(time.RFC3339)})
 			_ = receipt.Close()
 		}
 	}
@@ -2421,7 +2434,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// Rendering is optional evidence and a failure is only a caveat.
 	render := effectiveRenderContract(projCfg)
 	if projCfg.RenderConfigured && render.Command != "" {
-		rendered, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
+		rendered, renderErr := captureRender(s.renderContext(ctx), ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
 		if len(rendered.Captures) > 0 {
 			rs.wmu.Lock()
 			rs.run.Captures = rendered.Captures

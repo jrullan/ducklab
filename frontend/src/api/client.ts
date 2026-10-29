@@ -748,6 +748,24 @@ export type ProviderLogin = {
   sign_in?: ProviderView["sign_in"];
 };
 
+/** One project a per-agent token may reach (B-550). */
+export type AgentGrant = { project: string; level: "read-only" | "full" };
+
+/** A per-agent token as the engine shows it. Mirrors agenttoken.View; the
+ *  secret is never part of it. */
+export type AgentToken = {
+  id: string;
+  name: string;
+  actor: string;
+  hint: string;
+  created_at: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  grants: AgentGrant[] | null;
+};
+
+export type AgentTokenList = { items: AgentToken[] | null; total: number; legacy_enabled: boolean };
+
 /** One past bench run. Mirrors service.BenchSummary. */
 export type BenchSummary = {
   suite: string;
@@ -1518,6 +1536,24 @@ export class EngineClient {
   }
   providerLogout(id: string) {
     return this.request<unknown>("DELETE", `/v1/providers/${encodeURIComponent(id)}/login`);
+  }
+  /** Per-agent tokens (B-550). Every call is the person's: the engine
+   *  refuses them to an agent's credential. */
+  agentTokens() {
+    return this.request<AgentTokenList>("GET", "/v1/agent-tokens");
+  }
+  /** Issues a token. The secret is in this answer only. */
+  agentTokenCreate(name: string, grants: AgentGrant[]) {
+    return this.request<{ token: AgentToken; secret: string }>("POST", "/v1/agent-tokens", { name, grants });
+  }
+  agentTokenSetGrants(id: string, grants: AgentGrant[]) {
+    return this.request<AgentToken>("PATCH", `/v1/agent-tokens/${encodeURIComponent(id)}`, { grants });
+  }
+  agentTokenRevoke(id: string) {
+    return this.request<AgentToken>("DELETE", `/v1/agent-tokens/${encodeURIComponent(id)}`);
+  }
+  agentTokenLegacySet(enabled: boolean) {
+    return this.request<{ legacy_enabled: boolean }>("PUT", "/v1/agent-tokens/legacy", { enabled });
   }
   providerModelEndpoints(id: string, model: string) {
     return this.request<{ items: ModelEndpoint[] | null }>(

@@ -23,3 +23,4 @@ engineer.
 | [0007](0007-artifact-modes.md) | An artifact stage may run solo, and says which ducklings it will use |
 | [0008](0008-rubber-duck.md) | The advisor is a positioned turn with three answers, not a background consult |
 | [0010](0010-actor-from-credential.md) | The engine derives the actor from the credential; agents ask the person through approval requests |
+| [0011](0011-per-agent-tokens.md) | The person issues each agent its own token and grants it projects at read-only or full |

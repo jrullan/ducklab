@@ -418,6 +418,31 @@ chosen session whenever a run needs a decision, and in `act` mode carries a
 coordinator policy so that session runs errands end to end ("fix the bugs")
 and escalates what is the person's.
 
+### Giving each agent its own access
+
+By default every agent that can read `engine.json` shares one token with
+full access to every project. Give each agent its own instead — Settings →
+**Agent access**, or from your own terminal:
+
+```sh
+ducklab token create "OpenCode ti36" --grant ti36xpro-opencode=full --grant ducklab=read-only
+```
+
+The secret is printed once; put it in that agent's MCP server environment as
+`DUCKLAB_TOKEN`. The agent then reaches only the projects you granted —
+`read-only` reads, `full` acts — and everything it does is recorded under its
+own name (`agent:opencode-ti36`). Even `full` cannot change a project's
+rules (its config, autonomy, gates, skills) or name files outside it. Change
+grants or revoke at any time. Once
+every agent has its own token, turn the shared one off
+(`ducklab token legacy off`).
+
+This orders, limits and audits agents; it is not a sandbox. `full` runs the
+project's builds, tests and app — code the agent's ducklings wrote — with
+your rights, so give `full` only to an agent you trust with that project;
+`read-only` is the level that contains one. And an agent running as your
+own OS user can read files you can, `human.token` included.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, how the tests guard
