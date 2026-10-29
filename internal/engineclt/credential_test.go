@@ -113,3 +113,36 @@ func TestAnOldClientKeepsWorkingAsAnAgent(t *testing.T) {
 		t.Fatalf("NewHuman without human.token = %q, want engine.json's token", got.Token)
 	}
 }
+
+// B-550: an agent's own token (DUCKLAB_TOKEN) is what its client presents,
+// and a reconnect follows the engine's port without trading it for the
+// shared engine.json token. The person's client never picks it up.
+func TestAnAgentsOwnTokenOutlivesAReconnect(t *testing.T) {
+	seen := ""
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("Authorization")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer live.Close()
+	u, _ := url.Parse(live.URL)
+	port, _ := strconv.Atoi(u.Port())
+	writeEngineFiles(t, port, "shared-agent", "human-3")
+	t.Setenv(AgentTokenEnv, "dlk_own")
+
+	client := New(&daemon.EngineInfo{Port: 1, Token: "shared-agent"})
+	if client.Token != "dlk_own" || !client.Pinned {
+		t.Fatalf("New = %+v, want the agent's own token", client)
+	}
+	client.HTTPClient = http.DefaultClient
+	resp, err := client.do("GET", "/v1/anything", nil)
+	if err != nil {
+		t.Fatalf("did not follow the restart: %v", err)
+	}
+	resp.Body.Close()
+	if seen != "Bearer dlk_own" {
+		t.Fatalf("reconnected with %q, want the agent's own token", seen)
+	}
+	if got := NewHuman(&daemon.EngineInfo{Port: port, Token: "shared-agent"}); got.Token != "human-3" || got.Pinned {
+		t.Fatalf("NewHuman = %+v, want the person's token whatever DUCKLAB_TOKEN says", got)
+	}
+}

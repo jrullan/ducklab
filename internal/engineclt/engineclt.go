@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -25,7 +26,12 @@ type Client struct {
 	// agents' (engine.json). A reconnect re-reads the same kind: following an
 	// engine restart must never quietly turn the desktop into an agent, nor
 	// an agent's client into the person (B-530).
-	Human      bool
+	Human bool
+	// Pinned says Token came from DUCKLAB_TOKEN — a per-agent token the
+	// person issued (B-550). A reconnect follows the engine's port but keeps
+	// the token: falling back to engine.json's shared one would quietly
+	// trade the agent's own identity for a broader one.
+	Pinned     bool
 	Version    string
 	HTTPClient *http.Client
 }
@@ -33,22 +39,33 @@ type Client struct {
 // New creates an engine client with the AGENT credential from engine.json —
 // what the MCP server and a non-interactive CLI present. The engine records
 // everything it does as an agent and refuses it every human-only decision.
+//
+// DUCKLAB_TOKEN, when set, is the agent's own token (B-550) and is presented
+// instead.
 func New(info *daemon.EngineInfo) *Client {
-	return &Client{
+	c := &Client{
 		BaseURL: fmt.Sprintf("http://127.0.0.1:%d", info.Port),
 		Token:   info.Token,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+	if t := strings.TrimSpace(os.Getenv(AgentTokenEnv)); t != "" {
+		c.Token, c.Pinned = t, true
+	}
+	return c
 }
+
+// AgentTokenEnv names the variable an agent's per-agent token is read from.
+const AgentTokenEnv = "DUCKLAB_TOKEN"
 
 // NewHuman creates an engine client with the person's credential, for the
 // desktop and an interactive CLI. Against an engine from before the split
 // (no human.token) it falls back to engine.json's single token.
 func NewHuman(info *daemon.EngineInfo) *Client {
-	c := New(daemon.AsHuman(info))
-	c.Human = true
+	h := daemon.AsHuman(info)
+	c := New(h)
+	c.Token, c.Pinned, c.Human = h.Token, false, true
 	return c
 }
 
@@ -61,6 +78,9 @@ func (c *Client) freshCredential() (string, string, error) {
 	}
 	if c.Human {
 		info = daemon.AsHuman(info)
+	}
+	if c.Pinned {
+		return fmt.Sprintf("http://127.0.0.1:%d", info.Port), c.Token, nil
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, nil
 }
@@ -416,6 +436,77 @@ func (c *Client) ProviderLoginStatus(id string) (map[string]interface{}, error) 
 // ProviderLogout forgets a subscription sign-in.
 func (c *Client) ProviderLogout(id string) error {
 	return c.delete("/v1/providers/" + id + "/login")
+}
+
+// AgentGrant is one project a per-agent token may reach (B-550).
+type AgentGrant struct {
+	Project string `json:"project"`
+	Level   string `json:"level"`
+}
+
+// AgentToken is a per-agent token as the engine shows it; the secret is
+// never part of it.
+type AgentToken struct {
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Actor      string       `json:"actor"`
+	Hint       string       `json:"hint"`
+	CreatedAt  string       `json:"created_at"`
+	LastUsedAt string       `json:"last_used_at,omitempty"`
+	RevokedAt  string       `json:"revoked_at,omitempty"`
+	Grants     []AgentGrant `json:"grants"`
+}
+
+// AgentTokens is the person's token list.
+type AgentTokens struct {
+	Items         []AgentToken `json:"items"`
+	LegacyEnabled bool         `json:"legacy_enabled"`
+}
+
+// AgentTokenList lists the per-agent tokens. Person only.
+func (c *Client) AgentTokenList() (*AgentTokens, error) {
+	var out AgentTokens
+	return &out, c.get("/v1/agent-tokens", &out)
+}
+
+// AgentTokenCreate issues a token and returns it with its secret, which the
+// engine never shows again. Person only.
+func (c *Client) AgentTokenCreate(name string, grants []AgentGrant) (*AgentToken, string, error) {
+	var out struct {
+		Token  AgentToken `json:"token"`
+		Secret string     `json:"secret"`
+	}
+	if grants == nil {
+		grants = []AgentGrant{}
+	}
+	err := c.post("/v1/agent-tokens", map[string]interface{}{"name": name, "grants": grants}, &out)
+	return &out.Token, out.Secret, err
+}
+
+// AgentTokenSetGrants replaces a token's grants. Person only.
+func (c *Client) AgentTokenSetGrants(id string, grants []AgentGrant) (*AgentToken, error) {
+	if grants == nil {
+		grants = []AgentGrant{}
+	}
+	var out AgentToken
+	return &out, c.patch("/v1/agent-tokens/"+id, map[string]interface{}{"grants": grants}, &out)
+}
+
+// AgentTokenRevoke ends a token for good. Person only.
+func (c *Client) AgentTokenRevoke(id string) error {
+	return c.delete("/v1/agent-tokens/" + id)
+}
+
+// AgentTokenLegacySet turns the shared engine.json agent token on or off.
+// Person only.
+func (c *Client) AgentTokenLegacySet(enabled bool) error {
+	return c.put("/v1/agent-tokens/legacy", map[string]interface{}{"enabled": enabled}, nil)
+}
+
+// AgentTokenSelf says which credential this client carries.
+func (c *Client) AgentTokenSelf() (map[string]interface{}, error) {
+	var out map[string]interface{}
+	return out, c.get("/v1/agent-tokens/self", &out)
 }
 
 // DucklingSet adds or partially updates a duckling.

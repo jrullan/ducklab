@@ -6,6 +6,22 @@
 // engine, the Go client and this file cannot describe the same endpoint
 // differently. An edit here would reintroduce exactly the drift it prevents.
 
+export interface AgenttokenGrant {
+  level?: string;
+  project?: string;
+}
+
+export interface AgenttokenView {
+  actor?: string;
+  created_at?: string;
+  grants?: AgenttokenGrant[];
+  hint?: string;
+  id?: string;
+  last_used_at?: string;
+  name?: string;
+  revoked_at?: string;
+}
+
 export interface ArtifactNode {
   down?: string[];
   id?: string;
@@ -267,6 +283,43 @@ export interface EngineapiacceptRequest {
   lane_widening?: string[];
   message?: string;
   resolve_additive_conflicts?: boolean;
+}
+
+export interface EngineapiagentTokenCreateRequest {
+  grants?: AgenttokenGrant[];
+  name?: string;
+}
+
+export interface EngineapiagentTokenCreated {
+  secret?: string;
+  token?: AgenttokenView;
+}
+
+export interface EngineapiagentTokenLegacyRequest {
+  enabled?: boolean;
+}
+
+export interface EngineapiagentTokenLegacyResponse {
+  legacy_enabled?: boolean;
+}
+
+export interface EngineapiagentTokenList {
+  items?: AgenttokenView[];
+  legacy_enabled?: boolean;
+  total?: number;
+}
+
+export interface EngineapiagentTokenSelf {
+  actor?: string;
+  grants?: AgenttokenGrant[];
+  id?: string;
+  kind?: string;
+  name?: string;
+}
+
+export interface EngineapiagentTokenUpdateRequest {
+  grants?: AgenttokenGrant[];
+  name?: string;
 }
 
 export interface EngineapianswerRequest {
@@ -1384,6 +1437,12 @@ export interface SkillArg {
 
 /** Every endpoint, derived from the engine's route table. */
 export const OPERATIONS = [
+  { id: "AgentTokenList", method: "GET", path: "/v1/agent-tokens" },
+  { id: "AgentTokenCreate", method: "POST", path: "/v1/agent-tokens" },
+  { id: "AgentTokenLegacySet", method: "PUT", path: "/v1/agent-tokens/legacy" },
+  { id: "AgentTokenSelf", method: "GET", path: "/v1/agent-tokens/self" },
+  { id: "AgentTokenRevoke", method: "DELETE", path: "/v1/agent-tokens/{tok}" },
+  { id: "AgentTokenUpdate", method: "PATCH", path: "/v1/agent-tokens/{tok}" },
   { id: "BenchList", method: "GET", path: "/v1/bench" },
   { id: "Bench", method: "POST", path: "/v1/bench" },
   { id: "BenchStart", method: "POST", path: "/v1/bench/start" },

@@ -47,6 +47,8 @@ type Service struct {
 	// configPath is where cfg came from. Writing ducklings and providers back
 	// is the only reason the service needs to know.
 	configPath string
+	// renderTokens mints a render command's engine credential (B-550).
+	renderTokens RenderTokenIssuer
 	// cfgMu guards cfg and the registries it feeds, which a config edit
 	// rebuilds while runs may be reading them.
 	cfgMu sync.RWMutex
@@ -2403,7 +2405,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// Rendering is optional evidence and a failure is only a caveat.
 	render := effectiveRenderContract(projCfg)
 	if projCfg.RenderConfigured && render.Command != "" {
-		rendered, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
+		rendered, renderErr := captureRender(s.renderContext(ctx), ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
 		if len(rendered.Captures) > 0 {
 			rs.wmu.Lock()
 			rs.run.Captures = rendered.Captures

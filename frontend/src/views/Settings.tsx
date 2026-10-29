@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Ducklings } from "./Ducklings";
 import { Skills } from "./Skills";
 import { Projects } from "./Projects";
+import { AgentAccess } from "./AgentAccess";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
@@ -56,6 +57,7 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "fleet", label: "providers" },
   { id: "budgets", label: "budgets & limits" },
   { id: "autopilot", label: "autopilot & autonomy" },
+  { id: "access", label: "agent access" },
   { id: "remote", label: "repo, remote & git" },
   { id: "appearance", label: "appearance & alerts" },
   { id: "engine", label: "engine" },
@@ -73,7 +75,7 @@ const SETTINGS_GROUPS: { label: string; shortLabel: string; sectionIds?: Setting
   {
     label: "Who works for you — and how far they may go",
     shortLabel: "People & autonomy",
-    sectionIds: ["ducklings", "fleet", "budgets", "autopilot"],
+    sectionIds: ["ducklings", "fleet", "budgets", "autopilot", "access"],
     rooms: ["skills"],
   },
   {
@@ -190,6 +192,7 @@ export function Settings({
           {!room && activeSection === "fleet" && client && (
             <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
           )}
+          {!room && activeSection === "access" && client && <AgentAccess client={client} />}
           {!room && activeSection === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
 
           <div className={activeSection === "appearance" ? "" : "hidden"}>

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/agenttoken"
 	"github.com/jrullan/ducklab/internal/bench"
 	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/bus"
@@ -36,8 +37,11 @@ type Server struct {
 	bus *bus.Bus
 	// token is the person's credential; agentToken the agents' (B-530).
 	// Which one a request presents decides every actor it records.
-	token       string
-	agentToken  string
+	token      string
+	agentToken string
+	// agentTokens are the person's per-agent credentials (B-550). Nil
+	// means the engine knows only the two shared ones.
+	agentTokens *agenttoken.Store
 	version     string
 	provenance  string
 	allowOrigin string
@@ -126,7 +130,7 @@ func (s *Server) routes() {
 	for _, r := range routeTable() {
 		h := r.handler(s)
 		if r.Auth {
-			h = s.auth(h)
+			h = s.auth(s.agentScope(r, h))
 		}
 		s.mux.HandleFunc(r.Method+" "+r.Path, h)
 	}
@@ -142,8 +146,8 @@ func (s *Server) routes() {
 	// The one time a goroutine dump was needed — an exec that survived its
 	// abort — the engine's stderr pointed at /dev/null and the diagnosis ran
 	// blind. Loopback-only plus auth: same trust boundary as everything else.
-	s.mux.HandleFunc("GET /debug/pprof/", s.auth(netpprof.Index))
-	s.mux.HandleFunc("GET /debug/pprof/profile", s.auth(netpprof.Profile))
+	s.mux.HandleFunc("GET /debug/pprof/", s.auth(s.unscopedOnly(netpprof.Index)))
+	s.mux.HandleFunc("GET /debug/pprof/profile", s.auth(s.unscopedOnly(netpprof.Profile)))
 }
 
 // allowedOrigins are the only origins permitted to call the engine.
@@ -1120,11 +1124,27 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		cred, ok := s.credentialFor(token)
+		var who *agenttoken.Identity
+		if !ok && s.agentTokens != nil {
+			who, ok = s.agentTokens.Lookup(token)
+			cred = credAgent
+		}
 		if !ok {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), credentialKey{}, cred))
+		if cred == credAgent && who == nil && s.agentTokens != nil && !s.agentTokens.LegacyEnabled() {
+			s.error(w, http.StatusUnauthorized, "shared_agent_token_off",
+				"the shared agent token (engine.json) is turned off; this agent needs its own token. "+
+					"The person issues one in Settings → Agent access (or `ducklab token create`) and the agent "+
+					"presents it through DUCKLAB_TOKEN")
+			return
+		}
+		ctx := context.WithValue(r.Context(), credentialKey{}, cred)
+		if who != nil {
+			ctx = context.WithValue(ctx, identityKey{}, who)
+		}
+		r = r.WithContext(ctx)
 		// Check version
 		clientVersion := r.Header.Get("X-Ducklab-Client")
 		if clientVersion != "" {
@@ -1232,6 +1252,7 @@ func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	projects = visibleProjects(r, projects)
 	s.json(w, http.StatusOK, map[string]interface{}{"items": projects, "total": len(projects)})
 }
 
@@ -1365,6 +1386,10 @@ func (s *Server) handleBugAdd(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Who filed it is the credential's to say, like every other actor
+	// (B-530): an agent's declared reporter may narrow, never claim the
+	// person, and a per-agent token is recorded under its own name (B-550).
+	req.Reporter = s.actor(r, req.Reporter)
 	b, err := s.svc.BugAdd(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -1789,6 +1814,11 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	projectID := query.Get("project")
 	status := query.Get("status")
+	if who := requestIdentity(r); who != nil && projectID != "" {
+		if !s.agentMay(w, who, projectID, agenttoken.LevelRead) {
+			return
+		}
+	}
 	runs, err := s.svc.RunList(r.Context(), service.RunFilter{
 		ProjectID: projectID,
 		Status:    status,
@@ -1797,6 +1827,7 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	runs = visibleRuns(r, runs)
 	total := len(runs)
 	// Pagination is applied after filtering so total remains honest for the
 	// question asked. Invalid values are rejected rather than silently changing
@@ -2023,6 +2054,29 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := r.URL.Query().Get("project")
 	runID := r.URL.Query().Get("run")
+	// A per-agent token hears only its projects (B-550). The all-projects
+	// stream would need filtering per event; naming the project or run is
+	// what every agent client already does.
+	if who := requestIdentity(r); who != nil {
+		if projectID == "" && runID == "" {
+			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+				"agent token %q must name the project (?project=) or run (?run=) it listens to", who.Name))
+			return
+		}
+		if projectID != "" && !s.agentMay(w, who, projectID, agenttoken.LevelRead) {
+			return
+		}
+		if runID != "" {
+			owner := s.projectIDFn(runID)
+			if owner == "" {
+				s.error(w, http.StatusNotFound, "not_found", fmt.Sprintf("run %s not found", runID))
+				return
+			}
+			if !s.agentMay(w, who, owner, agenttoken.LevelRead) {
+				return
+			}
+		}
+	}
 	fromSeq := 0
 	if seq := r.URL.Query().Get("from_seq"); seq != "" {
 		fmt.Sscanf(seq, "%d", &fromSeq)

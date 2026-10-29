@@ -36,6 +36,24 @@ app are clients. This document is the contract between them.
   never recorded as `human`, and human-only decisions refuse it. Agents ask
   the person through `POST /v1/runs/{id}/approval-requests`; only the person's
   credential approves or declines.
+- **Per-agent tokens** (B-550, `docs/decisions/0011`). The person issues
+  each agent its own token (`POST /v1/agent-tokens`, person only; the secret
+  is in that answer alone, the engine keeps a SHA-256 hash in
+  `<config-dir>/agent-tokens.json`, mode `0600`). Each token carries grants
+  `{project, level}` with level `read-only` or `full`; no grant is no access.
+  A request presenting one is an agent's, recorded as `agent:<slug of name>`
+  whatever its body declares, and is limited by route:
+  `/v1/projects/{id}/…` by the grant for `{id}`, `/v1/runs/{id}/…` by the
+  grant for the run's project; `GET` needs `read-only`, anything else `full`
+  (an artifact lint is a read). `GET /v1/projects` and `GET /v1/runs` list
+  only granted projects; `/v1/events` must name a granted `project` or `run`.
+  Outside projects a token reads configuration only (engine, ducklings,
+  providers, defaults, bench, presets, `GET /v1/agent-tokens/self`); every
+  other route there is refused. Refusals are `403 agent_scope` and name the
+  way out. The shared `engine.json` token stays valid until the person turns
+  it off (`PUT /v1/agent-tokens/legacy`); then it is `401
+  shared_agent_token_off`, and the renderer gets an in-memory read-only token
+  for its project, revoked when the render ends.
 - Every request carries `Authorization: Bearer <token>` and
   `X-Ducklab-Client: <name>/<semver>`. A missing or wrong token → `401`. A
   client whose **major** version differs from the engine's → `409` with

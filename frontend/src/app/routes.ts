@@ -1,7 +1,7 @@
 /** Hash routing. A pop-out window opens a route directly (08 §1.3), so routes
  * must be addressable without a router that owns history. */
 
-export type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "remote" | "appearance" | "engine";
+export type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "access" | "remote" | "appearance" | "engine";
 
 export type Route =
   | { name: "now" }
@@ -69,7 +69,7 @@ export function parseRoute(hash: string): Route {
 }
 
 function isSettingsSection(value: string | undefined): value is SettingsSection {
-  return value === "ducklings" || value === "fleet" || value === "budgets" || value === "autopilot" || value === "remote" || value === "appearance" || value === "engine";
+  return value === "ducklings" || value === "fleet" || value === "budgets" || value === "autopilot" || value === "access" || value === "remote" || value === "appearance" || value === "engine";
 }
 
 export function routeHref(route: Route): string {

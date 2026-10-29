@@ -170,6 +170,38 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("DELETE /v1/providers/{id}/login", f.auth(func(w http.ResponseWriter, r *http.Request) {
 		f.write(w, http.StatusOK, map[string]interface{}{"ok": true})
 	}))
+	// Per-agent tokens (B-550): the demo has none and never issues a real one.
+	f.mux.HandleFunc("GET /v1/agent-tokens", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"items": []interface{}{}, "total": 0, "legacy_enabled": true})
+	}))
+	f.mux.HandleFunc("POST /v1/agent-tokens", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name   string        `json:"name"`
+			Grants []interface{} `json:"grants"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		f.write(w, http.StatusCreated, map[string]interface{}{
+			"token": map[string]interface{}{"id": "at_demo", "name": body.Name, "actor": "agent:demo", "hint": "dlk_demo00",
+				"created_at": time.Now().UTC().Format(time.RFC3339), "grants": body.Grants},
+			"secret": "dlk_demo00000000000000000000000000000000000000000000",
+		})
+	}))
+	f.mux.HandleFunc("GET /v1/agent-tokens/self", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusOK, map[string]interface{}{"kind": "person", "actor": "human"})
+	}))
+	f.mux.HandleFunc("PUT /v1/agent-tokens/legacy", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		f.write(w, http.StatusOK, map[string]interface{}{"legacy_enabled": body.Enabled})
+	}))
+	f.mux.HandleFunc("PATCH /v1/agent-tokens/{tok}", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusNotFound, map[string]interface{}{"error": map[string]interface{}{"code": "not_found", "message": "no such agent token"}})
+	}))
+	f.mux.HandleFunc("DELETE /v1/agent-tokens/{tok}", f.auth(func(w http.ResponseWriter, r *http.Request) {
+		f.write(w, http.StatusNotFound, map[string]interface{}{"error": map[string]interface{}{"code": "not_found", "message": "no such agent token"}})
+	}))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/diagnostics", f.auth(f.diagnosticDefaults))

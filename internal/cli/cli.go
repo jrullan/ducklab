@@ -93,7 +93,7 @@ func Run(args []string) int {
 				verb = remaining[1]
 				cmdArgs = remaining[2:]
 			}
-		case "task", "trace":
+		case "task", "trace", "token":
 			verb = remaining[1]
 			cmdArgs = remaining[2:]
 		case "provider", "duckling", "roster", "budget":
@@ -177,6 +177,8 @@ func Run(args []string) int {
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
 	case "provider":
 		return providerCmd(verb, cmdArgs)
+	case "token":
+		return tokenCmd(verb, cmdArgs)
 	case "budget":
 		return budgetCmd(verb, cmdArgs)
 	case "roster":
@@ -224,8 +226,12 @@ func isTerminal(f *os.File) bool {
 // otherwise. A heuristic, stated as one: an agent that allocates a pty can
 // look interactive. What it rules out is the default path — a piped CLI, the
 // MCP server, a script — being recorded as the person.
+//
+// DUCKLAB_TOKEN outranks the terminal: it is a per-agent token the person
+// issued (B-550), and an agent holding one stays that agent even when its
+// shell looks interactive.
 func cliClient(info *daemon.EngineInfo) *engineclt.Client {
-	if interactiveTerminal() {
+	if os.Getenv(engineclt.AgentTokenEnv) == "" && interactiveTerminal() {
 		return engineclt.NewHuman(info)
 	}
 	return engineclt.New(info)
@@ -308,6 +314,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
   provider  set | list | remove        duckling  set | list | probe | test
   roster    show | set | suggest       budget    show | set
   trace     check requirement→spec→task coverage
+  token     list | create | grant | revoke | legacy | whoami  (per-agent access)
   mcp       serve (stdio MCP server exposing the loop)
 
 The first command auto-starts the engine if none is running
