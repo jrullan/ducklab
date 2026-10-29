@@ -1,6 +1,7 @@
 package engineapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -89,6 +90,13 @@ var agentProjectRules = map[string]bool{
 	"PUT /v1/projects/{id}/skills/{name}":     true,
 	"DELETE /v1/projects/{id}/skills/{name}":  true,
 	"POST /v1/projects/{id}/recover/{action}": true,
+	// Turning autopilot on or off is autonomy by another door; the roster
+	// chooses which models — local or hosted — see the project; a task's
+	// owns is its lane, and widening a lane is the person's (B-530).
+	"POST /v1/projects/{id}/autopilot":   true,
+	"PUT /v1/projects/{id}/roster":       true,
+	"DELETE /v1/projects/{id}/roster":    true,
+	"PUT /v1/projects/{id}/tasks/{task}": true,
 }
 
 // agentReadPosts are POSTs that only compute an answer, so read-only access
@@ -223,45 +231,99 @@ func visibleRuns(r *http.Request, runs []*runlog.Run) []*runlog.Run {
 	return out
 }
 
-// agentPathsInside refuses a per-agent token any file path outside its
-// project. Review of B-550: a stage's --from and refs, and a reference
-// import, name files the engine reads with the person's rights; with a full
-// grant on one project, {"from": "~/.local/state/ducklab/human.token"} read
-// the person's credential into a brief the agent could then fetch. Paths are
-// resolved the way the service resolves them — relative to the project, ~
-// to home — and through symlinks.
-func (s *Server) agentPathsInside(w http.ResponseWriter, r *http.Request, projectID string, paths []string) bool {
+// agentPathError is a per-agent token naming a file outside its project.
+type agentPathError struct{ msg string }
+
+func (e *agentPathError) Error() string { return e.msg }
+
+// agentPathGuard vets file paths for a per-agent token: each must resolve,
+// through symlinks, inside the project — and so must every file in a named
+// directory, since a reference directory is walked and its links followed.
+// Review of B-550: a stage's from and refs, and a reference import, name
+// files the engine reads with the person's rights; {"from":
+// "~/.local/state/ducklab/human.token"} read the person's credential into a
+// brief the agent could fetch. Relative paths resolve against the project,
+// as the service resolves references; callers pass a path the service reads
+// some other way (the brief, an import) already absolute. Nil for the person
+// and the shared token.
+func (s *Server) agentPathGuard(r *http.Request, projectID string) func([]string) error {
 	who := requestIdentity(r)
-	if who == nil || len(paths) == 0 {
+	if who == nil {
+		return nil
+	}
+	return func(paths []string) error {
+		if len(paths) == 0 {
+			return nil
+		}
+		project, err := s.svc.ProjectGet(r.Context(), projectID)
+		if err != nil {
+			return err
+		}
+		root := resolvedPath(project.Path)
+		inside := func(p string) bool {
+			rel, err := filepath.Rel(root, resolvedPath(p))
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		}
+		refuse := func(p string) error {
+			return &agentPathError{fmt.Sprintf(
+				"agent token %q may name files only inside project %q; %s is outside it. "+
+					"A reference from elsewhere is the person's to give", who.Name, projectID, p)}
+		}
+		for _, p := range paths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if p == "~" || strings.HasPrefix(p, "~/") {
+				if home, err := os.UserHomeDir(); err == nil {
+					p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+				}
+			} else if !filepath.IsAbs(p) {
+				p = filepath.Join(project.Path, p)
+			}
+			if !inside(p) {
+				return refuse(p)
+			}
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				var bad string
+				filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
+					if err == nil && path != p && !inside(path) {
+						bad = path
+						return filepath.SkipAll
+					}
+					return nil
+				})
+				if bad != "" {
+					return refuse(bad)
+				}
+			}
+		}
+		return nil
+	}
+}
+
+// agentPathsInside is agentPathGuard answering the request itself.
+func (s *Server) agentPathsInside(w http.ResponseWriter, r *http.Request, projectID string, paths []string) bool {
+	guard := s.agentPathGuard(r, projectID)
+	if guard == nil {
 		return true
 	}
-	project, err := s.svc.ProjectGet(r.Context(), projectID)
-	if err != nil {
-		s.error(w, http.StatusNotFound, "not_found", err.Error())
+	if err := guard(paths); err != nil {
+		s.agentPathRefusal(w, err)
 		return false
 	}
-	root := resolvedPath(project.Path)
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if p == "~" || strings.HasPrefix(p, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				p = filepath.Join(home, strings.TrimPrefix(p, "~"))
-			}
-		} else if !filepath.IsAbs(p) {
-			p = filepath.Join(project.Path, p)
-		}
-		rel, err := filepath.Rel(root, resolvedPath(p))
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
-				"agent token %q may name files only inside project %q; %s is outside it. "+
-					"A reference from elsewhere is the person's to give", who.Name, projectID, p))
-			return false
-		}
-	}
 	return true
+}
+
+// agentPathRefusal answers a guard's error: a scope refusal as one, anything
+// else as the lookup failure it is.
+func (s *Server) agentPathRefusal(w http.ResponseWriter, err error) {
+	var scope *agentPathError
+	if errors.As(err, &scope) {
+		s.error(w, http.StatusForbidden, "agent_scope", scope.msg)
+		return
+	}
+	s.error(w, http.StatusNotFound, "not_found", err.Error())
 }
 
 // resolvedPath is p made absolute with every symlink followed, as far as the

@@ -50,11 +50,13 @@ app are clients. This document is the contract between them.
   Outside projects a token reads configuration only (engine, ducklings,
   providers, defaults, bench, presets, `GET /v1/agent-tokens/self`); every
   other route there is refused. Even `full` does not reach a project's
-  rules — `PATCH`/`DELETE /v1/projects/{id}`, autonomy, gate adoption,
-  visual-check config, skill writes, orphan recovery — since its config names
-  the commands the engine runs. File paths a token names (a stage's `from`
+  rules — `PATCH`/`DELETE /v1/projects/{id}`, autonomy, autopilot, roster
+  writes, task edits (a task's lane), gate adoption, visual-check config,
+  skill writes, orphan recovery — since its config names the commands the
+  engine runs. A chat with a harness scope or bug target is refused. File paths a token names (a stage's `from`
   and `refs`, a reference import) must resolve, through symlinks, inside the
-  project. Provider header values are masked. An open event stream re-checks
+  project — inherited references included, and every file of a named
+  directory. Provider header values are masked. An open event stream re-checks
   the token before every write and ends on revoke or a narrowed grant;
   forgetting a project drops every grant to it. Refusals are `403
   agent_scope` and name the way out. The shared `engine.json` token stays valid until the person turns

@@ -104,6 +104,11 @@ type StageRequest struct {
 	// that describes the intended product the brief asks to build toward.
 	Refs   []StageRef `json:"refs,omitempty"`
 	Stream bool       `json:"stream"`
+	// PathGuard, when set, vets every file the run will read on the
+	// caller's behalf — the brief file and the references, inherited ones
+	// included — once they are final. The API sets it for a per-agent token
+	// (B-550); an error refuses the launch.
+	PathGuard func(paths []string) error `json:"-"`
 	// resumed is set only by RunResume: the run keeps its recorded ceilings
 	// and its ledger continues from what it already spent.
 	resumed bool
@@ -473,6 +478,21 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// and relative references are project-relative rather than dependent on the
 	// engine daemon's working directory (B-474).
 	req.Refs = normalizeStageRefs(entry.Path, req.Stage, req.Refs)
+	if req.PathGuard != nil {
+		var paths []string
+		// The brief is read as a file when one is there, relative to the
+		// engine's directory; otherwise it is the brief's text.
+		if req.From != "" {
+			if _, err := os.Stat(req.From); err == nil {
+				abs, _ := filepath.Abs(req.From)
+				paths = append(paths, abs)
+			}
+		}
+		paths = append(paths, refPaths(req.Refs)...)
+		if err := req.PathGuard(paths); err != nil {
+			return nil, err
+		}
+	}
 
 	// The plan amendment: Review's "this needs more, but not a redesign".
 	// Solo and one round unless asked otherwise: the architect returns a

@@ -437,8 +437,11 @@ grants or revoke at any time. Once
 every agent has its own token, turn the shared one off
 (`ducklab token legacy off`).
 
-This orders, limits and audits agents; it is not a sandbox. An agent running
-as your own OS user can still read files you can, `human.token` included.
+This orders, limits and audits agents; it is not a sandbox. `full` runs the
+project's builds, tests and app — code the agent's ducklings wrote — with
+your rights, so give `full` only to an agent you trust with that project;
+`read-only` is the level that contains one. And an agent running as your
+own OS user can read files you can, `human.token` included.
 
 ## Contributing
 

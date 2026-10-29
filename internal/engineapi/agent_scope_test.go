@@ -346,6 +346,10 @@ func TestAFullGrantDoesNotChangeAProjectsRules(t *testing.T) {
 		{"PUT", "/v1/projects/" + project + "/visual-check", `{}`},
 		{"POST", "/v1/projects/" + project + "/skills", `{"name":"x"}`},
 		{"POST", "/v1/projects/" + project + "/recover/restore", `{}`},
+		{"POST", "/v1/projects/" + project + "/autopilot", `{}`},
+		{"PUT", "/v1/projects/" + project + "/roster", `{}`},
+		{"DELETE", "/v1/projects/" + project + "/roster", ""},
+		{"PUT", "/v1/projects/" + project + "/tasks/T-001", `{"owns":["/"]}`},
 	} {
 		status, out := call(t, server, tok, c.method, c.path, c.body)
 		wantScopeRefusal(t, status, out, c.method+" "+c.path)
@@ -368,6 +372,12 @@ func TestAPerAgentTokenNamesFilesOnlyInsideItsProject(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
+	// A directory is walked and its links followed, so a link inside one
+	// leads out as surely as a link named directly.
+	os.MkdirAll(filepath.Join(f.path, "docs"), 0o755)
+	if err := os.Symlink(outside, filepath.Join(f.path, "docs", "x.txt")); err != nil {
+		t.Fatal(err)
+	}
 	stage := "/v1/projects/" + f.project + "/stages/intake"
 	for name, body := range map[string]string{
 		"from outside":       `{"from":"` + outside + `"}`,
@@ -375,6 +385,7 @@ func TestAPerAgentTokenNamesFilesOnlyInsideItsProject(t *testing.T) {
 		"ref by home":        `{"from":"build a thing","refs":[{"path":"~/.local/state/ducklab/human.token"}]}`,
 		"ref through a link": `{"from":"build a thing","refs":[{"path":"innocent.md"}]}`,
 		"ref climbing out":   `{"from":"build a thing","refs":[{"path":"../../etc/passwd"}]}`,
+		"link inside a dir":  `{"from":"build a thing","refs":[{"path":"docs"}]}`,
 	} {
 		status, out := call(t, f.server, tok, "POST", stage, body)
 		wantScopeRefusal(t, status, out, name)
@@ -442,26 +453,10 @@ func TestAPerAgentTokenSeesWhichProviderHeadersAreSetNotTheirValues(t *testing.T
 func TestARevokeEndsAnOpenEventStream(t *testing.T) {
 	f := scopedEngine(t)
 	view, secret, _ := f.store.Create("Agent", []agenttoken.Grant{{Project: f.project, Level: agenttoken.LevelRead}})
-	req, _ := http.NewRequest("GET", f.server.URL+"/v1/events?project="+f.project, nil)
-	req.Header.Set("Authorization", "Bearer "+secret)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("stream = %d", resp.StatusCode)
-	}
-	ended := make(chan struct{})
-	go func() {
-		io.Copy(io.Discard, resp.Body)
-		close(ended)
-	}()
-	f.bus.Publish(bus.Event{Type: "run_started", ProjectID: f.project})
+	ended := openAgentStream(t, f, secret)
 	if _, err := f.store.Revoke(view.ID); err != nil {
 		t.Fatal(err)
 	}
-	f.bus.Publish(bus.Event{Type: "run_started", ProjectID: f.project})
 	select {
 	case <-ended:
 	case <-time.After(3 * time.Second):
@@ -482,4 +477,70 @@ func TestAConfigReceiptNamesTheAgentNotThePerson(t *testing.T) {
 	if !strings.Contains(string(raw), `"actor":"agent"`) || strings.Contains(string(raw), `"actor":"human"`) {
 		t.Errorf("config receipt = %s, want the agent", raw)
 	}
+}
+
+// Review of B-550: harness diagnostics read, and file bugs into, a project
+// the token was never granted.
+func TestAPerAgentTokenCannotOpenAHarnessChat(t *testing.T) {
+	server, store, project := scopedServer(t)
+	tok := issue(t, store, "Agent", agenttoken.Grant{Project: project, Level: agenttoken.LevelFull})
+	for _, body := range []string{`{"diagnostic_scope":"subject+harness"}`, `{"bug_target":"harness"}`} {
+		status, out := call(t, server, tok, "POST", "/v1/projects/"+project+"/chats", body)
+		wantScopeRefusal(t, status, out, "harness chat "+body)
+	}
+}
+
+func TestTurningTheSharedTokenOffEndsItsOpenStreams(t *testing.T) {
+	f := scopedEngine(t)
+	ended := openAgentStream(t, f, agentTok)
+	if err := f.store.SetLegacyEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the shared token's stream outlived the switch")
+	}
+}
+
+// openAgentStream opens an event stream and keeps events flowing, so the stream
+// is answered (the engine sends headers with its first write) and every
+// later check runs on an event rather than waiting for a heartbeat. It
+// returns a channel closed when the stream ends.
+func openAgentStream(t *testing.T, f scopedFixture, token string) <-chan struct{} {
+	t.Helper()
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				f.bus.Publish(bus.Event{Type: "run_started", ProjectID: f.project})
+			}
+		}
+	}()
+	// Cancelled at cleanup, before the server closes: a stream that never
+	// ends would otherwise hold the server open and hang the test.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, _ := http.NewRequestWithContext(ctx, "GET", f.server.URL+"/v1/events?project="+f.project, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream = %d", resp.StatusCode)
+	}
+	ended := make(chan struct{})
+	go func() {
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		close(ended)
+	}()
+	return ended
 }

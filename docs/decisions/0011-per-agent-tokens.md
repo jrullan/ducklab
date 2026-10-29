@@ -42,6 +42,11 @@ land tasks and open PRs in any other.
   reference import) must resolve inside the project: `{"from":
   "~/.local/state/ducklab/human.token"}` otherwise read the person's
   credential into a brief the agent could fetch.
+- Review's second pass added: turning autopilot on or off, the roster (which
+  models — local or hosted — see the project) and a task's lane are rules
+  too; files are vetted after a revision inherits its parent's references,
+  and every file in a named directory is checked through its links; a chat
+  cannot reach the harness project.
 - A grant ends when it should: an event stream re-checks the token before
   each write, and forgetting a project drops its grants, since project ids
   are reused.
@@ -49,7 +54,8 @@ land tasks and open PRs in any other.
   alike, and the CLI even at an interactive terminal — and a reconnect keeps
   it rather than falling back to `engine.json`. The engine never inherits
   it: an agent's CLI that auto-starts the engine would otherwise make every
-  child the engine spawns act as that agent.
+  child the engine spawns act as that agent. (So `DUCKLAB_TOKEN` is no longer
+  a render-worker override; `DUCKLAB_ENGINE` still is.)
 
 **Transition.** The shared token keeps working, at full access everywhere,
 until the person turns it off. Turning it on by default keeps every existing
@@ -58,6 +64,14 @@ renderer receives an in-memory read-only token for the project it renders,
 revoked when the render ends.
 
 ## What it does not do
+
+**`full` still runs code as the person.** A full grant launches builds,
+runs the project's gate and tests, starts its app and its install chain —
+all of which execute code that ducklings wrote under the agent's direction,
+with the person's OS rights. Locking the project's rules stops an agent from
+choosing *which* command runs; it cannot stop the project's own code from
+doing what code does. So `full` is real trust in that agent for that
+project, and `read-only` is the level that contains it.
 
 It orders, limits and audits agents that use the engine's API; it does not
 sandbox them. An agent running as the person's OS user can read

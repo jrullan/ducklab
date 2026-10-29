@@ -186,10 +186,13 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		}
 		return ""
 	}
-	engineURL, token := envValue("DUCKLAB_ENGINE"), envValue("DUCKLAB_TOKEN")
+	// DUCKLAB_TOKEN is no override here any more: the engine strips it at
+	// start, since it is an agent's own token and must not become the
+	// engine's (B-550). DUCKLAB_ENGINE still points a render elsewhere.
+	engineURL, token := envValue("DUCKLAB_ENGINE"), ""
 	// With the shared agent token off, the renderer gets its own: read-only,
 	// for this project, alive only while the render runs.
-	if issue, ok := parentCtx.Value(renderTokenKey{}).(RenderTokenIssuer); ok && token == "" {
+	if issue, ok := parentCtx.Value(renderTokenKey{}).(RenderTokenIssuer); ok {
 		minted, revoke, err := issue(projectID)
 		if err != nil {
 			return renderOutcome{}, fmt.Errorf("render token: %w", err)
@@ -200,8 +203,8 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		token = minted
 	}
 	// The engine owns the connection details; render commands should not need
-	// callers to duplicate them in their environment. Environment overrides
-	// remain useful for tests and explicitly configured render workers.
+	// callers to duplicate them in their environment. DUCKLAB_ENGINE remains
+	// an override for tests and explicitly configured render workers.
 	if info, err := daemon.ReadEngineJSON(); err == nil {
 		if engineURL == "" && info.Port > 0 {
 			engineURL = fmt.Sprintf("http://127.0.0.1:%d", info.Port)

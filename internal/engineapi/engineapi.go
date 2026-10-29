@@ -1050,6 +1050,15 @@ func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Harness diagnostics read, and file bugs into, a second project the
+	// token was never granted (review of B-550).
+	if who := requestIdentity(r); who != nil &&
+		(strings.Contains(req.DiagnosticScope, "harness") || req.BugTarget == "harness") {
+		s.error(w, http.StatusForbidden, "agent_scope", fmt.Sprintf(
+			"agent token %q reaches only project %q; a chat that reads or files into the harness project is the person's to open",
+			who.Name, r.PathValue("id")))
+		return
+	}
 	run, err := s.svc.ChatStart(r.Context(), r.PathValue("id"), req)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -2178,8 +2187,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	stillAllowed := func() bool {
 		who := requestIdentity(r)
-		if who == nil || s.agentTokens == nil {
+		if s.agentTokens == nil {
 			return true
+		}
+		if who == nil {
+			// The shared token's streams end when the person turns it off.
+			return requestCredential(r) == credHuman || s.agentTokens.LegacyEnabled()
 		}
 		now, ok := s.agentTokens.Current(who)
 		if !ok {
@@ -2273,25 +2286,13 @@ func (s *Server) handleStageStart(w http.ResponseWriter, r *http.Request) {
 	if s.refuseAgentCaps(w, r, nil, req.AgentTurns) {
 		return
 	}
-	if requestIdentity(r) != nil {
-		var paths []string
-		// --from is read as a file when one is there, else taken as text.
-		// The service reads it relative to the engine's directory, not the
-		// project's, so it is checked as the absolute path that read opens.
-		if req.From != "" {
-			if _, err := os.Stat(req.From); err == nil {
-				abs, _ := filepath.Abs(req.From)
-				paths = append(paths, abs)
-			}
-		}
-		for _, ref := range req.Refs {
-			paths = append(paths, ref.Path)
-		}
-		if !s.agentPathsInside(w, r, r.PathValue("id"), paths) {
-			return
-		}
-	}
+	req.PathGuard = s.agentPathGuard(r, r.PathValue("id"))
 	run, err := s.svc.StageStart(r.Context(), r.PathValue("id"), req)
+	var scope *agentPathError
+	if errors.As(err, &scope) {
+		s.agentPathRefusal(w, err)
+		return
+	}
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
