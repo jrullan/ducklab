@@ -271,6 +271,9 @@ export const KNOWN_EVENT_TYPES = [
   "seat_failover",
   "gate_resolved",
   "gate_reproduced",
+  // The accept's clean-checkout reproduction, run while the gate waits
+  // (B-545); accept reuses it for the same tree.
+  "pre_reproduction",
   "app_smoke",
   "render",
   "visual_compare",

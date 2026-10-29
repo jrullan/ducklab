@@ -79,6 +79,9 @@ type Service struct {
 	// afterRunDiff is a lifecycle observation seam used by tests that must
 	// inspect an isolated checkout before its normal cleanup.
 	afterRunDiff func(*runState)
+	// preRepro holds accept reproductions started while a run waits at its
+	// gate (B-545).
+	preRepro preReproductions
 }
 
 type projectState struct {
@@ -2638,6 +2641,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			// Acceptance later commits and proves this isolated checkout.
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
 			rs.writer.WriteState()
+			if verdict == "PASSED" {
+				s.startPreReproduction(rs, entry)
+			}
 			s.bus.Publish(bus.Event{
 				Type:      "human_needed",
 				RunID:     rs.run.ID,
@@ -2678,6 +2684,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
+			s.startPreReproduction(rs, entry)
 			s.bus.Publish(bus.Event{
 				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
 				TS:   time.Now(),
@@ -3734,7 +3741,13 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			return fmt.Errorf("read rebased worktree HEAD: %w", err)
 		}
 		rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
-		reproduction, verifyErr := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		// A reproduction of this exact tree may already have run while the
+		// gate waited (B-545); otherwise reproduce now, as always.
+		reproduction, reused := s.preReproduced(ctx, rs.run.ID, defaultGit, entry.Path, rebasedSHA)
+		var verifyErr error
+		if !reused {
+			reproduction, verifyErr = verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		}
 		if reproduction != nil {
 			rs.run.GateReproduced = reproduction
 			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
@@ -4184,6 +4197,9 @@ func (s *Service) RunResumeWithNote(ctx context.Context, id, note, actor string)
 // recorded as a "decision" event, never read by the run. An MCP operator's
 // required reason used to reach no record at all on resume (B-524).
 func (s *Service) RunResumeDecided(ctx context.Context, id, note, reason, actor string) (_ *runlog.Run, err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	note = strings.TrimSpace(note)
@@ -4595,6 +4611,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 // as a "decision" event; an MCP operator's required reason used to be
 // dropped here without a word (B-524).
 func (s *Service) RunAbortAs(ctx context.Context, id, reason, actor string) (err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
@@ -5747,6 +5766,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 // (review of #177). The reason is recorded as a "decision" event before the
 // tree is restored; a log that refuses it refuses the reject.
 func (s *Service) RunRejectAs(ctx context.Context, id, reason, actor string) (err error) {
+	// Leaving the gate any way but accept ends a pre-reproduction (B-545): it
+	// would otherwise run a clean-checkout gate beside the resumed run's own.
+	s.dropPreReproduction(id)
 	closeDecision := func(error) {}
 	defer func() { closeDecision(err) }()
 	s.runsMu.RLock()
