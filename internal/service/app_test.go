@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -380,5 +381,133 @@ func TestAppLaunchDoesNotRepeatABuildUsedAsPreflight(t *testing.T) {
 	}
 	if got := strings.Count(string(body), "built"); got != 1 {
 		t.Fatalf("shared preflight/build command ran %d times, want once", got)
+	}
+}
+
+// B-552: a paused run that asks the person to verify something live has to
+// offer that environment. Launch for the run serves its worktree — with the
+// person's registered command, never the worktree's copy — keeps its log out
+// of the diff, shares the project's one-app slot, and ends with the decision.
+func TestARunsAppServesItsWorktreeUntilTheDecision(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"run.command": "pwd; echo registered; sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-live-check")
+	// The run under review rewrites its own copy of the config; the launch
+	// must not obey it.
+	wtConfig := filepath.Join(run.WorktreePath, ".ducklab", "project.toml")
+	if err := os.MkdirAll(filepath.Dir(wtConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wtConfig, []byte("[run]\n  command = \"echo hijacked; sleep 30\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := s.RunAppStart(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Running || st.RunID != run.ID || st.Root != run.WorktreePath {
+		t.Fatalf("run app status = %+v, want running in %s for %s", st, run.WorktreePath, run.ID)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(st.LogTail, "registered") && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		st, _ = s.AppStatus(context.Background(), id)
+	}
+	if !strings.Contains(st.LogTail, "registered") || strings.Contains(st.LogTail, "hijacked") {
+		t.Fatalf("the launch did not run the registered command: %q", st.LogTail)
+	}
+	realWT, _ := filepath.EvalSymlinks(run.WorktreePath)
+	if !strings.Contains(st.LogTail, run.WorktreePath) && !strings.Contains(st.LogTail, realWT) {
+		t.Fatalf("the app did not run in the worktree: %q", st.LogTail)
+	}
+	if _, err := os.Stat(filepath.Join(run.WorktreePath, ".ducklab", "app.log")); err == nil {
+		t.Fatal("the run's app log was written into the worktree, where it would ride into the diff")
+	}
+	// One app per project: main's launch is refused while the run's lives,
+	// and says whose app holds the slot.
+	if _, err := s.AppStart(context.Background(), id); err == nil || !strings.Contains(err.Error(), run.ID) {
+		t.Fatalf("project launch beside the run's app = %v, want refused naming the run", err)
+	}
+
+	if err := s.RunReject(context.Background(), run.ID, "not this one"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = s.AppStatus(context.Background(), id)
+	if st.Running || st.StoppedBy != "decision" {
+		t.Fatalf("the run's app outlived the decision: %+v", st)
+	}
+	if _, err := s.RunAppStart(context.Background(), run.ID); err == nil {
+		t.Fatal("a decided run's app was launched")
+	}
+}
+
+// A run that works in the project tree has no separate change to serve, and
+// a run that is not waiting for a decision has nothing to try.
+func TestARunsAppNeedsAPausedWorktreeRun(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"run.command": "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAppStart(context.Background(), "r-missing"); err == nil {
+		t.Fatal("an unknown run's app was launched")
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-not-paused")
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	rs.wmu.Lock()
+	rs.run.Status = "running"
+	rs.wmu.Unlock()
+	if _, err := s.RunAppStart(context.Background(), run.ID); err == nil || !strings.Contains(err.Error(), "waiting for a decision") {
+		t.Fatalf("a running run's app = %v, want refused", err)
+	}
+	rs.wmu.Lock()
+	rs.run.Status = "paused"
+	rs.run.WorktreePath = ""
+	rs.wmu.Unlock()
+	if _, err := s.RunAppStart(context.Background(), run.ID); err == nil || !strings.Contains(err.Error(), "project tree") {
+		t.Fatalf("an in-place run's app = %v, want pointed at the project's launch", err)
+	}
+}
+
+// Accept commits the worktree the run's app is serving: the app stops first,
+// and nothing it wrote beside its log rides into the commit.
+func TestAcceptStopsTheRunsAppBeforeCommitting(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"run.command": "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-live-accept")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "change.txt"), []byte("the change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAppStart(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := s.AppStatus(context.Background(), id)
+	if st.Running || st.StoppedBy != "decision" {
+		t.Fatalf("the run's app survived the accept: %+v", st)
+	}
+	out, err := exec.Command("git", "-C", dir, "show", "--name-only", "--format=", result.CommitSHA).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files := strings.Fields(string(out)); len(files) != 1 || files[0] != "change.txt" {
+		t.Fatalf("accepted files = %v, want only the run's change", files)
 	}
 }

@@ -2776,6 +2776,12 @@
           "requires": {
             "type": "string"
           },
+          "root": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
           "running": {
             "type": "boolean"
           },
@@ -9644,6 +9650,42 @@
           }
         ],
         "summary": "Answer a pending question"
+      }
+    },
+    "/v1/runs/{id}/app/start": {
+      "post": {
+        "operationId": "RunAppStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAppStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start the project's app from a paused run's worktree, so the person can verify its live checks on the change awaiting decision. Uses the registered run.command; shares the project's one managed-app slot; stopped by the decision"
       }
     },
     "/v1/runs/{id}/approval-requests": {

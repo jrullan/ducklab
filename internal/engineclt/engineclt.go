@@ -565,6 +565,13 @@ func (c *Client) AppStart(projectID string) (map[string]interface{}, error) {
 	return result, err
 }
 
+// RunAppStart launches the app from a paused run's worktree (B-552).
+func (c *Client) RunAppStart(runID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/runs/"+runID+"/app/start", nil, &result)
+	return result, err
+}
+
 // AppStop stops the engine-managed app process.
 func (c *Client) AppStop(projectID string) error {
 	return c.post("/v1/projects/"+projectID+"/app/stop", nil, nil)
