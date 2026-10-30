@@ -118,6 +118,11 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
         </details>
       )}
       {error && <p className="text-serious" data-testid="live-app-error">{error}</p>}
+      {statusError && (
+        <p className="text-serious" data-testid="live-app-status-error">
+          Cannot read the app's state (showing the last one known): {statusError}
+        </p>
+      )}
     </div>
   );
 }

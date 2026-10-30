@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -122,25 +123,57 @@ type appLaunch struct {
 	done   chan struct{}
 }
 
-// forgetRunApp drops a run's launch baseline once its worktree moves on: a
-// resumed worker changes the tree legitimately, and a decided run is gone.
-func (s *Service) forgetRunApp(runID string) {
-	s.appMu.Lock()
-	delete(s.appBaselines, runID)
-	s.appMu.Unlock()
+// appBaselinePath keeps a run's launch baseline with the run, not in memory:
+// an engine restart kills the app but leaves what it wrote in the worktree.
+func appBaselinePath(projectRoot, runID string) string {
+	return filepath.Join(runlog.RunDirFor(projectRoot, runID), "app-baseline.json")
+}
+
+// forgetRunApp drops a run's launch baseline: once Accept has checked the
+// tree it commits it, and a decided run's worktree is gone. A later launch
+// records a fresh baseline from the tree as it then is.
+func (s *Service) forgetRunApp(projectRoot, runID string) {
+	_ = os.Remove(appBaselinePath(projectRoot, runID))
+}
+
+// stagedFingerprint is the worktree fingerprint restricted to what Accept
+// would stage: build products, linked dependencies and the configured
+// build_products are left out of the commit, so they are not drift either.
+func stagedFingerprint(root, projectRoot string, linkedDeps []string) (map[string]string, error) {
+	fp, err := vcs.New(root).WorkingFingerprint()
+	if err != nil {
+		return nil, err
+	}
+	excluded := append(append([]string(nil), linkedDeps...), landingExclusions(root, projectRoot)...)
+	for path := range fp {
+		for _, ex := range excluded {
+			ex = strings.Trim(filepath.ToSlash(ex), "/")
+			if ex != "" && (path == ex || strings.HasPrefix(path, ex+"/")) {
+				delete(fp, path)
+				break
+			}
+		}
+	}
+	return fp, nil
 }
 
 // runAppDrift names what changed in a run's worktree since its app was first
 // launched there. Called by Accept after stopping the app: the person
 // approved a diff, and the app or its build may have written beside it.
-func (s *Service) runAppDrift(runID, root string) error {
-	s.appMu.Lock()
-	baseline, ok := s.appBaselines[runID]
-	s.appMu.Unlock()
-	if !ok {
+func (s *Service) runAppDrift(run *runlog.Run, projectRoot string) error {
+	runID, root := run.ID, run.WorktreePath
+	raw, err := os.ReadFile(appBaselinePath(projectRoot, runID))
+	if os.IsNotExist(err) {
 		return nil
 	}
-	now, err := vcs.New(root).WorkingFingerprint()
+	var baseline map[string]string
+	if err == nil {
+		err = json.Unmarshal(raw, &baseline)
+	}
+	if err != nil {
+		return fmt.Errorf("cannot read the worktree's state from before the app was launched: %w", err)
+	}
+	now, err := stagedFingerprint(root, projectRoot, run.LinkedDeps)
 	if err != nil {
 		return fmt.Errorf("cannot compare the worktree with its state before the app was launched: %w", err)
 	}
@@ -167,10 +200,11 @@ func (s *Service) runAppDrift(runID, root string) error {
 
 // appTarget is the tree a managed app runs in.
 type appTarget struct {
-	root    string
-	logPath string
-	runEnv  string
-	runID   string
+	root       string
+	logPath    string
+	runEnv     string
+	runID      string
+	linkedDeps []string
 	// stillValid says whether the target may be launched. It takes the
 	// run's own locks, so it is called outside appMu; an accept that begins
 	// after it answered is caught by appStops instead.
@@ -210,6 +244,9 @@ func (s *Service) RunAppStart(ctx context.Context, runID string) (*AppStatus, er
 		if run.Status != "paused" || run.Accepted {
 			return fmt.Errorf("not started — run %s is %s; only a run waiting for a decision has a change to try", runID, run.Status)
 		}
+		if inRebase, _ := run.PendingData["rebase_in_progress"].(bool); inRebase {
+			return fmt.Errorf("not started — run %s's worktree is mid-rebase; finish resolving it and accept, or reject", runID)
+		}
 		return nil
 	}
 	if err := launchable(); err != nil {
@@ -233,6 +270,7 @@ func (s *Service) RunAppStart(ctx context.Context, runID string) (*AppStatus, er
 		logPath:    filepath.Join(runlog.RunDirFor(entry.Path, runID), "app.log"),
 		runEnv:     runID,
 		runID:      runID,
+		linkedDeps: run.LinkedDeps,
 		stillValid: launchable,
 	})
 }
@@ -329,20 +367,19 @@ func (s *Service) appStart(ctx context.Context, projectID string, target appTarg
 		// The tree as the person is about to see it. Anything the app or its
 		// build changes from here would be staged by Accept without having
 		// been in the diff anyone reviewed; Accept compares and refuses.
-		fp, fpErr := vcs.New(root).WorkingFingerprint()
-		if fpErr != nil {
-			return nil, fmt.Errorf("not started — cannot record the worktree's state before launch: %w", fpErr)
-		}
-		s.appMu.Lock()
-		if s.appBaselines == nil {
-			s.appBaselines = map[string]map[string]string{}
-		}
 		// The first launch's state is the reviewed one; a relaunch after the
 		// person restored the tree must still compare against it.
-		if _, ok := s.appBaselines[target.runID]; !ok {
-			s.appBaselines[target.runID] = fp
+		baselinePath := appBaselinePath(entry.Path, target.runID)
+		if _, statErr := os.Stat(baselinePath); os.IsNotExist(statErr) {
+			fp, fpErr := stagedFingerprint(root, entry.Path, target.linkedDeps)
+			if fpErr != nil {
+				return nil, fmt.Errorf("not started — cannot record the worktree's state before launch: %w", fpErr)
+			}
+			raw, _ := json.Marshal(fp)
+			if err := xplat.AtomicWrite(baselinePath, raw, 0o644); err != nil {
+				return nil, fmt.Errorf("not started — cannot record the worktree's state before launch: %w", err)
+			}
 		}
-		s.appMu.Unlock()
 	}
 	if cfg.Run.Command == "" {
 		return nil, fmt.Errorf("not started — this project has no run.command; set how the app starts in Projects (project set run.command \"…\")")

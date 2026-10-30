@@ -602,3 +602,38 @@ func TestARunsAppNeedsAGatePause(t *testing.T) {
 		t.Fatalf("a question pause's app = %v, want refused", err)
 	}
 }
+
+// What Accept would never stage is not drift: the app's own build output in
+// a configured build_products path leaves the accept alone (review of B-552).
+func TestRunAppBuildProductsAreNotDrift(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.build_products": "dist",
+		"run.command":           "mkdir -p dist && echo bundle > dist/app.js; sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-live-products")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "change.txt"), []byte("the change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAppStart(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(run.WorktreePath, "dist", "app.js")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(bundle); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := os.Stat(bundle); err != nil {
+		t.Fatal("the app never wrote its build product")
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatalf("accept refused over an excluded build product: %v", err)
+	}
+}

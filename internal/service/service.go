@@ -81,10 +81,8 @@ type Service struct {
 	appMu      sync.Mutex
 	apps       map[string]*appState
 	appStops   map[string]int // per run: decisions that stopped its app (B-552)
-	// appLaunches are run apps still in preflight/setup/build; appBaselines
-	// the worktree state at a run's first launch, which Accept compares.
-	appLaunches  map[string]*appLaunch
-	appBaselines map[string]map[string]string
+	// appLaunches are run apps still in preflight/setup/build.
+	appLaunches map[string]*appLaunch
 	// afterRunDiff is a lifecycle observation seam used by tests that must
 	// inspect an isolated checkout before its normal cleanup.
 	afterRunDiff func(*runState)
@@ -3630,9 +3628,13 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	// app still running there could write into the accepted diff, and what it
 	// or its build already wrote was never reviewed (B-552).
 	s.stopRunApp(rs.run.ID)
-	if err := s.runAppDrift(rs.run.ID, rs.run.WorktreePath); err != nil {
+	if err := s.runAppDrift(rs.run, entry.Path); err != nil {
 		return err
 	}
+	// Checked: this tree is what is committed next. A retry after a refused
+	// rebase or fast-forward finds the run's own commit, not drift; only a
+	// new launch records a new baseline (review of B-552).
+	s.forgetRunApp(entry.Path, rs.run.ID)
 	message = acceptCommitMessage(rs.run, message)
 	workGit := vcs.New(rs.run.WorktreePath)
 	// Retrying Accept is the UI door after a person resolves the materialized

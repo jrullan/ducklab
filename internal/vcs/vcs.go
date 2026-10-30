@@ -233,12 +233,15 @@ func (g *Git) DirtyPaths() []string {
 // name exactly the files a process changed in between: what an accept would
 // stage that nobody reviewed (B-552).
 func (g *Git) WorkingFingerprint() (map[string]string, error) {
-	out, err := g.run("status", "--porcelain=v1", "-z", "--untracked-files=all")
+	// Stdout only: a git warning on stderr glued onto a NUL-separated entry
+	// would turn a real path into garbage and drop it from the comparison.
+	cmd := exec.Command("git", "-C", g.Root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	raw, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git status: %w", err)
 	}
 	fp := map[string]string{}
-	entries := strings.Split(out, "\x00")
+	entries := strings.Split(string(raw), "\x00")
 	for i := 0; i < len(entries); i++ {
 		e := entries[i]
 		if len(e) < 4 {
