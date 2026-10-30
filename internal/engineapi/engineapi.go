@@ -630,6 +630,15 @@ func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, st)
 }
 
+func (s *Server) handleRunAppStart(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.RunAppStart(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
 func (s *Server) handleAppStop(w http.ResponseWriter, r *http.Request) {
 	if err := s.svc.AppStop(r.Context(), r.PathValue("id")); err != nil {
 		s.error(w, http.StatusConflict, "conflict", err.Error())

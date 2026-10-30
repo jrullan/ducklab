@@ -1037,6 +1037,45 @@ func TestAcceptWorktreeRetryReusesCommitAfterFailedRebase(t *testing.T) {
 	}
 }
 
+// B-552 review: a launched app records a baseline of the uncommitted tree.
+// The first accept commits that tree before its rebase fails; the retry must
+// find the run's own commit, not "drift" in every file it changed.
+func TestAcceptRetryAfterFailedRebaseSurvivesARunAppLaunch(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"run.command": "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-retry-live")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAppStart(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("default conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || strings.Contains(err.Error(), "app was launched") {
+		t.Fatalf("first accept = %v, want the rebase conflict", err)
+	}
+	cmd := exec.Command("git", "reset", "--hard", run.BaseSHA)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clear rebase blocker: %v: %s", err, out)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatalf("retry after clearing the rebase blocker: %v", err)
+	}
+}
+
 func TestAcceptWorktreeAdvancesCleanDefaultCheckout(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

@@ -227,6 +227,41 @@ func (g *Git) DirtyPaths() []string {
 	return paths
 }
 
+// WorkingFingerprint maps every path that differs from HEAD — modified,
+// deleted, renamed or untracked, ignored files excluded — to a hash of its
+// current content ("-" when the path is gone). Two fingerprints that differ
+// name exactly the files a process changed in between: what an accept would
+// stage that nobody reviewed (B-552).
+func (g *Git) WorkingFingerprint() (map[string]string, error) {
+	// Stdout only: a git warning on stderr glued onto a NUL-separated entry
+	// would turn a real path into garbage and drop it from the comparison.
+	cmd := exec.Command("git", "-C", g.Root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	fp := map[string]string{}
+	entries := strings.Split(string(raw), "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		path := e[3:]
+		if e[0] == 'R' || e[0] == 'C' {
+			i++ // the rename's source follows as its own entry
+		}
+		data, readErr := os.ReadFile(filepath.Join(g.Root, path))
+		if readErr != nil {
+			fp[path] = "-"
+			continue
+		}
+		sum := sha256.Sum256(data)
+		fp[path] = hex.EncodeToString(sum[:])
+	}
+	return fp, nil
+}
+
 // PathIsCommitted reports whether a path matches what is committed.
 //
 // False for anything git does not know about, and for anything changed since

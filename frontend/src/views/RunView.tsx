@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { RunLiveApp } from "../components/RunLiveApp";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section, RosterEntry } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
@@ -1138,6 +1139,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 			  <span>I verified acceptance slice {item.id}: {item.text}</span>
 			</label>
 		  ))}
+		  <RunLiveApp client={client} runId={run.id} projectId={run.project_id} worktreePath={run.worktree_path} />
 		</div>
 	  )}
       <DecisionCard

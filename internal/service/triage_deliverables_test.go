@@ -160,3 +160,35 @@ func TestManualAcceptanceSlicesAreReservedForTheHumanGate(t *testing.T) {
 		t.Fatalf("human verification payload = %#v", payload)
 	}
 }
+
+// B-552: T-063's slices cite the calculator's manual. The noun is not a way
+// of verifying, and both slices were backed by UI regressions the gate ran.
+func TestTheProductManualIsNotManualVerification(t *testing.T) {
+	notManual := []string{
+		"El flujo UI del manual permite guardar, recuperar y redefinir ×2+3, y aplicarlo con resultados y contador correctos.",
+		"Las regresiones UI cubren el acceso desde Home vacío y mantienen los controles B-010/B-019, actualizando su preparación incompatible con el manual.",
+		"Key legends match the user manual",
+		"Los atajos a mano cubren el flujo",
+		"Las leyendas escritas a mano se respetan",
+		"Diagrams drawn by hand stay in docs/",
+	}
+	if got := manualDeliverables(notManual); len(got) != 0 {
+		t.Fatalf("the product manual was read as manual verification: %v", got)
+	}
+	manual := []string{
+		"Verified manually on the desktop",
+		"Manual check: the dialog opens",
+		"Verificación manual en la app: el contador avanza",
+		"Se comprueba a mano en el escritorio",
+		"Pruebas manuales del flujo de guardado",
+		"Checked by hand on a physical device",
+		"Manual acceptance: the counter advances",
+		"Manual: open the app and press 2nd",
+		"Validación manual del contador",
+		"Chequeo manual en la app",
+		"manual e2e on device",
+	}
+	if got := manualDeliverables(manual); len(got) != len(manual) {
+		t.Fatalf("manual verification wording missed: %v of %d", got, len(manual))
+	}
+}

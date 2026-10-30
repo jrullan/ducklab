@@ -77,6 +77,8 @@ func (s *Service) cleanupRunWorktree(rs *runState, projectRoot string) {
 	if rs.run.WorktreePath == "" {
 		return
 	}
+	s.stopRunApp(rs.run.ID)
+	s.forgetRunApp(projectRoot, rs.run.ID)
 	if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
 		// A crash can remove the directory before the terminal decision. The
 		// branch is still ours to retire even though git has nothing to remove.

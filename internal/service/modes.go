@@ -1287,7 +1287,11 @@ func (s *Service) taskDeliverables(ctx context.Context, projectID, taskID string
 	return strategy.ExtractDeliverables(task.Title, task.Body)
 }
 
-var manualVerificationWords = regexp.MustCompile(`(?i)\b(manual(?:ly)?|by (?:the )?person|physical device|live desktop|wayland session|human (?:verification|check|inspection|smoke|confirmation))\b`)
+// "manual" alone is not a verification word: a calculator task cites "el flujo
+// UI del manual" — the product's manual — and B-552 routed both of T-063's
+// test-backed slices to the person on that noun. Only manual as a way of
+// checking (manual smoke, manually, verificación manual, a mano) counts.
+var manualVerificationWords = regexp.MustCompile(`(?i)(\bmanually\b|\bmanual[ -](?:smoke|verification|check|checks|test|tests|testing|inspection|confirmation|acceptance|e2e|qa|review|walkthrough)\b|(?:^|[\n.;]\s*)manual\s*:|\bby (?:the )?person\b|\b(?:verif|check|test|confirm|inspect)\w* by hand\b|\bphysical device\b|\blive desktop\b|\bwayland session\b|\bhuman (?:verification|check|inspection|smoke|confirmation)\b|\bmanualmente\b|\b(?:verific|comprob|comprueb|prob|prueb|revis|valid|chequ)\w* a mano\b|\b(?:verificaci[oó]n|validaci[oó]n|prueba|comprobaci[oó]n|inspecci[oó]n|revisi[oó]n|chequeo) manual\b|\b(?:verificaciones|validaciones|pruebas|comprobaciones|inspecciones|revisiones|chequeos) manuales\b)`)
 
 // manualDeliverables identifies acceptance work that only the person or a
 // live environment can perform. The wording remains in the accepted task;

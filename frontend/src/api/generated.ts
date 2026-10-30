@@ -813,6 +813,8 @@ export interface ServiceAppStatus {
   pid?: number;
   preflight?: string;
   requires?: string;
+  root?: string;
+  run_id?: string;
   running?: boolean;
   smoke?: string;
   smoke_command?: string;
@@ -1563,6 +1565,7 @@ export const OPERATIONS = [
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },
   { id: "RunAccept", method: "POST", path: "/v1/runs/{id}/accept" },
   { id: "RunAnswer", method: "POST", path: "/v1/runs/{id}/answer" },
+  { id: "RunAppStart", method: "POST", path: "/v1/runs/{id}/app/start" },
   { id: "ApprovalRequestFile", method: "POST", path: "/v1/runs/{id}/approval-requests" },
   { id: "ApprovalRequestApprove", method: "POST", path: "/v1/runs/{id}/approval-requests/{req}/approve" },
   { id: "ApprovalRequestDecline", method: "POST", path: "/v1/runs/{id}/approval-requests/{req}/decline" },

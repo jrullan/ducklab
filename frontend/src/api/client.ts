@@ -199,6 +199,9 @@ export interface AppStatus {
   log_tail?: string;
   built_sha?: string;
   built_at?: string;
+  /** The run whose worktree the managed process serves; absent for main (B-552). */
+  run_id?: string;
+  root?: string;
   suggestions?: { command: string; capability: string; evidence: string }[];
 }
 
@@ -1391,6 +1394,10 @@ export class EngineClient {
   /** Start the app via run.command as an engine-managed process. */
   appStart(projectId: string) {
     return this.request<AppStatus>("POST", `/v1/projects/${projectId}/app/start`);
+  }
+  /** Start the app from a paused run's worktree, to verify its live checks (B-552). */
+  runAppStart(runId: string) {
+    return this.request<AppStatus>("POST", `/v1/runs/${runId}/app/start`);
   }
   /** Stop the managed app — kills the whole process group. */
   appStop(projectId: string) {
