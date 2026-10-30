@@ -168,6 +168,9 @@ func TestTheProductManualIsNotManualVerification(t *testing.T) {
 		"El flujo UI del manual permite guardar, recuperar y redefinir ×2+3, y aplicarlo con resultados y contador correctos.",
 		"Las regresiones UI cubren el acceso desde Home vacío y mantienen los controles B-010/B-019, actualizando su preparación incompatible con el manual.",
 		"Key legends match the user manual",
+		"Los atajos a mano cubren el flujo",
+		"Las leyendas escritas a mano se respetan",
+		"Diagrams drawn by hand stay in docs/",
 	}
 	if got := manualDeliverables(notManual); len(got) != 0 {
 		t.Fatalf("the product manual was read as manual verification: %v", got)
@@ -179,6 +182,11 @@ func TestTheProductManualIsNotManualVerification(t *testing.T) {
 		"Se comprueba a mano en el escritorio",
 		"Pruebas manuales del flujo de guardado",
 		"Checked by hand on a physical device",
+		"Manual acceptance: the counter advances",
+		"Manual: open the app and press 2nd",
+		"Validación manual del contador",
+		"Chequeo manual en la app",
+		"manual e2e on device",
 	}
 	if got := manualDeliverables(manual); len(got) != len(manual) {
 		t.Fatalf("manual verification wording missed: %v of %d", got, len(manual))

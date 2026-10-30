@@ -479,13 +479,16 @@ func TestARunsAppNeedsAPausedWorktreeRun(t *testing.T) {
 	}
 }
 
-// Accept commits the worktree the run's app is serving: the app stops first,
-// and nothing it wrote beside its log rides into the commit.
-func TestAcceptStopsTheRunsAppBeforeCommitting(t *testing.T) {
+// Accept commits the worktree the run's app is serving. What the app wrote
+// there was never in the reviewed diff: Accept stops the app, names the
+// files, and refuses until the tree is back to what the person reviewed.
+func TestAcceptRefusesWhatTheRunsAppWroteIntoItsWorktree(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
 	gitProject(t, dir)
-	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"run.command": "sleep 30"}); err != nil {
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"run.command": "echo rows > appdata.db; sleep 30",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-live-accept")
@@ -495,13 +498,29 @@ func TestAcceptStopsTheRunsAppBeforeCommitting(t *testing.T) {
 	if _, err := s.RunAppStart(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.RunAccept(context.Background(), run.ID, "")
-	if err != nil {
-		t.Fatal(err)
+	db := filepath.Join(run.WorktreePath, "appdata.db")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(db); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, err := s.RunAccept(context.Background(), run.ID, "")
+	if err == nil || !strings.Contains(err.Error(), "appdata.db") || strings.Contains(err.Error(), "change.txt") {
+		t.Fatalf("accept over the app's own writes = %v, want refused naming appdata.db only", err)
 	}
 	st, _ := s.AppStatus(context.Background(), id)
 	if st.Running || st.StoppedBy != "decision" {
 		t.Fatalf("the run's app survived the accept: %+v", st)
+	}
+
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatal(err)
 	}
 	out, err := exec.Command("git", "-C", dir, "show", "--name-only", "--format=", result.CommitSHA).Output()
 	if err != nil {
@@ -509,5 +528,77 @@ func TestAcceptStopsTheRunsAppBeforeCommitting(t *testing.T) {
 	}
 	if files := strings.Fields(string(out)); len(files) != 1 || files[0] != "change.txt" {
 		t.Fatalf("accepted files = %v, want only the run's change", files)
+	}
+}
+
+// A decision during the launch's build ends the build too, and the launch is
+// refused: nothing may still be writing into a tree being committed or removed.
+func TestADecisionEndsARunAppStillBuilding(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.build": "sleep 30",
+		"run.command":  "sleep 30",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-live-build")
+	launched := make(chan error, 1)
+	go func() {
+		_, err := s.RunAppStart(context.Background(), run.ID)
+		launched <- err
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.appMu.Lock()
+		building := s.appLaunches[run.ID] != nil
+		s.appMu.Unlock()
+		if building {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the launch never started building")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	if err := s.RunReject(context.Background(), run.ID, "no"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("reject waited %v on the build", took)
+	}
+	select {
+	case err := <-launched:
+		if err == nil {
+			t.Fatal("a launch survived the decision that ended its build")
+		}
+	default:
+		t.Fatal("the reject returned while the launch was still building")
+	}
+	if st, _ := s.AppStatus(context.Background(), id); st.Running {
+		t.Fatalf("an app runs for a rejected run: %+v", st)
+	}
+}
+
+// Only a gate pause is a decision about the change; a question pause resumes
+// the worker in this tree.
+func TestARunsAppNeedsAGatePause(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"run.command": "sleep 30"}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-question")
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	rs.wmu.Lock()
+	rs.run.PendingKind = "question"
+	rs.wmu.Unlock()
+	if _, err := s.RunAppStart(context.Background(), run.ID); err == nil || !strings.Contains(err.Error(), "question") {
+		t.Fatalf("a question pause's app = %v, want refused", err)
 	}
 }

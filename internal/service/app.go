@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,6 +115,56 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	})
 }
 
+// appLaunch is a run's app being prepared: preflight, setup and build run in
+// the worktree before the process exists, and a decision must end them too.
+type appLaunch struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// forgetRunApp drops a run's launch baseline once its worktree moves on: a
+// resumed worker changes the tree legitimately, and a decided run is gone.
+func (s *Service) forgetRunApp(runID string) {
+	s.appMu.Lock()
+	delete(s.appBaselines, runID)
+	s.appMu.Unlock()
+}
+
+// runAppDrift names what changed in a run's worktree since its app was first
+// launched there. Called by Accept after stopping the app: the person
+// approved a diff, and the app or its build may have written beside it.
+func (s *Service) runAppDrift(runID, root string) error {
+	s.appMu.Lock()
+	baseline, ok := s.appBaselines[runID]
+	s.appMu.Unlock()
+	if !ok {
+		return nil
+	}
+	now, err := vcs.New(root).WorkingFingerprint()
+	if err != nil {
+		return fmt.Errorf("cannot compare the worktree with its state before the app was launched: %w", err)
+	}
+	var changed []string
+	for path, sum := range now {
+		if baseline[path] != sum {
+			changed = append(changed, path)
+		}
+	}
+	for path := range baseline {
+		if _, ok := now[path]; !ok {
+			changed = append(changed, path)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	sort.Strings(changed)
+	if len(changed) > 10 {
+		changed = append(changed[:10], fmt.Sprintf("… %d more", len(changed)-10))
+	}
+	return fmt.Errorf("not accepted — the worktree changed after this run's app was launched, and those changes were never in the reviewed diff: %s. Restore them in %s (or add them to .gitignore) and accept again, or reject", strings.Join(changed, ", "), root)
+}
+
 // appTarget is the tree a managed app runs in.
 type appTarget struct {
 	root    string
@@ -132,9 +183,12 @@ type appTarget struct {
 // the registered tree, which does not contain the change awaiting decision.
 //
 // The command, build and preflight are the person's registered configuration,
-// never the worktree's copy of project.toml: the run under review must not
-// choose what the engine executes on its behalf. One managed app per project
-// still holds — a run's app and main's app would share the same port.
+// never the worktree's copy of project.toml. That keeps the run from naming
+// the command; it does not sandbox it — run.command typically calls the
+// worktree's own scripts, the same code the gate already executed. One
+// managed app per project still holds: a run's app and main's would share a
+// port. Only a gate pause qualifies: a question or budget pause resumes the
+// worker in this tree, and the app would write into its diff.
 func (s *Service) RunAppStart(ctx context.Context, runID string) (*AppStatus, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[runID]
@@ -143,6 +197,9 @@ func (s *Service) RunAppStart(ctx context.Context, runID string) (*AppStatus, er
 		return nil, fmt.Errorf("run %q not found", runID)
 	}
 	launchable := func() error {
+		if kind := rs.snapshotRun().PendingKind; kind != "gate" {
+			return fmt.Errorf("not started — run %s is waiting on %s, not on a decision about its change", runID, kind)
+		}
 		rs.acceptMu.Lock()
 		accepting := rs.accepting != nil
 		rs.acceptMu.Unlock()
@@ -189,6 +246,12 @@ func (s *Service) stopRunApp(runID string) {
 		s.appStops = map[string]int{}
 	}
 	s.appStops[runID]++
+	if launch := s.appLaunches[runID]; launch != nil {
+		s.appMu.Unlock()
+		launch.cancel()
+		<-launch.done
+		s.appMu.Lock()
+	}
 	var st *appState
 	for _, candidate := range s.apps {
 		if candidate.runID == runID && candidate.alive() {
@@ -231,14 +294,55 @@ func (s *Service) appStart(ctx context.Context, projectID string, target appTarg
 	root := target.root
 	// A decision that stops this run's app between the check below and the
 	// launch bumps appStops: the launch then refuses rather than serve a
-	// tree that is being committed or removed (B-552).
+	// tree that is being committed or removed (B-552). The decision also
+	// cancels this launch's preflight/setup/build and waits for them, so
+	// nothing is still writing into the tree when it is staged.
 	s.appMu.Lock()
 	stopsSeen := s.appStops[target.runID]
+	if target.runID != "" {
+		if s.appLaunches[target.runID] != nil {
+			s.appMu.Unlock()
+			return nil, fmt.Errorf("not started — run %s's app is already being prepared", target.runID)
+		}
+		launchCtx, cancelLaunch := context.WithCancel(ctx)
+		launch := &appLaunch{cancel: cancelLaunch, done: make(chan struct{})}
+		if s.appLaunches == nil {
+			s.appLaunches = map[string]*appLaunch{}
+		}
+		s.appLaunches[target.runID] = launch
+		ctx = launchCtx
+		defer func() {
+			s.appMu.Lock()
+			delete(s.appLaunches, target.runID)
+			s.appMu.Unlock()
+			cancelLaunch()
+			close(launch.done)
+		}()
+	}
 	s.appMu.Unlock()
 	if target.stillValid != nil {
 		if err := target.stillValid(); err != nil {
 			return nil, err
 		}
+	}
+	if target.runID != "" {
+		// The tree as the person is about to see it. Anything the app or its
+		// build changes from here would be staged by Accept without having
+		// been in the diff anyone reviewed; Accept compares and refuses.
+		fp, fpErr := vcs.New(root).WorkingFingerprint()
+		if fpErr != nil {
+			return nil, fmt.Errorf("not started — cannot record the worktree's state before launch: %w", fpErr)
+		}
+		s.appMu.Lock()
+		if s.appBaselines == nil {
+			s.appBaselines = map[string]map[string]string{}
+		}
+		// The first launch's state is the reviewed one; a relaunch after the
+		// person restored the tree must still compare against it.
+		if _, ok := s.appBaselines[target.runID]; !ok {
+			s.appBaselines[target.runID] = fp
+		}
+		s.appMu.Unlock()
 	}
 	if cfg.Run.Command == "" {
 		return nil, fmt.Errorf("not started — this project has no run.command; set how the app starts in Projects (project set run.command \"…\")")

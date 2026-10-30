@@ -7,6 +7,8 @@ import type { AppStatus, EngineClient } from "../api/client";
  * verify with, and the project's own Launch serves the registered tree —
  * main, without the change awaiting decision. This launches the run's
  * worktree instead, and says plainly which tree is running. */
+const POLL_MS = 2000;
+
 export function RunLiveApp({ client, runId, projectId, worktreePath }: {
   client: EngineClient;
   runId: string;
@@ -16,12 +18,26 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
 
   const refresh = useCallback(() => {
     if (!projectId || typeof client.appStatus !== "function") return;
-    client.appStatus(projectId).then(setStatus).catch(() => setStatus(null));
+    client
+      .appStatus(projectId)
+      .then((next) => {
+        setStatus(next);
+        setStatusError("");
+      })
+      .catch((e) => setStatusError(e instanceof Error ? e.message : String(e)));
   }, [client, projectId]);
-  useEffect(refresh, [refresh]);
+  // The app lives on its own: it can crash after launch, print its first
+  // output a moment later, or be stopped from Projects or the CLI. A status
+  // read once would keep saying "running" over all of that.
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, POLL_MS);
+    return () => clearInterval(timer);
+  }, [refresh]);
 
   const act = (call: () => Promise<unknown>) => {
     setBusy(true);
@@ -34,7 +50,13 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
       });
   };
 
-  if (!status) return null;
+  if (!status) {
+    return statusError ? (
+      <p className="mt-2 text-xs text-serious" data-testid="live-app-status-error">
+        Cannot read the app's state: {statusError}
+      </p>
+    ) : null;
+  }
   const ours = status.run_id === runId;
   const where = worktreePath ? <code className="break-all font-mono text-xs">{worktreePath}</code> : "the run's worktree";
 
@@ -84,7 +106,7 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
         </div>
       )}
       <p className="text-ink-muted">
-        Runs {where} — the change awaiting your decision, not main. Accept or reject stops it.
+        Runs {where} — the change awaiting your decision, not main. Accept or reject stops it; files the app writes there are not part of the change, and Accept names them until they are gone.
       </p>
       {ours && !status.running && status.exit_error && (
         <p className="text-serious" data-testid="live-app-exit">The app exited: {status.exit_error}</p>

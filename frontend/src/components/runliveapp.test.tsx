@@ -56,4 +56,24 @@ describe("run live app (B-552)", () => {
     fireEvent.click(await screen.findByTestId("live-app-launch"));
     expect(await screen.findByTestId("live-app-error")).toHaveTextContent("being accepted");
   });
+
+  it("follows the app after launch: a crash shows without a click", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const client = fakeClient({ configured: true, running: true, run_id: "r-1", pid: 7 });
+      render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
+      expect(await screen.findByTestId("live-app-stop")).toBeInTheDocument();
+      client.appStatus.mockResolvedValue({ configured: true, running: false, run_id: "r-1", exit_error: "exit status 1", smoke_expectation: "live", smoke_timeout_s: 3 });
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(await screen.findByTestId("live-app-exit")).toHaveTextContent("exit status 1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says when the app's state cannot be read instead of vanishing", async () => {
+    const client = fakeClient({}, { appStatus: vi.fn().mockRejectedValue(new Error("engine unreachable")) });
+    render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
+    expect(await screen.findByTestId("live-app-status-error")).toHaveTextContent("engine unreachable");
+  });
 });
