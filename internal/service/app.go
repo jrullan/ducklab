@@ -616,7 +616,11 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 	}
 	out.Running = true
 	if out.URL == "" {
+		// Head first — servers announce early — then the tail, for a run
+		// command that installs or builds at length before it serves.
 		if url := detectAppURL(headFile(st.logPath, 16384)); url != "" {
+			out.URL, out.URLSource = url, "output"
+		} else if url := detectAppURL(tailFile(st.logPath, 16384)); url != "" {
 			out.URL, out.URLSource = url, "output"
 		}
 	}
@@ -675,13 +679,28 @@ func probeHealth(url string) string {
 // hosts: a URL the app merely mentions elsewhere is not where it serves.
 var localURL = regexp.MustCompile(`https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]):\d{2,5}(?:/[^\s)"'<>]*)?`)
 
-// detectAppURL returns the first local address the app printed, with a
-// wildcard bind turned into the loopback address a browser can open.
+// announces marks a line where a server says where it itself listens, as
+// opposed to a dependency it waits for ("waiting for http://localhost:5432").
+var announces = regexp.MustCompile(`(?i)\b(serving|listening|running (?:on|at)|local\s*:|available (?:on|at)|started (?:on|at)|server (?:on|at)|ready (?:on|at)|open)\b`)
+
+// detectAppURL returns the local address the app announced — the first one
+// on a line that says it serves there, else the first local address — with
+// a wildcard bind turned into the loopback address a browser can open.
 func detectAppURL(output string) string {
-	url := localURL.FindString(output)
+	url := ""
+	for _, line := range strings.Split(output, "\n") {
+		if found := localURL.FindString(line); found != "" && announces.MatchString(line) {
+			url = found
+			break
+		}
+	}
+	if url == "" {
+		url = localURL.FindString(output)
+	}
 	if url == "" {
 		return ""
 	}
+	url = strings.TrimRight(url, ".,;:!?")
 	url = strings.Replace(url, "0.0.0.0", "127.0.0.1", 1)
 	url = strings.Replace(url, "[::]", "localhost", 1)
 	url = strings.Replace(url, "[::1]", "localhost", 1)

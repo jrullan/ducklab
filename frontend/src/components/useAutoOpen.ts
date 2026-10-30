@@ -15,7 +15,9 @@ export function useAutoOpen(status: AppStatus | null, refresh: () => void, match
 
   useEffect(() => {
     if (!armedUntil.current) return;
-    if (Date.now() > armedUntil.current || (status && !status.running && status.exit_error)) {
+    // Only the window disarms: a poll sent before the launch can still carry
+    // the previous crash, and an app that dies now simply never matches.
+    if (Date.now() > armedUntil.current) {
       armedUntil.current = 0;
       return;
     }

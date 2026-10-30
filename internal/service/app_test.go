@@ -642,10 +642,13 @@ func TestRunAppBuildProductsAreNotDrift(t *testing.T) {
 // The status names it, and where it came from, while the app runs.
 func TestAppStatusFindsTheAddressTheAppPrinted(t *testing.T) {
 	cases := map[string]string{
-		"Serving HTTP on 127.0.0.1 port 41666 (http://127.0.0.1:41666/) ...": "http://127.0.0.1:41666/",
-		"  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host":       "http://localhost:5173/",
-		"Running on http://0.0.0.0:8000 (Press CTRL+C to quit)":              "http://127.0.0.1:8000",
-		"docs at https://example.com:8443/guide; no local server":            "",
+		"Serving HTTP on 127.0.0.1 port 41666 (http://127.0.0.1:41666/) ...":          "http://127.0.0.1:41666/",
+		"  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host":              "http://localhost:5173/",
+		"Running on http://0.0.0.0:8000 (Press CTRL+C to quit)":                       "http://127.0.0.1:8000",
+		"docs at https://example.com:8443/guide; no local server":                     "",
+		"waiting for db at http://localhost:5432\nListening on http://localhost:3000": "http://localhost:3000",
+		"Uvicorn running on https://[::]:8443 (Press CTRL+C)":                         "https://localhost:8443",
+		"server ready at http://[::1]:4000/.":                                         "http://localhost:4000/",
 	}
 	for output, want := range cases {
 		if got := detectAppURL(output); got != want {

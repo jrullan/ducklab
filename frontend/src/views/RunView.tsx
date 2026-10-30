@@ -1139,7 +1139,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 			  <span>I verified acceptance slice {item.id}: {item.text}</span>
 			</label>
 		  ))}
-		  <RunLiveApp client={client} runId={run.id} projectId={run.project_id} worktreePath={run.worktree_path} />
+		  <RunLiveApp key={run.id} client={client} runId={run.id} projectId={run.project_id} worktreePath={run.worktree_path} />
 		</div>
 	  )}
       <DecisionCard

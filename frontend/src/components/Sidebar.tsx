@@ -91,7 +91,7 @@ export function Sidebar({
       </nav>
       {client && projectId && <details className="mt-3 border-t border-hairline pt-3" data-testid="project-controls">
         <summary className="cursor-pointer text-sm text-ink-muted hover:text-ink">Project controls</summary>
-        <div className="mt-3"><AppControl client={client} projectId={projectId} /></div>
+        <div className="mt-3"><AppControl key={projectId} client={client} projectId={projectId} /></div>
         <div className="mt-3"><AutopilotControl client={client} projectId={projectId} /></div>
       </details>}
       <footer className="mt-4 flex flex-col gap-1 border-t border-hairline pt-3 text-sm" data-testid="sidebar-footer">
