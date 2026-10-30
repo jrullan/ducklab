@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, EngineClient } from "../api/client";
+import { openExternal } from "../lib/attention";
+import { useAutoOpen } from "./useAutoOpen";
 
 /** The live environment a paused run's manual checks ask for (B-552).
  *
@@ -38,6 +40,9 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
     const timer = setInterval(refresh, POLL_MS);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  const isOurs = useCallback((s: AppStatus) => s.run_id === runId, [runId]);
+  const armAutoOpen = useAutoOpen(status, refresh, isOurs);
 
   const act = (call: () => Promise<unknown>) => {
     setBusy(true);
@@ -79,10 +84,16 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
       {status.running && ours ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-ink">This run's app is running{status.pid ? ` (pid ${status.pid})` : ""}.</span>
-          {status.url && (
-            <a href={status.url} target="_blank" rel="noreferrer" className="underline" data-testid="live-app-url">
+          {status.url ? (
+            // A button through the shell: the desktop webview swallows
+            // target=_blank, so a plain link opened nothing (B-553).
+            <button type="button" onClick={() => openExternal(status.url!)} className="underline" data-testid="live-app-url" title={status.url_source === "output" ? "the address the app printed" : "run.url"}>
               {status.url}
-            </a>
+            </button>
+          ) : (
+            <span className="text-ink-muted" data-testid="live-app-no-url">
+              no address yet — if the app never prints one, set run.url in Projects
+            </span>
           )}
           <button type="button" disabled={busy} onClick={() => act(() => client.appStop(projectId))} className="rounded border border-hairline px-2 py-0.5 disabled:opacity-50" data-testid="live-app-stop">
             Stop
@@ -99,7 +110,7 @@ export function RunLiveApp({ client, runId, projectId, worktreePath }: {
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" disabled={busy} onClick={() => act(() => client.runAppStart(runId))} className="rounded border border-hairline px-2 py-0.5 disabled:opacity-50" data-testid="live-app-launch">
+          <button type="button" disabled={busy} onClick={() => act(() => client.runAppStart(runId).then(armAutoOpen))} className="rounded border border-hairline px-2 py-0.5 disabled:opacity-50" data-testid="live-app-launch">
             {busy ? "Launching…" : "Launch this run's app"}
           </button>
           <code className="min-w-0 truncate font-mono text-ink-muted">{status.command}</code>

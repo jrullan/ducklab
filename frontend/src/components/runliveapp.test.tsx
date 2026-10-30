@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RunLiveApp } from "./RunLiveApp";
+import * as attention from "../lib/attention";
 
 const WT = "/home/u/.local/state/ducklab/worktrees/p/r-1";
 
@@ -36,8 +37,11 @@ describe("run live app (B-552)", () => {
   it("shows this run's running app with its address and stop", async () => {
     const client = fakeClient({ configured: true, running: true, run_id: "r-1", pid: 7, url: "http://127.0.0.1:41666", log_tail: "serving" });
     render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
-    expect(await screen.findByTestId("live-app-url")).toHaveAttribute("href", "http://127.0.0.1:41666");
+    const open = vi.spyOn(attention, "openExternal").mockImplementation(() => {});
+    fireEvent.click(await screen.findByTestId("live-app-url"));
+    expect(open).toHaveBeenCalledWith("http://127.0.0.1:41666");
     expect(screen.getByTestId("live-app")).toHaveTextContent("This run's app is running (pid 7)");
+    open.mockRestore();
   });
 
   it("says why it cannot launch an unconfigured project and where the change is", async () => {
@@ -75,5 +79,39 @@ describe("run live app (B-552)", () => {
     const client = fakeClient({}, { appStatus: vi.fn().mockRejectedValue(new Error("engine unreachable")) });
     render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
     expect(await screen.findByTestId("live-app-status-error")).toHaveTextContent("engine unreachable");
+  });
+
+  it("opens the app in the browser once it prints its address after the person's Launch (B-553)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const open = vi.spyOn(attention, "openExternal").mockImplementation(() => {});
+    try {
+      const client = fakeClient({ configured: true, running: false, command: "python3 -m http.server 41666" });
+      render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
+      // Launched, but the address is not printed yet.
+      client.appStatus.mockResolvedValue({ configured: true, running: true, run_id: "r-1", pid: 7, smoke_expectation: "live", smoke_timeout_s: 3 });
+      fireEvent.click(await screen.findByTestId("live-app-launch"));
+      expect(await screen.findByTestId("live-app-no-url")).toBeInTheDocument();
+      expect(open).not.toHaveBeenCalled();
+      client.appStatus.mockResolvedValue({ configured: true, running: true, run_id: "r-1", pid: 7, url: "http://127.0.0.1:41666/", url_source: "output", smoke_expectation: "live", smoke_timeout_s: 3 });
+      await vi.advanceTimersByTimeAsync(600);
+      await waitFor(() => expect(open).toHaveBeenCalledWith("http://127.0.0.1:41666/"));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      open.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("never opens a window for an app that was already running", async () => {
+    const open = vi.spyOn(attention, "openExternal").mockImplementation(() => {});
+    try {
+      const client = fakeClient({ configured: true, running: true, run_id: "r-1", url: "http://127.0.0.1:41666/" });
+      render(<RunLiveApp client={client as never} runId="r-1" projectId="p" worktreePath={WT} />);
+      await screen.findByTestId("live-app-url");
+      expect(open).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+    }
   });
 });

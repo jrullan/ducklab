@@ -826,6 +826,7 @@ export interface ServiceAppStatus {
   stopped_by?: string;
   suggestions?: ServiceAppSuggestion[];
   url?: string;
+  url_source?: string;
 }
 
 export interface ServiceAppSuggestion {

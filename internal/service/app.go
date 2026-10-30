@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -60,9 +61,13 @@ type AppStatus struct {
 	SmokeTimeoutS    int    `json:"smoke_timeout_s"`
 	SmokeExpectation string `json:"smoke_expectation"`
 	URL              string `json:"url,omitempty"`
-	Running          bool   `json:"running"`
-	PID              int    `json:"pid,omitempty"`
-	StartedAt        string `json:"started_at,omitempty"`
+	// URLSource says where URL came from: "run.url" when configured, or
+	// "output" when the running app printed its own local address (B-553).
+	// A launched app with no link left the person guessing the port.
+	URLSource string `json:"url_source,omitempty"`
+	Running   bool   `json:"running"`
+	PID       int    `json:"pid,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
 	// Health is "healthy", "unhealthy", or empty when no health URL is
 	// configured or the app is not running. A process alive and a service
 	// answering are different claims, and only the second one is the app.
@@ -399,7 +404,10 @@ func (s *Service) appStart(ctx context.Context, projectID string, target appTarg
 	// The environment check, before the process: a failed preflight names
 	// what is missing in its own words, where a failed launch is a crash to
 	// decode from a log tail.
-	appEnv := append(os.Environ(), "DUCKLAB_RUN_ID="+target.runEnv, "DUCKLAB_PROJECT_ID="+projectID)
+	// PYTHONUNBUFFERED: the log is a file, and a block-buffered Python app
+	// (python -m http.server among them) would hold back the very line that
+	// says where it is listening until the buffer fills (B-553).
+	appEnv := append(os.Environ(), "DUCKLAB_RUN_ID="+target.runEnv, "DUCKLAB_PROJECT_ID="+projectID, "PYTHONUNBUFFERED=1")
 	preflightRanBuild := false
 	if cfg.Run.Preflight != "" {
 		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -584,6 +592,9 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		Preflight:        cfg.Run.Preflight,
 		Requires:         cfg.Run.Requires,
 	}
+	if out.URL != "" {
+		out.URLSource = "run.url"
+	}
 	st := s.apps[projectID]
 	if st == nil {
 		return out
@@ -604,6 +615,11 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		return out
 	}
 	out.Running = true
+	if out.URL == "" {
+		if url := detectAppURL(headFile(st.logPath, 16384)); url != "" {
+			out.URL, out.URLSource = url, "output"
+		}
+	}
 	out.PID = st.pid
 	out.StartedAt = st.startedAt.UTC().Format(time.RFC3339)
 	if cfg.Run.Health != "" {
@@ -651,6 +667,38 @@ func probeHealth(url string) string {
 		return "healthy"
 	}
 	return "unhealthy"
+}
+
+// localURL finds a local http(s) address in an app's own output: dev
+// servers announce where they listen ("Serving HTTP on … (http://127.0.0.1:
+// 41666/)", "Local: http://localhost:5173/"). Only loopback and wildcard
+// hosts: a URL the app merely mentions elsewhere is not where it serves.
+var localURL = regexp.MustCompile(`https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]):\d{2,5}(?:/[^\s)"'<>]*)?`)
+
+// detectAppURL returns the first local address the app printed, with a
+// wildcard bind turned into the loopback address a browser can open.
+func detectAppURL(output string) string {
+	url := localURL.FindString(output)
+	if url == "" {
+		return ""
+	}
+	url = strings.Replace(url, "0.0.0.0", "127.0.0.1", 1)
+	url = strings.Replace(url, "[::]", "localhost", 1)
+	url = strings.Replace(url, "[::1]", "localhost", 1)
+	return url
+}
+
+// headFile returns up to the first n bytes of a file: where a server says
+// where it listens, before request logs push it out of the tail.
+func headFile(path string, n int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	read, _ := f.Read(buf)
+	return string(buf[:read])
 }
 
 // tailFile returns the last n bytes of a file, from the first full line.

@@ -637,3 +637,48 @@ func TestRunAppBuildProductsAreNotDrift(t *testing.T) {
 		t.Fatalf("accept refused over an excluded build product: %v", err)
 	}
 }
+
+// B-553: an app with no run.url still has an address — the one it printed.
+// The status names it, and where it came from, while the app runs.
+func TestAppStatusFindsTheAddressTheAppPrinted(t *testing.T) {
+	cases := map[string]string{
+		"Serving HTTP on 127.0.0.1 port 41666 (http://127.0.0.1:41666/) ...": "http://127.0.0.1:41666/",
+		"  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host":       "http://localhost:5173/",
+		"Running on http://0.0.0.0:8000 (Press CTRL+C to quit)":              "http://127.0.0.1:8000",
+		"docs at https://example.com:8443/guide; no local server":            "",
+	}
+	for output, want := range cases {
+		if got := detectAppURL(output); got != want {
+			t.Errorf("detectAppURL(%q) = %q, want %q", output, got, want)
+		}
+	}
+
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Python, block-buffered into a file, is the case that hid the line.
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"run.command": `python3 -c "import time; print('Serving HTTP on 127.0.0.1 port 41666 (http://127.0.0.1:41666/) ...'); time.sleep(30)"`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppStart(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	defer s.AppStop(context.Background(), p.ID) //nolint:errcheck
+	deadline := time.Now().Add(5 * time.Second)
+	var st *AppStatus
+	for time.Now().Before(deadline) {
+		st, _ = s.AppStatus(context.Background(), p.ID)
+		if st.URL != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if st.URL != "http://127.0.0.1:41666/" || st.URLSource != "output" {
+		t.Fatalf("status url = %q from %q, want the printed address from output", st.URL, st.URLSource)
+	}
+}
