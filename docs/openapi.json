@@ -2817,6 +2817,9 @@
           },
           "url": {
             "type": "string"
+          },
+          "url_source": {
+            "type": "string"
           }
         },
         "required": [

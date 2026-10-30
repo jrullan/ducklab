@@ -490,7 +490,9 @@ function AppChip({
               setSmoke(status.smoke ?? "");
               setSmokeExpectation(status.smoke_expectation ?? "");
               setSmokeTimeoutS(String(status.smoke_timeout_s ?? 3));
-              setUrl(status.url ?? "");
+              // A detected address is what the app printed this time, not
+              // configuration: saving it would pin a port that may move.
+              setUrl(status.url_source === "output" ? "" : (status.url ?? ""));
               setHealth("");
               setPreflight(status.preflight ?? "");
               setRequires(status.requires ?? "");

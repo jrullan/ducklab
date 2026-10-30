@@ -106,6 +106,18 @@ describe("Projects", () => {
     expect(screen.getByTestId("app-smoke-expect")).toHaveValue("exit");
   });
 
+  it("never seeds run.url with the address a running app merely printed (B-553)", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    (client.appStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: true, command: "npm run dev", running: true,
+      url: "http://localhost:5173/", url_source: "output",
+      smoke_expectation: "live", smoke_timeout_s: 3,
+    });
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("app-edit"));
+    expect(screen.getByTestId("app-url")).toHaveValue("");
+  });
+
   it("shows the engine's refusal rather than failing silently", async () => {
     const client = clientWith([]);
     (client.projectInit as ReturnType<typeof vi.fn>).mockRejectedValueOnce(

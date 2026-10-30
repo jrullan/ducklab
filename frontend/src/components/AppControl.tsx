@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, EngineClient } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { openExternal } from "../lib/attention";
+import { useAutoOpen } from "./useAutoOpen";
 
 /** The app's Launch/Stop, in the shell header beside the project picker.
  *
@@ -28,13 +29,19 @@ export function AppControl({ client, projectId }: { client: EngineClient; projec
       clearInterval(t);
     };
   }, [client, projectId]);
+  const refresh = useCallback(() => {
+    if (projectId) client.appStatus(projectId).then(setApp).catch(() => {});
+  }, [client, projectId]);
+  // The header launches main's app; a run's app (B-552) is its card's to open.
+  const isMain = useCallback((a: AppStatus) => !a.run_id, []);
+  const armAutoOpen = useAutoOpen(app, refresh, isMain);
 
   if (!app?.configured) return null;
 
   const act = () => {
     setBusy(true);
     setError(null);
-    const action = app.running ? client.appStop(projectId) : client.appStart(projectId).then(() => {});
+    const action = app.running ? client.appStop(projectId) : client.appStart(projectId).then(armAutoOpen);
     void action
       .then(() => client.appStatus(projectId))
       .then(setApp)

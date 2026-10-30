@@ -187,6 +187,8 @@ export interface AppStatus {
   smoke_expectation: "exit" | "live";
   smoke_timeout_s: number;
   url?: string;
+  /** "run.url" when configured; "output" when the app printed its own local address (B-553). */
+  url_source?: "run.url" | "output";
   running: boolean;
   pid?: number;
   started_at?: string;
