@@ -769,6 +769,10 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			// The round gate decides (I2): it never reuses, and what it finds
 			// is what verify_run and the final gate may reuse (B-545).
 			gate, log, err := tools.RunVerificationGate(tools.FreshGate(ctx), mc.ectx)
+			// A green seals the epoch: if nothing executes from here to the
+			// final gate, that gate may reuse this one even before a smoke or
+			// render (B-554).
+			mc.ectx.GateMemo.SealRoundGate(err == nil && gate == "green")
 			if err != nil {
 				// A build-system marker without its tool is not a gate error:
 				// it is a toolchain the person has not installed, named on the
@@ -845,6 +849,9 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		if mc.projCfg.RenderConfigured && contract.Command != "" && len(contract.Compare) > 0 &&
 			s.taskOwnsVisualCheck(ctx, mc.rs.run.ProjectID, mc.req.TaskID, contract) {
 			vision = vision.withFeedback(mc.rs.runDir, base.Diff, func(ctx context.Context) (*runlog.VisualGate, []string, error) {
+				// A render executes the project's command in the tree, after
+				// the round gate: the final gate then runs fresh (B-554).
+				mc.ectx.GateMemo.Touch()
 				rendered, err := captureRender(s.renderContext(ctx), root, contract, mc.rs.writer, mc.rs.run.ID, mc.rs.run.ProjectID)
 				if len(rendered.Captures) == 0 {
 					if err == nil {

@@ -2379,11 +2379,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// (B-545) — unless a product smoke or render follows: those run against
 	// the build output the project gate leaves behind, which is ignored and
 	// outside the tree identity, so the gate rebuilds it first (review of
-	// B-545).
-	finalCtx := ctx
-	if smoke, _, _, _ := productSmokeConfig(projCfg.Run); smoke != "" || (projCfg.RenderConfigured && effectiveRenderContract(projCfg).Command != "") {
-		finalCtx = tools.FreshGate(ctx)
-	}
+	// B-545). When the last round gate was green and nothing has executed in
+	// the tree since, that output is the round gate's own and rebuilding it
+	// re-proves the same thing: on TI-36X every run paid a second 3.5-minute
+	// suite on the tree the round gate had just passed (B-554).
+	finalCtx := finalGateContext(ctx, projCfg, ectx.GateMemo)
 	taskGate, taskGateLog, err := tools.RunTaskVerificationGate(finalCtx, ectx)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify task: %w", err))
@@ -7061,4 +7061,25 @@ func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.R
 		w.AppendEvent("seat_failover", data)
 	}
 	return s.RunResume(ctx, id)
+}
+
+// finalGateContext decides whether the final gate may reuse the memo
+// (B-545, B-554): always without a smoke or render after it; with one, only
+// when the last round gate was green and nothing has executed since — checked
+// again at each step, so the first step that runs makes the rest run.
+//
+// The seal counts what the run itself executes. A command a person starts in
+// a non-worktree run's tree meanwhile (an install, the app's own build) is
+// not counted, as it was not by B-545's verify_run reuse.
+func finalGateContext(ctx context.Context, projCfg *config.Project, memo *tools.GateMemo) context.Context {
+	smoke, _, _, _ := productSmokeConfig(projCfg.Run)
+	readsBuildOutput := smoke != "" || (projCfg.RenderConfigured && effectiveRenderContract(projCfg).Command != "")
+	switch {
+	case !readsBuildOutput:
+		return ctx
+	case memo.UntouchedSinceGreenRoundGate():
+		return tools.ReuseWhileSealed(ctx)
+	default:
+		return tools.FreshGate(ctx)
+	}
 }

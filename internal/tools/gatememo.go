@@ -31,9 +31,51 @@ import (
 // Ignored files are outside the tree identity: a dependency reinstalled
 // after a green verify_run is not seen. The round gate, which always runs,
 // and the accept's clean-checkout reproduction are what catch that.
+//
+// The epoch counts every execution in the run's tree that the memo hears of:
+// each real verification and each tool call (Touch). A green round gate seals
+// the epoch it ended on; Untouched says nothing has executed since, which is
+// what lets the final gate reuse that green even when a smoke or render
+// follows (B-554): the build output they read is the one the round gate's own
+// run left behind, and nothing has run that could have changed it.
 type GateMemo struct {
-	mu      sync.Mutex
-	entries map[string]gateMemoEntry
+	mu       sync.Mutex
+	entries  map[string]gateMemoEntry
+	epoch    uint64
+	sealed   bool
+	sealedAt uint64
+}
+
+// Touch records that something executed in the tree. Nil-safe.
+func (m *GateMemo) Touch() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.epoch++
+	m.mu.Unlock()
+}
+
+// SealRoundGate records how a round gate ended: a green seals the current
+// epoch, anything else clears the seal. Nil-safe.
+func (m *GateMemo) SealRoundGate(green bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.sealed, m.sealedAt = green, m.epoch
+	m.mu.Unlock()
+}
+
+// UntouchedSinceGreenRoundGate reports whether the last round gate was green
+// and nothing has executed since it ended.
+func (m *GateMemo) UntouchedSinceGreenRoundGate() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sealed && m.epoch == m.sealedAt
 }
 
 type gateMemoEntry struct {
@@ -52,6 +94,26 @@ type freshGateKey struct{}
 func FreshGate(ctx context.Context) context.Context {
 	return context.WithValue(ctx, freshGateKey{}, true)
 }
+
+type sealedReuseKey struct{}
+
+// ReuseWhileSealed marks ctx so verifications reuse the memo only while
+// nothing has executed since the last green round gate, re-checked at each
+// verification: the final gate before a smoke or render (B-554). Its first
+// step that really runs breaks the seal, and every later step then runs
+// too, in the round gate's order, so the build output the smoke or render
+// reads is never left behind by a different command (review of B-554).
+func ReuseWhileSealed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sealedReuseKey{}, true)
+}
+
+func reuseOnlyWhileSealed(ctx context.Context) bool {
+	v, _ := ctx.Value(sealedReuseKey{}).(bool)
+	return v
+}
+
+// IsFreshGate reports whether ctx was marked by FreshGate.
+func IsFreshGate(ctx context.Context) bool { return isFreshGate(ctx) }
 
 func isFreshGate(ctx context.Context) bool {
 	fresh, _ := ctx.Value(freshGateKey{}).(bool)
@@ -80,10 +142,12 @@ func RunVerify(ctx context.Context, ectx *ExecContext, root string, cfg config.V
 	before, err := treeIdentity(root)
 	if err != nil {
 		// No identity, no reuse — and nothing recorded either.
+		memo.Touch()
 		return verify.Run(ctx, root, cfg, id)
 	}
 	key := gateMemoKey(root, cfg, before)
-	if !isFreshGate(ctx) {
+	fresh := isFreshGate(ctx) || (reuseOnlyWhileSealed(ctx) && !memo.UntouchedSinceGreenRoundGate())
+	if !fresh {
 		memo.mu.Lock()
 		hit, ok := memo.entries[key]
 		memo.mu.Unlock()
@@ -97,6 +161,7 @@ func RunVerify(ctx context.Context, ectx *ExecContext, root string, cfg config.V
 			return &reused, nil
 		}
 	}
+	memo.Touch()
 	res, err := verify.Run(ctx, root, cfg, id)
 	// Only the latest run of a key speaks for it. A run that is not green —
 	// red, an error, a gate that changed the tree — removes what an earlier

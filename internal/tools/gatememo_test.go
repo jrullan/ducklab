@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,5 +166,87 @@ func TestAReusedResultHasNoDuration(t *testing.T) {
 	runIt(t, ctx, ectx)
 	if res := runIt(t, ctx, ectx); res.Duration != 0 {
 		t.Errorf("a reused result reports %vs of a run that did not happen", res.Duration)
+	}
+}
+
+// B-554: a green round gate seals the memo's epoch; anything that executes
+// afterwards breaks the seal, a reused verify_run does not, and a round gate
+// that is not green leaves nothing sealed.
+func TestTheRoundGateSealBreaksOnAnyExecution(t *testing.T) {
+	ctx := context.Background()
+	ectx, count, _ := memoFixture(t, "true")
+	if ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatal("a memo with no round gate reports a sealed green")
+	}
+	gate, _, err := RunVerificationGate(FreshGate(ctx), ectx)
+	if err != nil || gate != "green" {
+		t.Fatalf("round gate: %s %v", gate, err)
+	}
+	ectx.GateMemo.SealRoundGate(true)
+	if !ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatal("nothing ran after the green round gate, yet the seal is broken")
+	}
+
+	// A verify_run on the same tree reuses the result: nothing executes.
+	reg := NewRegistry()
+	if _, err := reg.Execute(ctx, ectx, "verify_run", nil); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 1 || !ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatalf("a reused verify_run broke the seal (runs=%d)", count())
+	}
+
+	// Any other tool runs something the tree identity may not see.
+	ectx.ToolsClosed, ectx.ReadToolsClosed = false, false
+	if _, err := reg.Execute(ctx, ectx, "shell", json.RawMessage(`{"cmd":"true"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatal("a shell command after the round gate left the seal intact")
+	}
+
+	// A verification that really runs breaks it too.
+	ectx.GateMemo.SealRoundGate(true)
+	runIt(t, FreshGate(ctx), ectx)
+	if ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatal("a verification that ran after the round gate left the seal intact")
+	}
+
+	// A round gate that is not green seals nothing.
+	ectx.GateMemo.SealRoundGate(false)
+	if ectx.GateMemo.UntouchedSinceGreenRoundGate() {
+		t.Fatal("a red round gate sealed the epoch")
+	}
+
+	var none *GateMemo
+	none.Touch()
+	none.SealRoundGate(true)
+	if none.UntouchedSinceGreenRoundGate() {
+		t.Fatal("a nil memo reports a sealed green")
+	}
+}
+
+// Review of B-554: the final gate decides reuse at each step. When an early
+// step really runs (its key missed: the round gate recorded nothing for it),
+// the steps after it run too, though the memo holds a green for them.
+func TestAStepThatRunsInTheFinalGateMakesTheLaterStepsRun(t *testing.T) {
+	ctx := context.Background()
+	ectx, count, _ := memoFixture(t, "true")
+	runIt(t, FreshGate(ctx), ectx) // the round gate's project verify, recorded
+	ectx.GateMemo.SealRoundGate(true)
+
+	final := ReuseWhileSealed(ctx)
+	if res := runIt(t, final, ectx); !strings.Contains(res.Output, "[reused") || count() != 1 {
+		t.Fatalf("an untouched seal did not reuse (runs=%d)", count())
+	}
+	// A step with no recorded green runs for real...
+	other := ectx.Verify
+	other.Custom = "true # task verification"
+	if _, err := RunVerify(final, ectx, ectx.ProjectRoot, other, verify.Identity{}); err != nil {
+		t.Fatal(err)
+	}
+	// ...and the project verify after it no longer reuses.
+	if res := runIt(t, final, ectx); strings.Contains(res.Output, "[reused") || count() != 2 {
+		t.Fatalf("a step after one that ran reused the memo (runs=%d): %q", count(), res.Output)
 	}
 }
