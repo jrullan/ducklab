@@ -507,6 +507,12 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			"the tree — either the project has no such code yet, or the id you search for is not a section "+
 			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit)), nil
 	}
+	// Any tool that runs may touch what the tree identity cannot see (B-554):
+	// a shell command, a write under an ignored path. verify_run marks its
+	// own executions in RunVerify, where a reused result runs nothing.
+	if name != "verify_run" {
+		ectx.GateMemo.Touch()
+	}
 	res, err := t.Execute(ctx, ectx, args)
 	if explorationTool[name] {
 		ectx.explorationCalls++

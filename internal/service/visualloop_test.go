@@ -53,6 +53,8 @@ type visualLoop struct {
 	plan string
 	// tolerance replaces the comparison's default tolerance when non-zero.
 	tolerance float64
+	// verify, when set, is the project's custom gate command.
+	verify string
 }
 
 type visualLoopRequest struct {
@@ -97,6 +99,9 @@ func runVisualLoop(t *testing.T, o visualLoop) ([]visualLoopRequest, []*runlog.E
 	}
 	if o.required {
 		cfg.Render.Enforcement = "required"
+	}
+	if o.verify != "" {
+		cfg.Verify = config.Verify{Mode: "custom", Custom: o.verify, TimeoutS: 30}
 	}
 	if o.tolerance > 0 {
 		tol := o.tolerance
@@ -658,5 +663,34 @@ func TestB507ASeeingAdvisorSeesTheReferenceAndTheCapture(t *testing.T) {
 	}
 	if len(recorded) != 1 || recorded[0]["role"] != "advisor" || recorded[0]["can_see"] != true {
 		t.Errorf("turn_images = %v", recorded)
+	}
+}
+
+// B-554 review: a render after the round gate executes in the tree, so the
+// final gate before the run's own render cannot reuse the round gate's green
+// — the build output that render reads is no longer the gate's alone.
+func TestB554ARenderAfterTheRoundGateMakesTheFinalGateRun(t *testing.T) {
+	_, events := runVisualLoop(t, visualLoop{mode: "solo", rounds: 1, match: true, verify: "true",
+		report: func(int) string { return visualDone }})
+	var green bool
+	for _, e := range eventsOf(events, "round_gate") {
+		green = e.Data["result"] == "green"
+	}
+	if !green {
+		t.Fatal("the round gate was not green: nothing for the final gate to reuse")
+	}
+	var after bool
+	for _, e := range eventsOf(events, "visual_feedback") {
+		after = after || stringValueAny(e.Data["phase"]) == "after round gate"
+	}
+	if !after {
+		t.Fatal("no render after the round gate: the case under test did not happen")
+	}
+	gates := eventsOf(events, "gate")
+	if len(gates) == 0 {
+		t.Fatal("no final gate event")
+	}
+	if out := stringValueAny(gates[len(gates)-1].Data["output"]); strings.Contains(out, "[reused") {
+		t.Errorf("the final gate reused the round gate after a render ran in the tree:\n%s", out)
 	}
 }
