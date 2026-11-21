@@ -45,3 +45,27 @@ describe("B-510 a red gate over passing tests", () => {
     expect(card.textContent).not.toContain("command exit code");
   });
 });
+
+// B-555: before the fix every finished gate recorded 0 s, and a reused gate
+// records 0 because nothing ran. Neither is shown as "0s"; a real duration is
+// formatted, not printed raw.
+describe("B-555 gate durations on the rail and the lane", () => {
+  const gate = (duration_s: number) => [
+    ev("gate_started", 1, { phase: "final", detail: "running the full gate" }),
+    ev("gate", 2, { gate: "green", command_gate: "tests", command: "npm test", exit_code: 0, effective_exit_code: 0, output: "ok", duration_s }),
+  ];
+  it("shows no duration for a zero", () => {
+    render(<GateCard gate={buildGate(gate(0))} />);
+    expect(screen.getByTestId("gate-card").textContent).not.toContain("·");
+    const [block] = buildTurns(gate(0));
+    render(<ConversationTurn block={block!} roster={[]} />);
+    expect(screen.getByTestId("gate-result").textContent).not.toContain("·");
+  });
+  it("formats a real duration", () => {
+    render(<GateCard gate={buildGate(gate(213.7))} />);
+    expect(screen.getByTestId("gate-card").textContent).toContain("exit code 0 · 3m33s");
+    const [block] = buildTurns(gate(213.7));
+    render(<ConversationTurn block={block!} roster={[]} />);
+    expect(screen.getByTestId("gate-result").textContent).toContain("exit code 0 · 3m33s");
+  });
+});

@@ -1,5 +1,6 @@
 import type { GateState } from "../lib/runview";
 import { StatusChip } from "./StatusChip";
+import { gateDuration } from "../lib/format";
 
 /** The gate result. A `none` gate reports that nothing was executable rather
  * than anything that could be read as success (P3).
@@ -43,7 +44,7 @@ export function GateCard({ gate, stage }: { gate: GateState | null; stage?: stri
       </div>
       {/* The command's own exit code: under a red visual check it is 0, and
           the chip above says what made the gate red (B-510). */}
-      {gate.exitCode !== undefined && <div className="mt-1 text-xs text-ink-secondary">{gate.redBy.some((c) => c.check !== "command") ? "command " : ""}exit code {gate.exitCode}{gate.durationS !== undefined ? ` · ${gate.durationS}s` : ""}</div>}
+      {gate.exitCode !== undefined && <div className="mt-1 text-xs text-ink-secondary">{gate.redBy.some((c) => c.check !== "command") ? "command " : ""}exit code {gate.exitCode}{gateDuration(gate.durationS) ? ` · ${gateDuration(gate.durationS)}` : ""}</div>}
       {gate.output && <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-secondary">{gate.output}</pre>}
     </div>
   );
