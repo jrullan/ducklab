@@ -572,6 +572,9 @@
             },
             "type": "object"
           },
+          "roster_default": {
+            "type": "string"
+          },
           "roster_seats": {
             "additionalProperties": {
               "items": {
@@ -4237,6 +4240,9 @@
               "$ref": "#/components/schemas/ServiceRosterEntry"
             },
             "type": "array"
+          },
+          "project_default": {
+            "type": "string"
           },
           "warning": {
             "type": "string"

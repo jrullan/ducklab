@@ -29,7 +29,10 @@ type RosterEntry struct {
 // RosterView is the resolved roster for a project.
 type RosterView struct {
 	Entries []RosterEntry `json:"entries"`
-	Warning string        `json:"warning,omitempty"`
+	// ProjectDefault is the project's one model for every role it does not
+	// pin (B-557); empty when none is set.
+	ProjectDefault string `json:"project_default,omitempty"`
+	Warning        string `json:"warning,omitempty"`
 }
 
 // RosterGet returns the roster as it will actually be used, not just what the
@@ -67,7 +70,17 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 			}
 		}
 	}
-	view := &RosterView{Warning: warning}
+	if d := projCfg.RosterDefault; d != "" {
+		if _, err := s.ducklings.Get(d); err != nil {
+			note := fmt.Sprintf("project default %s is not a registered duckling; its seats fall back to the global defaults", d)
+			if warning == "" {
+				warning = note
+			} else {
+				warning += "; " + note
+			}
+		}
+	}
+	view := &RosterView{Warning: warning, ProjectDefault: string(projCfg.RosterDefault)}
 	scorecards, _ := s.Scorecards(ctx)
 
 	for _, role := range config.ValidRoles() {
@@ -78,6 +91,9 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource, Candidates: s.candidatesFor(string(role), scorecards)}
 		if canonicalSource == "project pin" || canonicalSource == "project mode seat" {
 			withoutPin := *projCfg
+			// Default is "what the global seats would give": the project
+			// default is the project's own word, not the inherited value.
+			withoutPin.RosterDefault = ""
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
 			for r, id := range projCfg.Roster {
 				if r != role {
@@ -233,6 +249,83 @@ func (s *Service) ProjectAutonomySet(projectID, autonomy string) error {
 	return nil
 }
 
+// projectDefaultFor is the project default for one seat, or "" where it
+// does not apply (B-557, and its review):
+//   - the advisor and the judge stay as configured: an advisor nobody asked
+//     for costs turns and can stop a run, and a judge drawn from the default
+//     would judge its own tournament entry;
+//   - multi-slot participant seats (council critics, split workers,
+//     tournament contestants) need several distinct ducklings, which one
+//     default cannot give — they keep their own lists;
+//   - a default that names an unregistered duckling is ignored, so a removed
+//     model falls back to the global seats instead of breaking every role.
+func (s *Service) projectDefaultFor(proj *config.Project, mode string, role config.Role) config.DucklingID {
+	if proj == nil || proj.RosterDefault == "" {
+		return ""
+	}
+	switch role {
+	case config.RoleAdvisor, config.RoleJudge, config.RoleHuman:
+		return ""
+	}
+	if multiSlotSeat(mode, role) {
+		return ""
+	}
+	if _, err := s.ducklings.Get(proj.RosterDefault); err != nil {
+		return ""
+	}
+	return proj.RosterDefault
+}
+
+// multiSlotSeat names the seats that take an ordered list of distinct
+// ducklings.
+func multiSlotSeat(mode string, role config.Role) bool {
+	switch {
+	case mode == "council" && role == config.RoleReviewer:
+		return true
+	case (mode == "split" || mode == "tournament") && role == config.RoleImplementer:
+		return true
+	}
+	return false
+}
+
+// RosterDefaultRole is the roster "role" that names the project's default
+// duckling (B-557): `ducklab roster set default terra` seats terra in every
+// role the project does not pin, and unpinning it clears the default. Not a
+// real role — no seat is called "default" — so it cannot collide with one.
+const RosterDefaultRole = "default"
+
+// rosterSetDefault sets (one id) or clears (none) the project's default
+// duckling. It is mode-independent: a default for one mode is what a mode
+// seat already is.
+func (s *Service) rosterSetDefault(ctx context.Context, projectID, mode string, ducklingIDs []string) (*RosterView, error) {
+	if mode != "" && mode != "common" {
+		return nil, fmt.Errorf("the project default applies to every mode, not to %q; next: set it without a mode, or pin the %s seats instead", mode, mode)
+	}
+	if len(ducklingIDs) > 1 {
+		return nil, fmt.Errorf("the project default is one duckling, got %d; next: name one, then pin the exceptions per role", len(ducklingIDs))
+	}
+	var id config.DucklingID
+	if len(ducklingIDs) == 1 {
+		id = config.DucklingID(ducklingIDs[0])
+		if _, err := s.ducklings.Get(id); err != nil {
+			return nil, fmt.Errorf("no duckling %q — registered: %s; next: choose a registered duckling", id, registeredDucklings(s))
+		}
+	}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	projCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		return nil, err
+	}
+	projCfg.RosterDefault = id
+	if err := writeProjectTOML(filepath.Join(entry.Path, ".ducklab", "project.toml"), projCfg); err != nil {
+		return nil, fmt.Errorf("write project.toml: %w", err)
+	}
+	return s.RosterGet(ctx, projectID, "")
+}
+
 // RosterSet assigns a duckling to a role and persists it to project.toml.
 func (s *Service) RosterSet(ctx context.Context, projectID, role, ducklingID string) (*RosterView, error) {
 	return s.RosterSetMany(ctx, projectID, role, []string{ducklingID})
@@ -245,6 +338,9 @@ func (s *Service) RosterSetMany(ctx context.Context, projectID, role string, duc
 
 // RosterSetManyMode replaces a project pin and validates the complete mode roster.
 func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role string, ducklingIDs []string) (*RosterView, error) {
+	if role == RosterDefaultRole {
+		return s.rosterSetDefault(ctx, projectID, mode, ducklingIDs)
+	}
 	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
 		return nil, fmt.Errorf("field role invalid for roster: %q (valid: %s); next: choose a board role", role, rolesList())
 	}
@@ -346,6 +442,9 @@ func (s *Service) validateRosterMode(mode string, proj *config.Project) error {
 }
 
 func (s *Service) RosterUnpin(ctx context.Context, projectID, mode, role string) (*RosterView, error) {
+	if role == RosterDefaultRole {
+		return s.rosterSetDefault(ctx, projectID, mode, nil)
+	}
 	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
 		return nil, fmt.Errorf("field role invalid for roster: %q; next: choose a valid role", role)
 	}
@@ -396,6 +495,12 @@ func (s *Service) rosterIDs(proj *config.Project, mode string, role config.Role)
 	}
 	if id := proj.Roster[role]; id != "" {
 		return []string{string(id)}
+	}
+	// The same rule as the resolver, so the board's card is the seat the
+	// run uses (review of B-557: the cards showed the global lists while
+	// the run seated the default).
+	if s.projectDefaultFor(proj, mode, role) != "" {
+		return []string{string(proj.RosterDefault)}
 	}
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()

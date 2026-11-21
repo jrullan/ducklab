@@ -32,8 +32,8 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "roster",
-			"description": "Read or edit canonical roster seats. get resolves provenance; set replaces ordered ducklings; unpin restores Global inheritance.",
-			"inputSchema": obj(map[string]interface{}{"action": str("get | set | unpin"), "scope": str("global | project"), "project_id": str("project id"), "mode": str("mode"), "role": str("role"), "ducklings": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "action", "scope"),
+			"description": "Read or edit canonical roster seats. get resolves provenance; set replaces ordered ducklings; unpin restores Global inheritance. With scope project and role \"default\" (no mode), set seats ONE duckling in every role the project does not pin and unpin clears it.",
+			"inputSchema": obj(map[string]interface{}{"action": str("get | set | unpin"), "scope": str("global | project"), "project_id": str("project id"), "mode": str("mode"), "role": str("role, or \"default\" for the project's one model"), "ducklings": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "action", "scope"),
 		},
 		{
 			"name": "duckling",

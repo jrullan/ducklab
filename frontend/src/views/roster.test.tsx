@@ -132,7 +132,9 @@ describe("Roster", () => {
 
     const pinned = screen.getByTestId("roster-card-pair-implementer-project-builder");
     expect(pinned.dataset.ghost).not.toBe("true");
-    expect(pinned.textContent).toContain("project default");
+    // A pin is "project pin"; "project default" now names the seats the
+    // project's one model fills (B-557), so the two read differently.
+    expect(pinned.textContent).toContain("project pin");
     expect(pinned.title).toContain("builder");
     expect(screen.getByTestId("roster-board-common").textContent).toMatch(/no pins/i);
 

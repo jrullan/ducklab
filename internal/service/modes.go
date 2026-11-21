@@ -270,8 +270,8 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 		return out
 	}
 	// Precedence per seat, and the record says which rung answered:
-	// project mode seat → project role pin → global mode seat → global role
-	// pin. A role nobody seated resolves to NOBODY. It used to resolve to the
+	// project mode seat → project role pin → project default (B-557) →
+	// global mode seat → global role pin. A role nobody seated resolves to NOBODY. It used to resolve to the
 	// alphabetically first registered duckling ("global role fallback"), so a
 	// mode with no advisor got atom-local as its duck and a launch with no
 	// implementer got whatever sorted first (B-063). Optional roles simply
@@ -298,6 +298,13 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 			}
 			if id := projCfg.Roster[role]; id != "" {
 				out[role], sources[role] = id, "project pin"
+				continue
+			}
+			// The project's one model, for every seat it did not pin and
+			// the default can fill (B-557; projectDefaultFor). Ahead of the
+			// global seats: it is the project's word.
+			if id := s.projectDefaultFor(projCfg, mode, role); id != "" {
+				out[role], sources[role] = id, "project default"
 				continue
 			}
 		}
@@ -384,6 +391,9 @@ func (s *Service) anySeatConfigured(projCfg *config.Project) bool {
 		}
 	}
 	if projCfg != nil {
+		if projCfg.RosterDefault != "" {
+			return true
+		}
 		for _, seats := range projCfg.ModeSeats {
 			for _, ids := range seats {
 				if len(ids) > 0 {

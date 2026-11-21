@@ -166,6 +166,7 @@ export interface ConfigProject {
   remote?: ConfigRemote;
   render?: ConfigRenderContract;
   roster?: Record<string, string>;
+  roster_default?: string;
   roster_seats?: Record<string, string[]>;
   run?: ConfigRunApp;
   schema?: number;
@@ -1243,6 +1244,7 @@ export interface ServiceRosterEntry {
 
 export interface ServiceRosterView {
   entries?: ServiceRosterEntry[];
+  project_default?: string;
   warning?: string;
 }
 

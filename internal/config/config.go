@@ -505,7 +505,11 @@ type Project struct {
 	// guessed — the same rule as verify.
 	Install    Install    `toml:"install" json:"install"`
 	References References `toml:"references" json:"references"`
-	Roster     Roster     `toml:"roster" json:"roster"`
+	// RosterDefault seats one duckling in every role the project does not
+	// pin itself (B-557): "this project runs on X", with the project's mode
+	// seats and role pins as the exceptions. Global seats come after it.
+	RosterDefault DucklingID `toml:"roster_default,omitempty" json:"roster_default,omitempty"`
+	Roster        Roster     `toml:"roster" json:"roster"`
 	// RosterSeats preserves ordered multi-slot project pins; Roster is retained for legacy scalar pins.
 	// Both are ROLE pins: they apply to every mode that seats the role.
 	RosterSeats map[Role][]DucklingID `toml:"roster_seats" json:"roster_seats,omitempty"`
