@@ -91,9 +91,6 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource, Candidates: s.candidatesFor(string(role), scorecards)}
 		if canonicalSource == "project pin" || canonicalSource == "project mode seat" {
 			withoutPin := *projCfg
-			// Default is "what the global seats would give": the project
-			// default is the project's own word, not the inherited value.
-			withoutPin.RosterDefault = ""
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
 			for r, id := range projCfg.Roster {
 				if r != role {
@@ -263,28 +260,45 @@ func (s *Service) projectDefaultFor(proj *config.Project, mode string, role conf
 	if proj == nil || proj.RosterDefault == "" {
 		return ""
 	}
-	switch role {
-	case config.RoleAdvisor, config.RoleJudge, config.RoleHuman:
-		return ""
-	}
-	if multiSlotSeat(mode, role) {
+	if !defaultSeatable(mode, role) {
 		return ""
 	}
 	if _, err := s.ducklings.Get(proj.RosterDefault); err != nil {
 		return ""
 	}
+	// A council architect critiqued by itself: the default stays off the
+	// architect when it is already one of the critics (second review of
+	// B-557).
+	if mode == "council" && role == config.RoleArchitect {
+		for _, id := range s.rosterIDs(proj, "council", config.RoleReviewer) {
+			if config.DucklingID(id) == proj.RosterDefault {
+				return ""
+			}
+		}
+	}
 	return proj.RosterDefault
 }
 
-// multiSlotSeat names the seats that take an ordered list of distinct
-// ducklings.
-func multiSlotSeat(mode string, role config.Role) bool {
-	switch {
-	case mode == "council" && role == config.RoleReviewer:
+// defaultSeatable names the seats a project default may fill: single seats
+// the mode actually uses (second review of B-557: the resolver filled every
+// role for every mode, so a tournament's unused reviewer seat became the
+// default and distinctDucklings made it contestant 2, judged by itself; a
+// solo document stage's reviewer became the drafter). Mode "" is the board's
+// mode-independent view and follows pair.
+func defaultSeatable(mode string, role config.Role) bool {
+	switch role {
+	case config.RoleTriager, config.RoleScribe, config.RoleConsultant:
 		return true
-	case (mode == "split" || mode == "tournament") && role == config.RoleImplementer:
-		return true
+	case config.RoleImplementer:
+		return mode == "" || mode == "solo" || mode == "pair"
+	case config.RoleReviewer:
+		return mode == "" || mode == "pair"
+	case config.RoleArchitect:
+		return mode == "council" || mode == "solo"
 	}
+	// The advisor, the judge (an unasked advisor costs turns and can stop a
+	// run; a default judge would judge its own entry) and the multi-slot
+	// participant seats keep their own configuration.
 	return false
 }
 

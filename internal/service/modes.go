@@ -391,8 +391,12 @@ func (s *Service) anySeatConfigured(projCfg *config.Project) bool {
 		}
 	}
 	if projCfg != nil {
+		// Only a registered default seats anyone; an unregistered one must
+		// not also switch off the blank-install picking (second review).
 		if projCfg.RosterDefault != "" {
-			return true
+			if _, err := s.ducklings.Get(projCfg.RosterDefault); err == nil {
+				return true
+			}
 		}
 		for _, seats := range projCfg.ModeSeats {
 			for _, ids := range seats {
@@ -900,16 +904,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 }
 
 func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strategy.ExecuteParams) error {
-	var contestants []config.DucklingID
-	for _, id := range mc.req.Ducklings {
-		contestants = append(contestants, config.DucklingID(id))
-	}
-	if len(contestants) < 2 {
-		// Two contestants from the roster: implementer plus the next distinct
-		// duckling. A tournament against yourself measures self-consistency,
-		// not decorrelation, so it is worth being explicit about.
-		contestants = distinctDucklings(mc.roster, s.cfg.Ducklings, 2)
-	}
+	contestants := s.tournamentContestants(mc.req.Ducklings, mc.projCfg, mc.roster)
 
 	scratch := filepath.Join(mc.entry.Path, ".ducklab", "worktrees")
 	tp := &strategy.TournamentParams{
@@ -1029,6 +1024,34 @@ func copyOwnedFile(from, to string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// tournamentContestants picks who races: the request's ducklings when it
+// names two or more; else the tournament implementer list the board shows,
+// registered ids only (second review of B-557 — an untouched launch took
+// implementer + reviewer instead, so the board said [glm, luna] and the run
+// raced [glm, terra]); else two distinct ducklings from the roster.
+func (s *Service) tournamentContestants(requested []string, projCfg *config.Project, roster map[config.Role]config.DucklingID) []config.DucklingID {
+	var contestants []config.DucklingID
+	for _, id := range requested {
+		contestants = append(contestants, config.DucklingID(id))
+	}
+	if len(contestants) >= 2 {
+		return contestants
+	}
+	contestants = nil
+	for _, id := range s.rosterIDs(projCfg, "tournament", config.RoleImplementer) {
+		if _, err := s.ducklings.Get(config.DucklingID(id)); err == nil {
+			contestants = append(contestants, config.DucklingID(id))
+		}
+	}
+	if len(contestants) >= 2 {
+		return contestants
+	}
+	// Two contestants from the roster: implementer plus the next distinct
+	// duckling. A tournament against yourself measures self-consistency,
+	// not decorrelation, so it is worth being explicit about.
+	return distinctDucklings(roster, s.cfg.Ducklings, 2)
 }
 
 func distinctDucklings(roster map[config.Role]config.DucklingID, all map[config.DucklingID]config.Duckling, n int) []config.DucklingID {

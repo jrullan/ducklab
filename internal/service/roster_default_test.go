@@ -202,9 +202,10 @@ func TestAnUnregisteredProjectDefaultFallsBackWithAWarning(t *testing.T) {
 	}
 }
 
-// A pinned seat's Default is what the global seats would give, not the
-// project default — the card's tooltip says "Global:".
-func TestAPinnedSeatsDefaultIsTheGlobalOne(t *testing.T) {
+// A pinned seat's Default is what unpinning it gives — here the project
+// default, not the global seat (second review of B-557: the tooltip named a
+// fallback the unpin would not produce).
+func TestAPinnedSeatsDefaultIsWhatUnpinningGives(t *testing.T) {
 	s := serviceWithDucklings(t, "terra", "glm", "luna")
 	ctx := context.Background()
 	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{"solo": {"implementer": {"glm"}}}
@@ -216,7 +217,92 @@ func TestAPinnedSeatsDefaultIsTheGlobalOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ := s.RosterGet(ctx, id, "solo")
-	if e := rosterEntry(t, v, "implementer"); e.Duckling != "luna" || e.Default != "glm" {
-		t.Errorf("implementer = %s, default %q, want luna over the global glm", e.Duckling, e.Default)
+	if e := rosterEntry(t, v, "implementer"); e.Duckling != "luna" || e.Default != "terra" {
+		t.Errorf("implementer = %s, default %q, want luna over the project default terra", e.Duckling, e.Default)
+	}
+}
+
+// Second review of B-557: the default fills only the single seats a mode
+// uses. A tournament's and a split's unused reviewer stay as configured (the
+// tournament took implementer+reviewer as contestants), a solo stage's
+// reviewer is left to the documents council seat instead of the drafter, and
+// a council architect is not the default when the default is a critic.
+func TestTheProjectDefaultFillsOnlySeatsTheModeUses(t *testing.T) {
+	s := serviceWithDucklings(t, "terra", "glm", "luna")
+	ctx := context.Background()
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"luna"}, "reviewer": {"terra", "glm"}},
+		"split":   {"implementer": {"glm", "luna"}},
+	}
+	id, _ := projectWithDocs(t, s, nil)
+	if _, err := s.RosterSetManyMode(ctx, id, "", RosterDefaultRole, []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	seat := func(mode, role string) RosterEntry {
+		t.Helper()
+		v, err := s.RosterGet(ctx, id, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rosterEntry(t, v, role)
+	}
+	for _, c := range []struct{ mode, role string }{
+		{"tournament", "reviewer"}, {"split", "reviewer"}, {"solo", "reviewer"},
+	} {
+		if e := seat(c.mode, c.role); e.Source == "project default" {
+			t.Errorf("%s %s filled by the default", c.mode, c.role)
+		}
+	}
+	if e := seat("split", "implementer"); strings.Join(e.Ducklings, ",") != "glm,luna" || e.Source == "project default" {
+		t.Errorf("split workers = %v (%s), want the global list", e.Ducklings, e.Source)
+	}
+	if e := seat("council", "architect"); e.Duckling != "luna" {
+		t.Errorf("council architect = %s (%s): the default is a critic and must not draft", e.Duckling, e.Source)
+	}
+	if e := seat("solo", "architect"); e.Duckling != "terra" || e.Source != "project default" {
+		t.Errorf("solo architect = %s (%s)", e.Duckling, e.Source)
+	}
+}
+
+// An unregistered default does not count as a configured seat: on a blank
+// install the engine still picks instead of every launch refusing.
+func TestAnUnregisteredDefaultKeepsBlankInstallPicking(t *testing.T) {
+	s := serviceWithDucklings(t, "terra", "glm")
+	ctx := context.Background()
+	s.cfg.Defaults.ModeSeats = nil
+	s.cfg.Defaults.RolePins = nil
+	id, dir := projectWithDocs(t, s, nil)
+	path := filepath.Join(dir, ".ducklab", "project.toml")
+	cfg, _ := config.LoadProject(path)
+	cfg.RosterDefault = "gone"
+	if err := writeProjectTOML(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.RosterGet(ctx, id, "solo")
+	if e := rosterEntry(t, v, "implementer"); e.Duckling == "" || e.Source != "engine picked (no seats configured)" {
+		t.Errorf("implementer = %s (%s), want an engine pick", e.Duckling, e.Source)
+	}
+}
+
+// The tournament races what the board shows: with no ducklings in the
+// request, the tournament implementer list — not implementer + reviewer.
+func TestATournamentRacesTheBoardsContestants(t *testing.T) {
+	s := serviceWithDucklings(t, "terra", "glm", "luna")
+	ctx := context.Background()
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{"tournament": {"implementer": {"glm", "luna"}, "judge": {"terra"}}}
+	id, _ := projectWithDocs(t, s, nil)
+	if _, err := s.RosterSetManyMode(ctx, id, "", RosterDefaultRole, []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	projCfg, err := s.projectConfig(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster, _ := s.resolveCanonicalRoster(projCfg, "tournament")
+	if got := s.tournamentContestants(nil, projCfg, roster); len(got) != 2 || got[0] != "glm" || got[1] != "luna" {
+		t.Errorf("contestants = %v, want the board's [glm luna]", got)
+	}
+	if got := s.tournamentContestants([]string{"terra", "luna"}, projCfg, roster); len(got) != 2 || got[0] != "terra" {
+		t.Errorf("requested contestants not honoured: %v", got)
 	}
 }

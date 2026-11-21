@@ -58,6 +58,9 @@ describe("Flock project default", () => {
     expect(fromDefault.textContent).toBe("project default");
     expect(screen.getByTestId("roster-card-pair-implementer-terra").dataset.ghost).toBeUndefined();
     expect(screen.getByTestId("roster-seat-source-pair-reviewer-glm").textContent).toBe("project pin");
+    // A default seat is changed through the select, not removed card by card.
+    expect(screen.queryByRole("button", { name: "remove terra from implementer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "remove glm from reviewer" })).toBeTruthy();
   });
 
   it("shows a default that names an unregistered duckling instead of hiding it", async () => {
