@@ -245,6 +245,28 @@ describe("Reports", () => {
     expect(screen.getByTestId("dev-report-copy")).toBeTruthy();
   });
 
+  // B-556: the flow report sits beside it, built the same way.
+  it("builds and shows the flow report on demand", async () => {
+    const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
+    const flowReport = vi.fn(() =>
+      Promise.resolve({ rendered: "# Flow report\n\n| Waiting for the owner | 0.9h | 90% |" }),
+    );
+    (client as unknown as { flowReport: unknown }).flowReport = flowReport;
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("flow-report-generate"));
+    await waitFor(() => expect(screen.getByTestId("flow-report-body")).toBeTruthy());
+    expect(flowReport).toHaveBeenCalledWith("p");
+    expect(screen.getByTestId("flow-report-body").textContent).toContain("Waiting for the owner");
+    expect(screen.queryByTestId("dev-report-body")).toBeNull();
+  });
+
+  it("offers the flow report even before any run finished", async () => {
+    const client = clientWith([], []);
+    (client as unknown as { flowReport: unknown }).flowReport = vi.fn(() => Promise.resolve({ rendered: "# Flow report" }));
+    render(<Reports client={client} projectId="p" />);
+    expect(await screen.findByTestId("flow-report-generate")).toBeTruthy();
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

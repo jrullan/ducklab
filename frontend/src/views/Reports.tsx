@@ -7,7 +7,7 @@
  * counts were measured or estimated.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { EngineClient, ReportDelta, ReportRow } from "../api/client";
 import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
@@ -83,6 +83,9 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
       <div data-testid="reports-view">
         <PageHeader eyebrow="Records" title="Reports" subtitle="Understand outcomes, cost and the evidence behind each operating mode." actions={benchLink} />
         <EmptyState message="No finished runs yet — there is nothing to measure." />
+        {/* Paused runs are not finished, and they are what the flow report
+            names as waiting on the owner (review of B-556). */}
+        <FlowReportSection key={`flow-${projectId}`} client={client} projectId={projectId} />
       </div>
     );
   }
@@ -184,7 +187,8 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
 
       {byDuckling.length >= 2 && <HeadToHeadSection rows={byDuckling} />}
 
-      <DevReportSection client={client} projectId={projectId} />
+      <FlowReportSection key={`flow-${projectId}`} client={client} projectId={projectId} />
+      <DevReportSection key={`dev-${projectId}`} client={client} projectId={projectId} />
     </div>
   );
 }
@@ -308,6 +312,41 @@ function HeadToHeadSection({ rows }: { rows: readonly ReportRow[] }) {
  * Deterministic and copyable as Markdown, because its natural destination is
  * an email, a wiki page, or a client's hands — not this window. */
 function DevReportSection({ client, projectId }: { client: EngineClient; projectId: string }) {
+  return (
+    <RenderedReportSection
+      testid="dev-report"
+      title="Development report"
+      blurb={<>The software in the approved requirements&apos; own words, the requirement → spec → task
+        matrix with statuses, bug fixes, releases, and the spine&apos;s breaks. Built from the
+        record — no model writes it.</>}
+      load={() => client.traceReport(projectId)}
+    />
+  );
+}
+
+/** The flow report (B-556): where delivery time goes — model turns, gates
+ * and waits on the owner, what the owner was waited on for, bug lead time and
+ * owner actions, first-pass builds. Also built from the record only. */
+function FlowReportSection({ client, projectId }: { client: EngineClient; projectId: string }) {
+  return (
+    <RenderedReportSection
+      testid="flow-report"
+      title="Flow report"
+      blurb={<>Where delivery time goes, over every recorded run (the range above does not apply):
+        model turns, gates and waits on you, what each pause was for and the longest ones, runs
+        waiting on you now, how long a bug takes from report to fixed and how many of your actions
+        it took. Built from the record — no model writes it.</>}
+      load={() => client.flowReport(projectId)}
+    />
+  );
+}
+
+function RenderedReportSection({ testid, title, blurb, load }: {
+  testid: string;
+  title: string;
+  blurb: ReactNode;
+  load: () => Promise<{ rendered: string }>;
+}) {
   const [rendered, setRendered] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -317,7 +356,7 @@ function DevReportSection({ client, projectId }: { client: EngineClient; project
     setBusy(true);
     setFailure(null);
     try {
-      const r = await client.traceReport(projectId);
+      const r = await load();
       setRendered(r.rendered);
     } catch (e) {
       setFailure(e instanceof Error ? e.message : String(e));
@@ -327,19 +366,15 @@ function DevReportSection({ client, projectId }: { client: EngineClient; project
   }
 
   return (
-    <section className="rounded-card border border-hairline p-3" data-testid="dev-report">
-      <h3 className="text-ink">Development report</h3>
-      <p className="mt-1 text-xs text-ink-muted">
-        The software in the approved requirements&apos; own words, the requirement → spec → task
-        matrix with statuses, bug fixes, releases, and the spine&apos;s breaks. Built from the
-        record — no model writes it.
-      </p>
+    <section className="rounded-card border border-hairline p-3" data-testid={testid}>
+      <h3 className="text-ink">{title}</h3>
+      <p className="mt-1 text-xs text-ink-muted">{blurb}</p>
       <div className="mt-2 flex items-center gap-2">
         <button
           type="button"
           onClick={() => void generate()}
           disabled={busy}
-          data-testid="dev-report-generate"
+          data-testid={`${testid}-generate`}
           className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
         >
           {busy ? "Building…" : rendered ? "Rebuild" : "Build the report"}
@@ -347,7 +382,7 @@ function DevReportSection({ client, projectId }: { client: EngineClient; project
         {rendered && (
           <button
             type="button"
-            data-testid="dev-report-copy"
+            data-testid={`${testid}-copy`}
             onClick={() => {
               void navigator.clipboard?.writeText(rendered).then(() => {
                 setCopied(true);
@@ -360,13 +395,13 @@ function DevReportSection({ client, projectId }: { client: EngineClient; project
           </button>
         )}
         {failure && (
-          <span className="text-xs text-critical" data-testid="dev-report-error">
+          <span className="text-xs text-critical" data-testid={`${testid}-error`}>
             {failure}
           </span>
         )}
       </div>
       {rendered && (
-        <div className="mt-3 max-h-[32rem] overflow-y-auto border-t border-hairline pt-3" data-testid="dev-report-body">
+        <div className="mt-3 max-h-[32rem] overflow-y-auto border-t border-hairline pt-3" data-testid={`${testid}-body`}>
           <Prose body={rendered} />
         </div>
       )}

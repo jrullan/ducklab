@@ -1108,6 +1108,37 @@ func (s *Service) Report(ctx context.Context, projectID string, opts report.Opti
 	return report.Build(runs, opts), nil
 }
 
+// ErrUnknownProject marks a request for a project the registry does not have.
+var ErrUnknownProject = errors.New("unknown project")
+
+// FlowReport is where delivery time goes for a project (B-556): run time
+// split into model turns, gates and owner waits, what the owner was waited on
+// for, bug lead time and owner actions, first-pass builds. Arithmetic over the
+// recorded events and bug history only.
+func (s *Service) FlowReport(ctx context.Context, projectID string) (*report.Flow, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnknownProject, err)
+	}
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
+	if err != nil {
+		return nil, err
+	}
+	flowRuns := make([]report.FlowRun, 0, len(runs))
+	for _, r := range runs {
+		backfillSpend(entry.Path, r)
+		// A run whose log cannot be read still counts as a run; it adds no
+		// time, which the report cannot invent.
+		events, _ := runlog.ReadEvents(runlog.RunDirFor(entry.Path, r.ID))
+		flowRuns = append(flowRuns, report.FlowRun{Run: r, Events: events})
+	}
+	bugs, err := s.BugList(ctx, projectID, false)
+	if err != nil {
+		return nil, err
+	}
+	return report.BuildFlow(flowRuns, bugs), nil
+}
+
 // pendingOrErr surfaces a human-input pause with the question attached, so the
 // caller can checkpoint it rather than treating it as a failure.
 func pendingOrErr(res *strategy.ExecuteResult, err error) error {

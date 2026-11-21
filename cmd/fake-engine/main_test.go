@@ -59,6 +59,7 @@ func TestFakeAnswersFrontendRoutes(t *testing.T) {
 		"GET /v1/projects/{id}/report":                 "report projection is outside the fake playback contract",
 		"GET /v1/projects/{id}/trace/check":            "trace checking is outside the fake playback contract",
 		"GET /v1/projects/{id}/trace/report":           "trace reporting is outside the fake playback contract",
+		"GET /v1/projects/{id}/report/flow":            "flow reporting is outside the fake playback contract",
 	}
 	for key, reason := range notInTheDesktop {
 		if strings.TrimSpace(reason) == "" {
