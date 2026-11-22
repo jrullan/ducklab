@@ -34,6 +34,17 @@ export function duration(ms: number): string {
   return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
 }
 
+/**
+ * A gate's recorded duration, for its exit-code line. Zero or absent says
+ * nothing: before B-555 every gate that finished recorded 0 s, and a reused
+ * result records 0 because nothing ran, so neither is shown as "0s".
+ */
+export function gateDuration(seconds: number | undefined): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 1) return "<1s";
+  return duration(seconds * 1000);
+}
+
 /** How long something has been waiting, for the human-gate inbox. */
 export function waitingFor(since: string, now: Date = new Date()): string {
   const started = Date.parse(since);

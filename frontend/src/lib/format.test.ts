@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { money, tokens, duration, waitingFor, shortSha } from "./format";
+import { money, tokens, duration, gateDuration, waitingFor, shortSha } from "./format";
 
 describe("money", () => {
   it("uses 4 decimals under a dollar and 2 above", () => {
@@ -32,6 +32,18 @@ describe("duration", () => {
   });
   it("never renders a negative", () => {
     expect(duration(-1)).toBe("0s");
+  });
+});
+
+describe("gateDuration", () => {
+  it("formats a gate's seconds like any duration", () => {
+    expect(gateDuration(213.7)).toBe("3m33s");
+    expect(gateDuration(4)).toBe("4s");
+    expect(gateDuration(0.3)).toBe("<1s");
+  });
+  it("shows nothing for an unknown or reused gate (B-555)", () => {
+    expect(gateDuration(undefined)).toBe("");
+    expect(gateDuration(0)).toBe("");
   });
 });
 
