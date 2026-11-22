@@ -1319,7 +1319,7 @@ export function Cycle({
                   entries={stageSeats(mode, roster).map((e, i) => ({
                     ...e,
                     duckling: seatPicks[`extend:${i}`] || e.duckling,
-                    provenance: seatPicks[`extend:${i}`] ? "picked now" : (e.source === "project pin" ? "project" : "global"),
+                    provenance: seatPicks[`extend:${i}`] ? "picked now" : (e.source?.startsWith("project") ? "project" : "global"),
                   }))}
                   fleet={fleet}
                   measured={measured}

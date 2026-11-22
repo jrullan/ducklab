@@ -1437,12 +1437,12 @@ export class EngineClient {
       "GET", `/v1/defaults/roster?mode=${encodeURIComponent(mode)}`,
     ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
   }
-  roster(projectId: string, mode = ""): Promise<{ entries: RosterEntry[]; warning?: string }> {
+  roster(projectId: string, mode = ""): Promise<{ entries: RosterEntry[]; warning?: string; project_default?: string }> {
     const q = mode ? `?mode=${encodeURIComponent(mode)}` : "";
-    return this.request<{ entries: RosterEntry[] | null; warning?: string }>(
+    return this.request<{ entries: RosterEntry[] | null; warning?: string; project_default?: string }>(
       "GET",
       `/v1/projects/${projectId}/roster${q}`,
-    ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
+    ).then((r) => ({ entries: r.entries ?? [], warning: r.warning, project_default: r.project_default }));
   }
   rosterGet(projectId: string, mode: string) {
     return this.roster(projectId, mode);

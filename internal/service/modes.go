@@ -270,8 +270,8 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 		return out
 	}
 	// Precedence per seat, and the record says which rung answered:
-	// project mode seat → project role pin → global mode seat → global role
-	// pin. A role nobody seated resolves to NOBODY. It used to resolve to the
+	// project mode seat → project role pin → project default (B-557) →
+	// global mode seat → global role pin. A role nobody seated resolves to NOBODY. It used to resolve to the
 	// alphabetically first registered duckling ("global role fallback"), so a
 	// mode with no advisor got atom-local as its duck and a launch with no
 	// implementer got whatever sorted first (B-063). Optional roles simply
@@ -298,6 +298,13 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 			}
 			if id := projCfg.Roster[role]; id != "" {
 				out[role], sources[role] = id, "project pin"
+				continue
+			}
+			// The project's one model, for every seat it did not pin and
+			// the default can fill (B-557; projectDefaultFor). Ahead of the
+			// global seats: it is the project's word.
+			if id := s.projectDefaultFor(projCfg, mode, role); id != "" {
+				out[role], sources[role] = id, "project default"
 				continue
 			}
 		}
@@ -384,6 +391,13 @@ func (s *Service) anySeatConfigured(projCfg *config.Project) bool {
 		}
 	}
 	if projCfg != nil {
+		// Only a registered default seats anyone; an unregistered one must
+		// not also switch off the blank-install picking (second review).
+		if projCfg.RosterDefault != "" {
+			if _, err := s.ducklings.Get(projCfg.RosterDefault); err == nil {
+				return true
+			}
+		}
 		for _, seats := range projCfg.ModeSeats {
 			for _, ids := range seats {
 				if len(ids) > 0 {
@@ -890,16 +904,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 }
 
 func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strategy.ExecuteParams) error {
-	var contestants []config.DucklingID
-	for _, id := range mc.req.Ducklings {
-		contestants = append(contestants, config.DucklingID(id))
-	}
-	if len(contestants) < 2 {
-		// Two contestants from the roster: implementer plus the next distinct
-		// duckling. A tournament against yourself measures self-consistency,
-		// not decorrelation, so it is worth being explicit about.
-		contestants = distinctDucklings(mc.roster, s.cfg.Ducklings, 2)
-	}
+	contestants := s.tournamentContestants(mc.req.Ducklings, mc.projCfg, mc.roster)
 
 	scratch := filepath.Join(mc.entry.Path, ".ducklab", "worktrees")
 	tp := &strategy.TournamentParams{
@@ -1019,6 +1024,34 @@ func copyOwnedFile(from, to string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// tournamentContestants picks who races: the request's ducklings when it
+// names two or more; else the tournament implementer list the board shows,
+// registered ids only (second review of B-557 — an untouched launch took
+// implementer + reviewer instead, so the board said [glm, luna] and the run
+// raced [glm, terra]); else two distinct ducklings from the roster.
+func (s *Service) tournamentContestants(requested []string, projCfg *config.Project, roster map[config.Role]config.DucklingID) []config.DucklingID {
+	var contestants []config.DucklingID
+	for _, id := range requested {
+		contestants = append(contestants, config.DucklingID(id))
+	}
+	if len(contestants) >= 2 {
+		return contestants
+	}
+	contestants = nil
+	for _, id := range s.rosterIDs(projCfg, "tournament", config.RoleImplementer) {
+		if _, err := s.ducklings.Get(config.DucklingID(id)); err == nil {
+			contestants = append(contestants, config.DucklingID(id))
+		}
+	}
+	if len(contestants) >= 2 {
+		return contestants
+	}
+	// Two contestants from the roster: implementer plus the next distinct
+	// duckling. A tournament against yourself measures self-consistency,
+	// not decorrelation, so it is worth being explicit about.
+	return distinctDucklings(roster, s.cfg.Ducklings, 2)
 }
 
 func distinctDucklings(roster map[config.Role]config.DucklingID, all map[config.DucklingID]config.Duckling, n int) []config.DucklingID {

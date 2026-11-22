@@ -114,7 +114,8 @@ ducklab duckling test <id> [--prompt <s>] [--stream]
 ducklab duckling remove <id>
 
 ducklab roster show
-ducklab roster set <role> <duckling-id>
+ducklab roster set <role> <duckling-id>   # role "default": one duckling for every seat the project does not pin
+ducklab roster unset <role|default>
 ducklab roster suggest [--budget <usd>] [--apply]
 ```
 

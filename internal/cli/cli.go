@@ -312,7 +312,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
   task      list | show | remove
   skill     list | show | new | run | validate
   provider  set | list | remove        duckling  set | list | probe | test
-  roster    show | set | suggest       budget    show | set
+  roster    show | set | unset | suggest  budget    show | set
   trace     check requirement→spec→task coverage
   token     list | create | grant | revoke | legacy | whoami  (per-agent access)
   mcp       serve (stdio MCP server exposing the loop)
@@ -559,7 +559,7 @@ func rosterCmd(verb string, args []string, repo string) int {
 
 	case "set":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab roster set <role> <duckling-id>")
+			fmt.Fprintln(os.Stderr, "usage: ducklab roster set <role> <duckling-id>   (role \"default\": one duckling for every role the project does not pin)")
 			return 2
 		}
 		view, err := client.RosterSet(projectID, args[0], args[1])
@@ -568,6 +568,22 @@ func rosterCmd(verb string, args []string, repo string) int {
 			return 1
 		}
 		fmt.Printf("%s -> %s\n\n", args[0], args[1])
+		fmt.Print(renderRoster(view))
+		return 0
+
+	case "unset":
+		// Removes a project pin, or with "default" the project default
+		// (B-557); the role falls back to the next rung.
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab roster unset <role|default>")
+			return 2
+		}
+		view, err := client.RosterUnpin(projectID, "", args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("%s unset\n\n", args[0])
 		fmt.Print(renderRoster(view))
 		return 0
 
@@ -610,6 +626,9 @@ func rosterCmd(verb string, args []string, repo string) int {
 
 func renderRoster(view map[string]interface{}) string {
 	var b strings.Builder
+	if d := str(view["project_default"]); d != "" {
+		fmt.Fprintf(&b, "project default: %s (every role the project does not pin)\n\n", d)
+	}
 	fmt.Fprintf(&b, "%-13s %-16s %s\n", "ROLE", "DUCKLING", "SOURCE")
 	entries, _ := view["entries"].([]interface{})
 	for _, raw := range entries {
