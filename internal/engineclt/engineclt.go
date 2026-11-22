@@ -988,6 +988,17 @@ func (c *Client) Report(projectID, by, since string) (map[string]interface{}, er
 	return result, err
 }
 
+// FlowReport fetches the rendered flow report (B-556).
+func (c *Client) FlowReport(projectID string) (string, error) {
+	var result struct {
+		Rendered string `json:"rendered"`
+	}
+	if err := c.get(fmt.Sprintf("/v1/projects/%s/report/flow", projectID), &result); err != nil {
+		return "", err
+	}
+	return result.Rendered, nil
+}
+
 func (c *Client) GlobalRosterGet(mode string) (map[string]interface{}, error) {
 	var v map[string]interface{}
 	path := "/v1/defaults/roster?mode=" + url.QueryEscape(mode)
