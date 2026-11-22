@@ -1878,6 +1878,13 @@ export class EngineClient {
     return this.request<{ rendered: string }>("GET", `/v1/projects/${projectId}/trace/report`);
   }
 
+  /** The flow report (B-556): where delivery time goes — model turns, gates,
+   * waits on the owner by kind and the longest ones, bug lead time and owner
+   * actions, first-pass builds. Deterministic — no model writes it. */
+  flowReport(projectId: string) {
+    return this.request<{ rendered: string }>("GET", `/v1/projects/${projectId}/report/flow`);
+  }
+
   traceCheck(projectId: string) {
     return this.request<{ errors: TraceError[] | null; proposed?: string[] | null }>(
       "GET",

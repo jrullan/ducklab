@@ -522,3 +522,24 @@ func TestGateRunsARustupProxyWithHomeIsolated(t *testing.T) {
 		t.Fatalf("rustup proxy did not find its toolchain through the isolated gate: exit %d\n%s", res.ExitCode, res.Output)
 	}
 }
+
+// B-555: a gate that finishes records how long it ran, not only a gate that
+// timed out — 207 of 215 acceptance receipts read 0 s.
+func TestAFinishedGateRecordsItsDuration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell commands")
+	}
+	dir := t.TempDir()
+	for _, c := range []struct{ name, cmd string }{
+		{"green", "sleep 0.2"},
+		{"red", "sleep 0.2; exit 3"},
+	} {
+		res, err := Run(context.Background(), dir, config.Verify{Mode: "custom", Custom: c.cmd, TimeoutS: 30}, Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Duration < 0.2 {
+			t.Errorf("%s gate: duration = %vs, want at least the 0.2s it slept", c.name, res.Duration)
+		}
+	}
+}

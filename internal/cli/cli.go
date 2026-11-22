@@ -644,8 +644,11 @@ func renderRoster(view map[string]interface{}) string {
 // reportCmd prints the solo-baseline comparison for the current project.
 func reportCmd(args []string, repo string) int {
 	by, since := "mode", ""
+	flow := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--flow":
+			flow = true
 		case "--by":
 			if i+1 < len(args) {
 				by = args[i+1]
@@ -667,6 +670,16 @@ func reportCmd(args []string, repo string) int {
 	projectID, code := resolveProjectID(client, repo)
 	if code != 0 {
 		return code
+	}
+	if flow {
+		// Where delivery time goes (B-556), as the engine rendered it.
+		rendered, err := client.FlowReport(projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Print(rendered)
+		return 0
 	}
 	rep, err := client.Report(projectID, by, since)
 	if err != nil {

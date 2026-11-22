@@ -906,6 +906,21 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleFlowReport(w http.ResponseWriter, r *http.Request) {
+	flow, err := s.svc.FlowReport(r.Context(), r.PathValue("id"))
+	if errors.Is(err, service.ErrUnknownProject) {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	if err != nil {
+		// A run list or bug store that failed to read is not a missing
+		// project (review of B-556).
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, renderedResponse{Rendered: report.RenderFlow(flow)})
+}
+
 // parseSince accepts "30d", "12h", "90m".
 func parseSince(v string) (time.Duration, error) {
 	if strings.HasSuffix(v, "d") {

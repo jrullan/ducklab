@@ -7912,6 +7912,42 @@
         "summary": "Solo-baseline comparison"
       }
     },
+    "/v1/projects/{id}/report/flow": {
+      "get": {
+        "operationId": "FlowReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapirenderedResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Flow report: where delivery time goes — model turns, gates and owner waits, what the owner was waited on for, bug lead time and owner actions, first-pass builds. Deterministic, model-free."
+      }
+    },
     "/v1/projects/{id}/reviews": {
       "get": {
         "operationId": "ReviewList",

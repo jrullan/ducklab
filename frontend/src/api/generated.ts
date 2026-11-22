@@ -1525,6 +1525,7 @@ export const OPERATIONS = [
   { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },
   { id: "ReleaseCut", method: "POST", path: "/v1/projects/{id}/releases/{version}/cut" },
   { id: "Report", method: "GET", path: "/v1/projects/{id}/report" },
+  { id: "FlowReport", method: "GET", path: "/v1/projects/{id}/report/flow" },
   { id: "ReviewList", method: "GET", path: "/v1/projects/{id}/reviews" },
   { id: "ReviewStart", method: "POST", path: "/v1/projects/{id}/reviews" },
   { id: "ReviewGet", method: "GET", path: "/v1/projects/{id}/reviews/{task}" },

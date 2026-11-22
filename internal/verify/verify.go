@@ -162,6 +162,7 @@ func Run(ctx context.Context, root string, cfg config.Verify, identities ...Iden
 				Command:  cmd,
 				ExitCode: -1,
 				Output:   fmt.Sprintf("gate command failed to start: %v", err),
+				Duration: time.Since(started).Seconds(),
 			}, nil
 		}
 	}
@@ -181,11 +182,15 @@ func Run(ctx context.Context, root string, cfg config.Verify, identities ...Iden
 		}, nil
 	}
 
+	// Every gate that ran says how long it took (B-555). Only the timeout
+	// path used to: 207 of 215 acceptance receipts read 0 s, and a 214 s
+	// final gate on TI-36X was recorded as instant.
 	return &Result{
 		Gate:     gate,
 		Command:  cmd,
 		ExitCode: exitCode,
 		Output:   string(output),
+		Duration: time.Since(started).Seconds(),
 	}, nil
 }
 
